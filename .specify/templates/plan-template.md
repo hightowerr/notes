@@ -47,7 +47,15 @@
 ## Constitution Check
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+Verify compliance with AI Note Synthesiser Constitution v1.0.0:
+
+- [ ] **Autonomous by Default**: Feature operates without manual triggers (Sense → Reason → Act)
+- [ ] **Deterministic Outputs**: JSON schemas documented and validated with retry logic
+- [ ] **Modular Architecture**: Components decoupled with clear interfaces, no tight coupling
+- [ ] **Test-First Development**: TDD plan established (tests before implementation)
+- [ ] **Observable by Design**: Structured logging with metrics, errors, and confidence scores
+
+Document any violations in Complexity Tracking section with justification or simplify design to comply.
 
 ## Project Structure
 
@@ -216,4 +224,4 @@ directories captured above]
 - [ ] Complexity deviations documented
 
 ---
-*Based on Constitution v2.1.1 - See `/memory/constitution.md`*
+*Based on Constitution v1.0.0 - See `.specify/memory/constitution.md`*
