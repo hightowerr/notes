@@ -1,102 +1,196 @@
-import Image from "next/image";
+'use client';
+
+import { useState } from 'react';
+import type { NotesData, Task } from '@/app/types';
+import FileUploadSection from '@/app/components/FileUploadSection';
+import TopicsSection from '@/app/components/TopicsSection';
+import DecisionsSection from '@/app/components/DecisionsSection';
+import ActionsSection from '@/app/components/ActionsSection';
+import TasksSection from '@/app/components/TasksSection';
+
+// Mock data for demonstration
+const initialData: NotesData = {
+  files: [
+    {
+      id: '1',
+      name: 'Q4-strategy-meeting.pdf',
+      size: 245000,
+      uploadedAt: Date.now() - 3600000
+    },
+    {
+      id: '2',
+      name: 'product-roadmap-notes.docx',
+      size: 156000,
+      uploadedAt: Date.now() - 7200000
+    }
+  ],
+  topics: [
+    { id: 't1', text: 'Q4 Product Roadmap Planning' },
+    { id: 't2', text: 'Team Hiring Strategy for Engineering' },
+    { id: 't3', text: 'Customer Feedback Analysis' },
+    { id: 't4', text: 'Budget Allocation for Next Quarter' }
+  ],
+  decisions: [
+    {
+      id: 'd1',
+      text: 'Proceed with mobile-first redesign',
+      context: 'Approved by leadership team after user research presentation'
+    },
+    {
+      id: 'd2',
+      text: 'Hire 3 senior engineers by end of Q4',
+      context: 'Budget approved, recruitment process to start immediately'
+    },
+    {
+      id: 'd3',
+      text: 'Sunset legacy API v1 by March 2026'
+    }
+  ],
+  actions: [
+    { id: 'a1', text: 'Schedule design review session with UX team' },
+    { id: 'a2', text: 'Draft job descriptions for engineering roles' },
+    { id: 'a3', text: 'Send migration guide to API v1 customers' },
+    { id: 'a4', text: 'Set up weekly sync with product team' }
+  ],
+  tasks: {
+    leverage: [
+      {
+        id: 'tl1',
+        text: 'Complete competitive analysis for new feature set',
+        category: 'leverage'
+      },
+      {
+        id: 'tl2',
+        text: 'Define metrics for success in Q4 initiatives',
+        category: 'leverage'
+      },
+      {
+        id: 'tl3',
+        text: 'Create technical architecture proposal for redesign',
+        category: 'leverage'
+      }
+    ],
+    neutral: [
+      {
+        id: 'tn1',
+        text: 'Update project documentation with latest decisions',
+        category: 'neutral'
+      },
+      {
+        id: 'tn2',
+        text: 'Schedule team onboarding sessions',
+        category: 'neutral'
+      },
+      {
+        id: 'tn3',
+        text: 'Review and approve pending pull requests',
+        category: 'neutral'
+      }
+    ],
+    overhead: [
+      {
+        id: 'to1',
+        text: 'File expense reports for last quarter',
+        category: 'overhead'
+      },
+      {
+        id: 'to2',
+        text: 'Update Slack channel descriptions',
+        category: 'overhead'
+      },
+      {
+        id: 'to3',
+        text: 'Organize team drive folders',
+        category: 'overhead'
+      }
+    ]
+  }
+};
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [data, setData] = useState<NotesData>(initialData);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const handleFilesAdded = (files: File[]) => {
+    // Simulate file upload and processing
+    const newFiles = files.map((file, index) => ({
+      id: `${Date.now()}-${index}`,
+      name: file.name,
+      size: file.size,
+      uploadedAt: Date.now()
+    }));
+
+    setData((prev) => ({
+      ...prev,
+      files: [...prev.files, ...newFiles]
+    }));
+
+    // In a real app, this would trigger AI processing
+    console.log('Files uploaded:', files);
+  };
+
+  const handleTasksChange = (tasks: { leverage: Task[]; neutral: Task[]; overhead: Task[] }) => {
+    setData((prev) => ({
+      ...prev,
+      tasks
+    }));
+  };
+
+  return (
+    <div className="min-h-screen bg-[#1a1a1a]">
+      {/* Header */}
+      <header className="border-b border-gray-800 bg-[#1a1a1a]/80 backdrop-blur-sm sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="text-3xl">📝</div>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-100">AI Note Synthesiser</h1>
+                <p className="text-sm text-gray-500">
+                  Autonomous document analysis and structured insights
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="px-4 py-2 bg-blue-500/10 text-blue-400 text-sm font-medium rounded-full border border-blue-500/30">
+                {data.files.length} Documents Processed
+              </div>
+            </div>
+          </div>
         </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+        {/* File Upload Section */}
+        <FileUploadSection files={data.files} onFilesAdded={handleFilesAdded} />
+
+        {/* Two-column layout for Topics and Decisions */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <TopicsSection
+            topics={data.topics}
+            onTopicsChange={(topics) => setData((prev) => ({ ...prev, topics }))}
+          />
+          <DecisionsSection
+            decisions={data.decisions}
+            onDecisionsChange={(decisions) => setData((prev) => ({ ...prev, decisions }))}
+          />
+        </div>
+
+        {/* Actions Section */}
+        <ActionsSection
+          actions={data.actions}
+          onActionsChange={(actions) => setData((prev) => ({ ...prev, actions }))}
+        />
+
+        {/* Tasks Section with L/N/O categorization */}
+        <TasksSection tasks={data.tasks} onTasksChange={handleTasksChange} />
       </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
+
+      {/* Footer */}
+      <footer className="border-t border-gray-800 mt-16">
+        <div className="max-w-7xl mx-auto px-6 py-6 text-center text-sm text-gray-600">
+          <p>AI Note Synthesiser - Powered by Next.js 15, React 19, and TypeScript</p>
+        </div>
       </footer>
     </div>
   );
