@@ -88,7 +88,7 @@ The goal is to remove this friction by enabling an **agent that works silently**
 ## Acceptance Criteria
 - [ ] File watcher/trigger detects new files automatically.  
 - [ ] PDFs, DOCX, TXT successfully convert to Markdown.  
-- [ ] AI summary returns Markdown + JSON with `{ topics, decisions, actions, LNO tasks (Leverage, Neutral, Ovehead) }`.  
+- [ ] AI summary returns Markdown + JSON with `{ topics, decisions, actions, LNO tasks (Leverage, Neutral, Overhead) }`.  
 - [ ] Output saved locally and visible in console/UI.  
 - [ ] Errors logged and retried once with adjusted prompt.
 

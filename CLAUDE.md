@@ -65,6 +65,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Design Principles
 
+- **Frontend design:** Always usee shadcn over custom components
+- **Frontend components:** Always install Shadcn componentss using the install command: Example: pnpm dlx shadcn@latest add button
+- **Frontend colours:** Always user the standard Tailwind and Shadcn colours. Never use inline custom colours
 - **Autonomous by default:** No manual "summarise" button
 - **Deterministic outputs:** Consistent JSON schema
 - **Local-first:** Minimal external dependencies
