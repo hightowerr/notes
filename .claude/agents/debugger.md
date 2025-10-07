@@ -63,6 +63,10 @@ When activated, you will:
      
      ## Root Cause
      [Confirmed root cause with evidence]
+
+     ## User Impact
+     [How this bug affects the user journey]
+     [What user action is blocked or broken]
      
      ## Corrective Plan
      [Step-by-step fix recommendation - DO NOT IMPLEMENT]

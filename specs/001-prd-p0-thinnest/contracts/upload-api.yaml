@@ -1,0 +1,117 @@
+openapi: 3.0.3
+info:
+  title: File Upload API
+  description: API for uploading note files (PDF, DOCX, TXT, MD) to the AI Note Synthesiser
+  version: 1.0.0
+
+paths:
+  /api/upload:
+    post:
+      summary: Upload a file for processing
+      description: |
+        Uploads a document file, validates format and size, stores in Supabase,
+        and triggers automatic processing pipeline.
+
+        Functional Requirements Satisfied:
+        - FR-001: Automatic detection on upload
+        - FR-016: Reject files > 10MB
+        - FR-008: Handle invalid formats gracefully
+      operationId: uploadFile
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Document file to upload
+      responses:
+        '201':
+          description: File uploaded successfully and queued for processing
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - fileId
+                  - status
+                  - message
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  fileId:
+                    type: string
+                    format: uuid
+                    example: "550e8400-e29b-41d4-a716-446655440000"
+                  status:
+                    type: string
+                    enum: [pending, processing]
+                    example: "processing"
+                  message:
+                    type: string
+                    example: "File uploaded successfully. Processing started."
+                  queuePosition:
+                    type: integer
+                    description: Queue position if concurrent uploads exceed limit (FR-017)
+                    example: 2
+                    nullable: true
+        '400':
+          description: Invalid file format or size exceeds limit
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - error
+                  - code
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: "File size exceeds 10MB limit"
+                  code:
+                    type: string
+                    enum: [FILE_TOO_LARGE, UNSUPPORTED_FORMAT, INVALID_FILE]
+                    example: "FILE_TOO_LARGE"
+        '500':
+          description: Server error during upload
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - error
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: "Failed to store file in Supabase"
+
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      required:
+        - success
+        - error
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+        code:
+          type: string

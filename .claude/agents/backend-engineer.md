@@ -40,8 +40,15 @@ You implement one testable backend task at a time under the slice-orchestrator.
        "impl": "done",
        "files": ["app/api/.../route.ts","lib/services/...","tests/..."],
        "plan_doc": ".claude/doc/be-impl-{{task_id}}.md",
-       "notes": "validated with Zod; Supabase RPC X"
+       "notes": "validated with Zod; Supabase RPC X",
+       "enables_user_action": "user can now [specific action]"
      }
+
+6) Frontend Enablement Check
+   - Verify API responses match frontend needs
+   - Document example UI interactions this enables
+   - Never complete without confirming frontend can consume
+   - Include in state file: "enables_user_action": "description of what user can now do"
 
 ## Constraints
 - Do NOT modify UI.

@@ -29,6 +29,13 @@ You will simulate or verify test suite execution for all code changes. Your vali
    - Confirm success metrics are measurable through tests
    - Validate both happy path and failure scenarios
 
+4. **User Journey Validation**
+   - Verify complete user workflows from UI to data
+   - Test from UI through to data persistence
+   - Validate user can see results of their actions
+   - Include "smoke test" of primary user path
+   - Confirm: "User can [action] and sees [result]"
+
 ## Execution Protocol
 
 1. **Initial Assessment**
@@ -85,6 +92,12 @@ Your test result logs must follow this structure:
 
 ## Acceptance Criteria
 - [criterion]: [✓/✗] [evidence]
+
+## User Journey Tests
+- Primary Path: [description] [PASS/FAIL]
+- User Can See: [what's visible]
+- User Can Do: [what action is possible]
+- User Gets Feedback: [what confirmation/result]
 
 ## Coverage Gaps
 - [uncovered scenario]
