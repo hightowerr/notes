@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { supabase } from '@/lib/supabase';
 import { generateContentHash } from '@/lib/schemas';
+import { POST } from '@/app/api/upload/route';
 
 describe('T001 Integration Tests - File Upload Flow', () => {
   const testFileIds: string[] = [];
@@ -18,9 +19,6 @@ describe('T001 Integration Tests - File Upload Flow', () => {
   afterAll(async () => {
     // Cleanup: Delete test files from database and storage
     for (const fileId of testFileIds) {
-      // Delete from uploaded_files (cascade will delete logs)
-      await supabase.from('uploaded_files').delete().eq('id', fileId);
-
       // Get storage path first
       const { data: file } = await supabase
         .from('uploaded_files')
@@ -32,6 +30,9 @@ describe('T001 Integration Tests - File Upload Flow', () => {
         // Delete from storage
         await supabase.storage.from('notes').remove([file.storage_path]);
       }
+
+      // Delete from uploaded_files (cascade will delete logs)
+      await supabase.from('uploaded_files').delete().eq('id', fileId);
     }
   });
 
@@ -47,11 +48,12 @@ describe('T001 Integration Tests - File Upload Flow', () => {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch('http://localhost:3000/api/upload', {
+      const request = new Request('http://localhost:3000/api/upload', {
         method: 'POST',
         body: formData,
       });
 
+      const response = await POST(request);
       expect(response.status).toBe(201);
 
       const result = await response.json();
@@ -119,11 +121,12 @@ describe('T001 Integration Tests - File Upload Flow', () => {
       const formData1 = new FormData();
       formData1.append('file', file1);
 
-      const response1 = await fetch('http://localhost:3000/api/upload', {
+      const request1 = new Request('http://localhost:3000/api/upload', {
         method: 'POST',
         body: formData1,
       });
 
+      const response1 = await POST(request1);
       expect(response1.status).toBe(201);
       const result1 = await response1.json();
       testFileIds.push(result1.fileId);
@@ -136,10 +139,12 @@ describe('T001 Integration Tests - File Upload Flow', () => {
       const formData2 = new FormData();
       formData2.append('file', file2);
 
-      const response2 = await fetch('http://localhost:3000/api/upload', {
+      const request2 = new Request('http://localhost:3000/api/upload', {
         method: 'POST',
         body: formData2,
       });
+
+      const response2 = await POST(request2);
 
       // Should fail due to duplicate content_hash with 409 Conflict
       expect(response2.status).toBe(409);

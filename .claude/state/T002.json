@@ -1,0 +1,119 @@
+{
+  "taskId": "T002",
+  "taskName": "[SLICE] User sees AI-generated summary after automatic processing completes",
+  "status": "implementation_in_progress",
+  "phase": "Backend Complete - Frontend Pending",
+  "userStory": "As a knowledge worker, after uploading a note file, I can see an AI-generated summary with topics, decisions, actions, and LNO tasks appear automatically within 8 seconds without clicking anything",
+  "uiEntryPoint": "http://localhost:3000 - Summary panel appears after upload processing",
+  "userAction": "Upload a file and wait for automatic processing to complete",
+  "visibleOutcome": "Summary panel slides in with topics, decisions, actions, and LNO tasks displayed",
+  "demoSteps": [
+    "1. Navigate to http://localhost:3000",
+    "2. Upload meeting-transcript.pdf using T001 upload UI",
+    "3. Observe 'Processing' status badge for ≤8 seconds",
+    "4. Verify summary panel appears automatically with extracted data",
+    "5. Check topics list displays with badges",
+    "6. Check decisions list shows checkmarks",
+    "7. Check actions list has priority indicators",
+    "8. Verify LNO tasks displayed in three columns",
+    "9. Confirm status badge shows 'Complete' with green icon",
+    "10. Verify toast notification: 'Summary ready for [filename]'",
+    "11. Check console logs show processing metrics",
+    "12. Validate Supabase storage contains processed Markdown",
+    "13. Check processed_documents table has JSON output"
+  ],
+  "implementation": {
+    "phase": "Backend Complete - Frontend Next",
+    "completed": [
+      "Dependencies added to package.json (ai, @ai-sdk/anthropic, pdf-parse, mammoth)",
+      "lib/services/noteProcessor.ts - File conversion service",
+      "lib/services/aiSummarizer.ts - AI extraction service",
+      "app/api/process/route.ts - Processing pipeline endpoint",
+      "app/api/status/[fileId]/route.ts - Status polling endpoint",
+      ".claude/doc/be-impl-T002.md - Implementation plan documentation"
+    ],
+    "pending": [
+      "npm install (run npm install to install new dependencies)",
+      "Apply database migration (supabase/migrations/002_create_processing_tables.sql)",
+      "Add ANTHROPIC_API_KEY to .env.local",
+      "app/components/SummaryPanel.tsx - Summary display component",
+      "Update app/page.tsx - Status polling and SummaryPanel integration"
+    ],
+    "filesCreated": [
+      "lib/services/noteProcessor.ts",
+      "lib/services/aiSummarizer.ts",
+      "app/api/process/route.ts",
+      "app/api/status/[fileId]/route.ts",
+      ".claude/doc/be-impl-T002.md",
+      ".claude/logs/T002-orchestration.md"
+    ],
+    "filesModified": [
+      "package.json",
+      "lib/schemas.ts"
+    ]
+  },
+  "functionalRequirements": {
+    "FR-002": "Convert uploaded files to Markdown - IMPLEMENTED",
+    "FR-003": "Extract structured data (topics, decisions, actions, LNO) - IMPLEMENTED",
+    "FR-004": "Produce JSON + Markdown outputs - IMPLEMENTED",
+    "FR-005": "Store outputs in Supabase - IMPLEMENTED",
+    "FR-006": "Display success feedback (console, toast, status) - PENDING (Frontend)",
+    "FR-007": "Log metrics (hash, duration, confidence) - IMPLEMENTED",
+    "FR-009": "OCR fallback for unreadable PDFs - IMPLEMENTED (placeholder)",
+    "FR-010": "Retry on invalid JSON with adjusted params - IMPLEMENTED",
+    "FR-011": "Flag confidence <80% as review_required - IMPLEMENTED",
+    "FR-013": "Complete processing within 8s average - IMPLEMENTED (needs testing)"
+  },
+  "currentStep": "TDD Step 2 - Backend Implementation Complete",
+  "tddStatus": {
+    "failingTestWritten": true,
+    "implementationComplete": false,
+    "backendComplete": true,
+    "frontendComplete": false,
+    "codeReviewed": false,
+    "testsPass": false,
+    "userJourneyValidated": false
+  },
+  "nextActions": [
+    "1. Install dependencies: npm install",
+    "2. Apply database migration to Supabase",
+    "3. Add ANTHROPIC_API_KEY to .env.local",
+    "4. Run tests to verify backend: npm run test:run",
+    "5. Delegate frontend to frontend-ui-builder agent",
+    "6. Run full test suite after frontend complete",
+    "7. Delegate to code-reviewer for quality check",
+    "8. Mark T002 complete and update tasks.md"
+  ],
+  "dependencies": {
+    "npm": {
+      "ai": "^4.0.0 (Vercel AI SDK) - ADDED",
+      "@ai-sdk/anthropic": "^1.0.0 (Anthropic provider) - ADDED",
+      "pdf-parse": "^1.1.1 (PDF text extraction) - ADDED",
+      "mammoth": "^1.8.0 (DOCX conversion) - ADDED"
+    },
+    "environment": {
+      "ANTHROPIC_API_KEY": "REQUIRED - Not yet configured in .env.local"
+    }
+  },
+  "blockers": [
+    {
+      "type": "environment",
+      "description": "ANTHROPIC_API_KEY not set in .env.local",
+      "impact": "AI summarization tests will fail without API key",
+      "resolution": "User must add ANTHROPIC_API_KEY to .env.local file"
+    },
+    {
+      "type": "database",
+      "description": "Migration 002 not yet applied",
+      "impact": "processed_documents table does not exist",
+      "resolution": "Apply supabase/migrations/002_create_processing_tables.sql via Supabase Dashboard or CLI"
+    }
+  ],
+  "metrics": {
+    "testsTotal": 26,
+    "testsPassing": 0,
+    "backendFilesCreated": 4,
+    "linesOfCode": "~1200 (estimated)",
+    "estimatedTimeRemaining": "Frontend: 2-3 hours, Testing: 1 hour"
+  }
+}

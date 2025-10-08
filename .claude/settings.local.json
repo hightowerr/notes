@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm run test:run:*)"
+      "Bash(npm run test:run:*)",
+      "Bash(source:*)",
+      "Bash(nvm:*)"
     ],
     "deny": [],
     "ask": []
