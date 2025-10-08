@@ -25,10 +25,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Workflow Commands (.specify)
 - `/plan` - Create implementation plan from feature spec
 - `/specify` - Create feature specification from description
-- `/tasks` - Generate actionable task list from plan
+- `/tasks` - Generate **slice-based** task list (UI + Backend + Data + Feedback per task)
 - `/clarify` - Identify underspecified areas in spec
 - `/constitution` - Create/update project constitution
-- `/implement` - Execute implementation plan
+- `/implement` - Execute implementation plan using slice-orchestrator
+
+**Note:** `/tasks` now generates vertical slice tasks (not layer-based). Each task includes user story, complete implementation scope (UI→Backend→Data→Feedback), and test scenario.
 
 ## Architecture
 
@@ -144,6 +146,28 @@ The project follows strict architectural principles defined in `.specify/memory/
 
 **Development Workflow:** Use `/plan` → `/tasks` → `/implement` commands following TDD principles
 
+### 🚨 CRITICAL: Slice-Based Development (SYSTEM_RULES.md)
+**EVERY code change MUST deliver complete user value:**
+
+**The Three Laws:**
+1. **SEE IT** → Visible UI change or feedback
+2. **DO IT** → Interactive capability user can trigger
+3. **VERIFY IT** → Observable outcome confirming it worked
+
+**Mandatory Workflow:**
+- **Step 0:** Define user story, identify UI component + backend endpoint, confirm user can test
+- **Step 1:** Use `slice-orchestrator` agent for ALL feature implementation
+- **Step 2:** TDD enforcement (failing test FIRST, then implement, then review)
+- **Step 3:** Complete ONLY when user can demo the feature end-to-end
+
+**FORBIDDEN:**
+- ❌ Backend-only or frontend-only tasks
+- ❌ Infrastructure tasks without user value
+- ❌ Skipping failing test phase
+- ❌ Tasks that can't be demoed to non-technical person
+
+**See `.claude/SYSTEM_RULES.md` for complete protocol**
+
 ### Technical
 - **Local-first:** Minimal external dependencies
 - **Modular:** Ready for future RAG/memory integration
@@ -217,8 +241,34 @@ curl -X POST -F "file=@/path/to/file.pdf" http://localhost:3000/api/upload-test
 
 - **Current Implementation:** Frontend UI complete with mock data. File upload to Supabase working. Processing pipeline (conversion, AI summarization) not yet implemented.
 - **Testing:** No test framework configured yet (TDD principle requires setup before implementing processing pipeline)
-- **Next Steps:**
-  1. Implement PDF/DOCX/TXT → Markdown conversion
-  2. Integrate Vercel AI SDK for summarization
-  3. Create database schema for storing results
-  4. Connect frontend to backend processing
+- **Active Feature:** P0 Thinnest Agentic Slice (see `specs/001-prd-p0-thinnest/tasks.md`)
+  - T001 [SLICE]: User uploads file → automatic processing starts
+  - T002 [SLICE]: User sees AI summary appear automatically
+  - T003 [SLICE]: User views dashboard with processed notes
+  - Tasks are **vertical slices** - each delivers complete user value (UI + Backend + Data + Feedback)
+
+## Task Structure (Slice-Based)
+
+Example task format from `specs/001-prd-p0-thinnest/tasks.md`:
+
+```
+T001 [SLICE] User uploads note file and sees processing begin automatically
+
+User Story: As a knowledge worker, I can drag-and-drop a PDF to upload it
+and immediately see automatic processing begin without manual intervention
+
+Implementation Scope:
+- UI (app/page.tsx): Drag-drop zone, validation, progress, status badge
+- Backend (app/api/upload/route.ts): Validation, hash generation, storage,
+  trigger processing
+- Data: Supabase storage + uploaded_files table
+- Feedback: Toast notification, status badge, console logs
+
+Test Scenario: [8 verification steps for end-to-end journey]
+```
+
+**Key Difference from Traditional Tasks:**
+- ❌ Old: "Create User model" (backend-only)
+- ✅ New: "User uploads file and sees processing start" (complete slice)
+
+Each task must be demoable to a non-technical person showing SEE → DO → VERIFY.
