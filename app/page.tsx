@@ -1,16 +1,19 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Upload, FileText, Lightbulb, CheckCircle2, ListTodo, MoveRight, AlertCircle, Loader2 } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
+import SummaryPanel from '@/app/components/SummaryPanel';
+import { toast, Toaster } from 'sonner';
+import type { DocumentOutput, StatusResponse } from '@/lib/schemas';
 
 // Type definitions
 type TaskCategory = 'leverage' | 'neutral' | 'overhead';
-type FileUploadStatus = 'idle' | 'uploading' | 'processing' | 'completed' | 'failed';
+type FileUploadStatus = 'idle' | 'uploading' | 'processing' | 'completed' | 'review_required' | 'failed';
 
 interface Task {
   id: string;
@@ -25,6 +28,9 @@ interface UploadedFileInfo {
   uploadedAt: number;
   status: FileUploadStatus;
   error?: string;
+  summary?: DocumentOutput;
+  confidence?: number;
+  processingDuration?: number;
 }
 
 interface NotesData {
@@ -139,9 +145,76 @@ export default function Home() {
   const [data, setData] = useState<NotesData>(initialData);
   const [isDragging, setIsDragging] = useState(false);
   const [draggedTask, setDraggedTask] = useState<Task | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pollingIntervalsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+
+  // Status polling effect
+  useEffect(() => {
+    // Clean up all intervals on unmount
+    return () => {
+      pollingIntervalsRef.current.forEach((interval) => clearInterval(interval));
+      pollingIntervalsRef.current.clear();
+    };
+  }, []);
+
+  // Status polling function
+  const startPolling = (fileId: string, filename: string) => {
+    // Avoid duplicate polling
+    if (pollingIntervalsRef.current.has(fileId)) {
+      return;
+    }
+
+    const pollStatus = async () => {
+      try {
+        const response = await fetch(`/api/status/${fileId}`);
+        const statusData: StatusResponse = await response.json();
+
+        // Update file status
+        setData((prev) => ({
+          ...prev,
+          files: prev.files.map((f) =>
+            f.id === fileId
+              ? {
+                  ...f,
+                  status: statusData.status,
+                  summary: statusData.summary,
+                  confidence: statusData.confidence,
+                  processingDuration: statusData.processingDuration,
+                  error: statusData.error,
+                }
+              : f
+          ),
+        }));
+
+        // Show toast notification when complete
+        if (statusData.status === 'completed' || statusData.status === 'review_required') {
+          toast.success(`Summary ready for ${filename}`);
+          stopPolling(fileId);
+        } else if (statusData.status === 'failed') {
+          toast.error(`Processing failed for ${filename}`);
+          stopPolling(fileId);
+        }
+      } catch (error) {
+        console.error('[POLLING ERROR]', { fileId, error });
+        // Continue polling on network errors
+      }
+    };
+
+    // Start polling every 2 seconds
+    const interval = setInterval(pollStatus, 2000);
+    pollingIntervalsRef.current.set(fileId, interval);
+
+    // Also poll immediately
+    pollStatus();
+  };
+
+  const stopPolling = (fileId: string) => {
+    const interval = pollingIntervalsRef.current.get(fileId);
+    if (interval) {
+      clearInterval(interval);
+      pollingIntervalsRef.current.delete(fileId);
+    }
+  };
 
   // File upload handlers
   const handleDragEnter = (e: React.DragEvent) => {
@@ -222,7 +295,10 @@ export default function Home() {
 
           // Show success toast
           const sizeInMB = (file.size / (1024 * 1024)).toFixed(1);
-          showToast(`${file.name} (${sizeInMB}MB) uploaded - Processing...`);
+          toast.success(`${file.name} (${sizeInMB}MB) uploaded - Processing...`);
+
+          // Start status polling
+          startPolling(result.fileId, file.name);
 
           // Log to console (FR-006: Observable by design)
           console.log('[UPLOAD SUCCESS]', {
@@ -244,7 +320,7 @@ export default function Home() {
           }));
 
           // Show error toast
-          showToast(`Failed to upload ${file.name}: ${result.error}`, 'error');
+          toast.error(`Failed to upload ${file.name}: ${result.error}`);
 
           // Log error to console
           console.error('[UPLOAD ERROR]', {
@@ -269,7 +345,7 @@ export default function Home() {
           ),
         }));
 
-        showToast(`Failed to upload ${file.name}`, 'error');
+        toast.error(`Failed to upload ${file.name}`);
 
         console.error('[UPLOAD NETWORK ERROR]', {
           filename: file.name,
@@ -278,11 +354,6 @@ export default function Home() {
         });
       }
     }
-  };
-
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
-    setToastMessage(message);
-    setTimeout(() => setToastMessage(null), 5000);
   };
 
   // Task drag and drop handlers
@@ -343,27 +414,35 @@ export default function Home() {
       case 'uploading':
         return (
           <Badge variant="secondary" className="flex items-center gap-1">
-            <Loader2 className="h-3 w-3 animate-spin" />
+            <Loader2 className="h-3 w-3 animate-spin" aria-label="Uploading" />
             Uploading
           </Badge>
         );
       case 'processing':
         return (
           <Badge variant="default" className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700">
-            <Loader2 className="h-3 w-3 animate-spin" />
+            <Loader2 className="h-3 w-3 animate-spin" aria-label="Processing" />
             Processing
           </Badge>
         );
       case 'completed':
         return (
-          <Badge variant="default" className="bg-green-600 hover:bg-green-700">
-            Completed
+          <Badge variant="default" className="flex items-center gap-1 bg-green-600 hover:bg-green-700">
+            <CheckCircle2 className="h-3 w-3" aria-label="Complete" />
+            Complete
+          </Badge>
+        );
+      case 'review_required':
+        return (
+          <Badge variant="destructive" className="flex items-center gap-1 bg-yellow-600 hover:bg-yellow-700">
+            <AlertCircle className="h-3 w-3" aria-label="Review required" />
+            Review Required
           </Badge>
         );
       case 'failed':
         return (
           <Badge variant="destructive" className="flex items-center gap-1">
-            <AlertCircle className="h-3 w-3" />
+            <AlertCircle className="h-3 w-3" aria-label="Failed" />
             Failed
           </Badge>
         );
@@ -374,17 +453,8 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed top-4 right-4 z-50 animate-in slide-in-from-top">
-          <Card className="border-primary shadow-lg">
-            <CardContent className="flex items-center gap-3 p-4">
-              <CheckCircle2 className="h-5 w-5 text-green-500" />
-              <p className="text-sm font-medium">{toastMessage}</p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      {/* Toast Notifications */}
+      <Toaster position="top-right" richColors />
 
       {/* Header */}
       <header className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur-sm">
@@ -453,25 +523,38 @@ export default function Home() {
           </Card>
 
           {data.files.length > 0 && (
-            <div className="mt-4 space-y-2">
+            <div className="mt-4 space-y-4">
               {data.files.map((file) => (
-                <Card key={file.id} className="transition-colors hover:bg-accent/50">
-                  <CardContent className="flex items-center justify-between p-4">
-                    <div className="flex items-center gap-3">
-                      <FileText className="h-6 w-6 text-muted-foreground" />
-                      <div>
-                        <p className="font-medium">{file.name}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {formatFileSize(file.size)} • {formatDate(file.uploadedAt)}
-                        </p>
-                        {file.error && (
-                          <p className="text-sm text-destructive mt-1">{file.error}</p>
-                        )}
+                <div key={file.id} className="space-y-3">
+                  <Card className="transition-colors hover:bg-accent/50">
+                    <CardContent className="flex items-center justify-between p-4">
+                      <div className="flex items-center gap-3">
+                        <FileText className="h-6 w-6 text-muted-foreground" />
+                        <div>
+                          <p className="font-medium">{file.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {formatFileSize(file.size)} • {formatDate(file.uploadedAt)}
+                          </p>
+                          {file.error && (
+                            <p className="text-sm text-destructive mt-1">{file.error}</p>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                    {getStatusBadge(file.status)}
-                  </CardContent>
-                </Card>
+                      {getStatusBadge(file.status)}
+                    </CardContent>
+                  </Card>
+
+                  {/* Show SummaryPanel when processing is complete */}
+                  {(file.status === 'completed' || file.status === 'review_required') &&
+                    file.summary && (
+                      <SummaryPanel
+                        summary={file.summary}
+                        confidence={file.confidence || 0}
+                        filename={file.name}
+                        processingDuration={file.processingDuration || 0}
+                      />
+                    )}
+                </div>
               ))}
             </div>
           )}

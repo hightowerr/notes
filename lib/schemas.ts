@@ -35,6 +35,10 @@ export const ErrorCode = z.enum([
   'DUPLICATE_FILE',
   'STORAGE_ERROR',
   'PROCESSING_ERROR',
+  'INVALID_REQUEST',
+  'FILE_NOT_FOUND',
+  'CONVERSION_ERROR',
+  'SUMMARIZATION_ERROR',
 ]);
 
 export type ErrorCodeType = z.infer<typeof ErrorCode>;
@@ -127,6 +131,36 @@ export const UploadSuccessResponseSchema = z.object({
 });
 
 export type UploadSuccessResponse = z.infer<typeof UploadSuccessResponseSchema>;
+
+// Success response for process endpoint
+export const ProcessSuccessResponseSchema = z.object({
+  success: z.literal(true),
+  documentId: z.string().uuid(),
+  fileId: z.string().uuid(),
+  markdownContent: z.string(),
+  structuredOutput: DocumentOutputSchema,
+  confidence: z.number().min(0).max(1),
+  processingDuration: z.number().int().nonnegative(),
+  metrics: z.object({
+    fileHash: z.string(),
+    processingDuration: z.number(),
+    confidence: z.number(),
+  }),
+});
+
+export type ProcessSuccessResponse = z.infer<typeof ProcessSuccessResponseSchema>;
+
+// Success response for status endpoint
+export const StatusResponseSchema = z.object({
+  fileId: z.string().uuid(),
+  status: FileStatus,
+  summary: DocumentOutputSchema.optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  processingDuration: z.number().int().nonnegative().optional(),
+  error: z.string().optional(),
+});
+
+export type StatusResponse = z.infer<typeof StatusResponseSchema>;
 
 // Error response schema
 export const ErrorResponseSchema = z.object({

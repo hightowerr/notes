@@ -210,9 +210,15 @@ export async function POST(request: Request) {
         timestamp: new Date().toISOString(),
       });
 
-    // TODO: Trigger automatic processing (will be implemented in T002)
-    // For now, we'll just mark status as 'processing' and return
-    // In T002, we'll add: await fetch('/api/process', { method: 'POST', body: JSON.stringify({ fileId }) })
+    // Trigger automatic processing (FR-001: Automatic detection on upload)
+    const processUrl = new URL('/api/process', request.url);
+    fetch(processUrl.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileId }),
+    }).catch(error => {
+      console.error('[UPLOAD] Failed to trigger processing:', error);
+    });
 
     // Return success response
     const successResponse: UploadSuccessResponse = {
