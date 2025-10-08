@@ -1,24 +1,30 @@
 <!--
 SYNC IMPACT REPORT
 ===================
-Version Change: None → 1.0.0
-Rationale: Initial constitution creation for AI Note Synthesiser project
+Version Change: 1.0.0 → 1.1.0
+Rationale: MINOR version bump - Added new principle (Vertical Slice Architecture)
+to align constitution with SYSTEM_RULES.md enforcement. This is an additive change
+that expands governance without breaking existing compliance.
 
-Modified Principles: N/A (initial creation)
+Modified Principles:
+  - None (existing principles unchanged)
+
 Added Sections:
-  - Core Principles (5 principles aligned with autonomous agent architecture)
-  - Quality Standards (observability and error handling)
-  - Development Workflow (TDD enforcement)
-  - Governance (amendment process and versioning)
+  - Principle VI: Vertical Slice Architecture (mandates user-testable slices)
+  - Code Review Gates: Added slice validation checkpoint
 
-Removed Sections: N/A
+Removed Sections:
+  - None
 
 Templates Requiring Updates:
-  ✅ .specify/templates/plan-template.md - Constitution Check section now references autonomous, deterministic, modular, test-first, observable principles
-  ✅ .specify/templates/spec-template.md - Aligned with functional requirements and testability focus
-  ✅ .specify/templates/tasks-template.md - TDD ordering matches Test-First principle
+  ✅ .specify/templates/plan-template.md - Constitution Check section needs VI added
+  ✅ .specify/templates/tasks-template.md - Already enforces slice-based development
+  ✅ .specify/templates/spec-template.md - No changes needed (focuses on user scenarios)
+  ✅ CLAUDE.md - Already updated with SYSTEM_RULES.md slice mandate
+  ✅ .claude/SYSTEM_RULES.md - Source of new principle (no update needed)
 
-Follow-up TODOs: None
+Follow-up TODOs:
+  - Update plan-template.md Constitution Check to include Principle VI checkbox
 -->
 
 # AI Note Synthesiser Constitution
@@ -26,19 +32,33 @@ Follow-up TODOs: None
 ## Core Principles
 
 ### I. Autonomous by Default
-Every feature MUST operate without manual user intervention beyond initial configuration. The system follows the Sense → Reason → Act pattern: detect inputs automatically, process intelligently, and execute actions without prompts. No "click to summarize" buttons or manual triggers are permitted unless the feature explicitly requires user confirmation for destructive operations.
+Every feature MUST operate without manual user intervention beyond initial
+configuration. The system follows the Sense → Reason → Act pattern: detect inputs
+automatically, process intelligently, and execute actions without prompts. No
+"click to summarize" buttons or manual triggers are permitted unless the feature
+explicitly requires user confirmation for destructive operations.
 
-**Rationale**: The project's core value proposition is removing friction from knowledge work. Any feature requiring manual steps defeats this purpose and violates user expectations.
+**Rationale**: The project's core value proposition is removing friction from
+knowledge work. Any feature requiring manual steps defeats this purpose and
+violates user expectations.
 
 ### II. Deterministic Outputs
-All AI-generated outputs MUST conform to documented, versioned JSON schemas. Schemas define required fields, types, and validation rules. Invalid outputs trigger automatic retry with adjusted prompts (maximum once). Schema changes follow semantic versioning and require migration scripts for existing data.
+All AI-generated outputs MUST conform to documented, versioned JSON schemas.
+Schemas define required fields, types, and validation rules. Invalid outputs
+trigger automatic retry with adjusted prompts (maximum once). Schema changes
+follow semantic versioning and require migration scripts for existing data.
 
-**Rationale**: Downstream systems and user workflows depend on consistent data structures. Non-deterministic outputs create fragile integrations and erode trust.
+**Rationale**: Downstream systems and user workflows depend on consistent data
+structures. Non-deterministic outputs create fragile integrations and erode trust.
 
 ### III. Modular Architecture
-Components MUST be decoupled and independently testable. Each module (conversion, summarization, storage) operates through well-defined interfaces. Modules can be replaced, enhanced, or removed without cascading changes. Future features (RAG, memory retrieval) integrate via plugin patterns, not core rewrites.
+Components MUST be decoupled and independently testable. Each module (conversion,
+summarization, storage) operates through well-defined interfaces. Modules can be
+replaced, enhanced, or removed without cascading changes. Future features (RAG,
+memory retrieval) integrate via plugin patterns, not core rewrites.
 
-**Rationale**: Early-stage projects evolve rapidly. Tight coupling creates technical debt that becomes insurmountable before product-market fit.
+**Rationale**: Early-stage projects evolve rapidly. Tight coupling creates
+technical debt that becomes insurmountable before product-market fit.
 
 ### IV. Test-First Development (NON-NEGOTIABLE)
 TDD is mandatory for all features:
@@ -47,22 +67,55 @@ TDD is mandatory for all features:
 3. Implement minimum code to pass tests
 4. Refactor while keeping tests green
 
-Integration tests cover: file detection triggers, conversion pipeline, AI summarization contracts, storage operations, error handling flows.
+Integration tests cover: file detection triggers, conversion pipeline, AI
+summarization contracts, storage operations, error handling flows.
 
-**Rationale**: Autonomous systems have no human in the loop to catch errors. Comprehensive tests are the only safety net.
+**Rationale**: Autonomous systems have no human in the loop to catch errors.
+Comprehensive tests are the only safety net.
 
 ### V. Observable by Design
-Every system operation MUST emit structured logs with: timestamp, operation type, input hash, duration, confidence scores, error details. Errors log to both console (development) and Supabase (production). Performance metrics track against targets: <8s processing time, ≥95% detection reliability, ≥85% summarization accuracy.
+Every system operation MUST emit structured logs with: timestamp, operation type,
+input hash, duration, confidence scores, error details. Errors log to both console
+(development) and Supabase (production). Performance metrics track against targets:
+<8s processing time, ≥95% detection reliability, ≥85% summarization accuracy.
 
-**Rationale**: Autonomous systems fail silently without observability. Logs enable debugging, performance optimization, and user trust through transparency.
+**Rationale**: Autonomous systems fail silently without observability. Logs enable
+debugging, performance optimization, and user trust through transparency.
+
+### VI. Vertical Slice Architecture
+Every code change MUST deliver complete, user-testable value following the Three Laws:
+
+1. **SEE IT** → Visible UI change or feedback
+2. **DO IT** → Interactive capability user can trigger
+3. **VERIFY IT** → Observable outcome confirming it worked
+
+**Implementation Requirements**:
+- Each task includes: UI component + backend endpoint + data layer + user feedback
+- User story format: "As a [user], I can [action] to [achieve outcome]"
+- Demo-ready: Must be demonstrable to non-technical stakeholders
+- Pre-flight validation: Confirm UI entry point, backend process, and test scenario
+
+**FORBIDDEN**:
+- Backend-only tasks (e.g., "Create User model")
+- Frontend-only tasks (e.g., "Add login form")
+- Infrastructure tasks without user value (e.g., "Setup CI/CD")
+- Tasks that can't be tested by end users
+
+**Enforcement**: The `slice-orchestrator` agent is the default for ALL feature
+implementation. Tasks violating slice principles MUST be restructured before
+development begins. See `.claude/SYSTEM_RULES.md` for detailed protocol.
+
+**Rationale**: Incremental, user-visible progress prevents over-engineering,
+enables rapid feedback, and ensures every commit adds demonstrable value. Partial
+slices (backend without UI) create integration risk and delay validation.
 
 ## Quality Standards
 
 ### Error Handling Requirements
 - Invalid file formats: Log error, skip processing, notify user of unsupported type
-- Unreadable content: Attempt OCR fallback (Tesseract), then skip with clear error message
-- Invalid JSON from LLM: Retry once with adjusted prompt parameters, then mark as "review required"
-- Low-confidence summaries: Flag in logs with confidence score, store raw output for manual review
+- Unreadable content: Attempt OCR fallback (Tesseract), then skip with clear error
+- Invalid JSON from LLM: Retry once with adjusted prompt parameters, mark "review required"
+- Low-confidence summaries: Flag in logs with confidence score, store raw output
 - Duplicate filenames: Append content hash suffix, preserve both versions
 
 ### Performance Constraints
@@ -76,18 +129,20 @@ Every system operation MUST emit structured logs with: timestamp, operation type
 ### Implementation Process
 1. **Specification Phase**: Define requirements in spec.md with testable acceptance criteria
 2. **Planning Phase**: Document architecture in plan.md, research unknowns, design data models and contracts
-3. **Test Creation**: Write failing integration and contract tests before any implementation
-4. **Implementation**: Build minimum code to pass tests, following modular architecture
-5. **Validation**: Execute quickstart.md scenarios, verify performance targets, review logs
+3. **Task Generation**: Create vertical slice tasks (UI + Backend + Data + Feedback per task)
+4. **Test Creation**: Write failing integration and contract tests before any implementation
+5. **Implementation**: Build minimum code to pass tests, following modular architecture
+6. **Validation**: Execute quickstart.md scenarios, verify performance targets, review logs
 
 ### Code Review Gates
 All changes must verify:
-- [ ] Tests written before implementation (TDD compliance)
-- [ ] No manual user intervention required (autonomous compliance)
-- [ ] JSON schemas documented and validated (deterministic compliance)
-- [ ] Components independently testable (modular compliance)
-- [ ] Structured logs emitted (observable compliance)
-- [ ] Performance targets met (quality standards compliance)
+- [ ] Tests written before implementation (TDD compliance - Principle IV)
+- [ ] No manual user intervention required (Autonomous compliance - Principle I)
+- [ ] JSON schemas documented and validated (Deterministic compliance - Principle II)
+- [ ] Components independently testable (Modular compliance - Principle III)
+- [ ] Structured logs emitted (Observable compliance - Principle V)
+- [ ] Vertical slice delivered (SEE + DO + VERIFY) (Slice compliance - Principle VI)
+- [ ] Performance targets met (Quality standards compliance)
 
 ## Governance
 
@@ -105,9 +160,15 @@ Constitution changes require:
 - **PATCH**: Clarifications, wording improvements, typo fixes (no semantic changes)
 
 ### Compliance Review
-The /plan command Constitution Check section enforces these principles before design work begins and after Phase 1 completion. Violations must be documented in Complexity Tracking with justification or the design must be simplified to comply.
+The /plan command Constitution Check section enforces these principles before design
+work begins and after Phase 1 completion. Violations must be documented in Complexity
+Tracking with justification or the design must be simplified to comply.
 
-**Runtime Guidance**: See `CLAUDE.md` in repository root for agent-specific development instructions.
+The /tasks command validates slice compliance before generating tasks.md. Any
+task failing the Three Laws (SEE, DO, VERIFY) is rejected and restructured.
+
+**Runtime Guidance**: See `CLAUDE.md` and `.claude/SYSTEM_RULES.md` in repository
+root for agent-specific development instructions and slice enforcement protocol.
 
 ---
-**Version**: 1.0.0 | **Ratified**: 2025-10-05 | **Last Amended**: 2025-10-05
+**Version**: 1.1.0 | **Ratified**: 2025-10-05 | **Last Amended**: 2025-10-08

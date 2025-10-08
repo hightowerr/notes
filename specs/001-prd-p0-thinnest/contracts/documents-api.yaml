@@ -1,0 +1,332 @@
+openapi: 3.0.3
+info:
+  title: Documents API
+  description: API for retrieving processed documents and their summaries
+  version: 1.0.0
+
+paths:
+  /api/documents:
+    get:
+      summary: List all processed documents
+      description: |
+        Retrieves list of processed documents with metadata and status.
+
+        Functional Requirements Satisfied:
+        - FR-005: Retrieve stored processed outputs
+      operationId: listDocuments
+      parameters:
+        - name: status
+          in: query
+          description: Filter by processing status
+          schema:
+            type: string
+            enum: [pending, processing, completed, failed, review_required]
+        - name: limit
+          in: query
+          description: Max number of results (default 50)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: offset
+          in: query
+          description: Pagination offset
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: List of documents retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - documents
+                  - total
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  documents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DocumentSummary'
+                  total:
+                    type: integer
+                    example: 125
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/documents/{fileId}:
+    get:
+      summary: Get processed document by file ID
+      description: |
+        Retrieves full processed document including Markdown content and structured JSON output.
+
+        Functional Requirements Satisfied:
+        - FR-004: Access both Markdown and JSON outputs
+        - FR-005: Retrieve stored outputs
+      operationId: getDocument
+      parameters:
+        - name: fileId
+          in: path
+          required: true
+          description: UUID of the uploaded file
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Document retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - document
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  document:
+                    $ref: '#/components/schemas/ProcessedDocument'
+        '404':
+          description: Document not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/documents/{fileId}/status:
+    get:
+      summary: Get processing status of a file
+      description: |
+        Retrieves current processing status and logs for a file.
+
+        Functional Requirements Satisfied:
+        - FR-006: Display processing feedback
+        - FR-007: Access processing metrics and logs
+      operationId: getDocumentStatus
+      parameters:
+        - name: fileId
+          in: path
+          required: true
+          description: UUID of the uploaded file
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Status retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - status
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  status:
+                    type: string
+                    enum: [pending, processing, completed, failed, review_required]
+                    example: "completed"
+                  progress:
+                    type: object
+                    properties:
+                      currentOperation:
+                        type: string
+                        example: "summarize"
+                      percentComplete:
+                        type: integer
+                        example: 75
+                  logs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProcessingLog'
+        '404':
+          description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    DocumentSummary:
+      type: object
+      required:
+        - fileId
+        - fileName
+        - status
+        - uploadedAt
+      properties:
+        fileId:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        fileName:
+          type: string
+          example: "meeting-notes.pdf"
+        fileSize:
+          type: integer
+          example: 2097152
+        status:
+          type: string
+          enum: [pending, processing, completed, failed, review_required]
+          example: "completed"
+        uploadedAt:
+          type: string
+          format: date-time
+          example: "2025-10-07T10:00:00Z"
+        processedAt:
+          type: string
+          format: date-time
+          example: "2025-10-07T10:00:07Z"
+          nullable: true
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          example: 0.92
+          nullable: true
+
+    ProcessedDocument:
+      type: object
+      required:
+        - fileId
+        - fileName
+        - markdownContent
+        - structuredOutput
+        - confidence
+        - processingDuration
+        - processedAt
+      properties:
+        fileId:
+          type: string
+          format: uuid
+        fileName:
+          type: string
+        markdownContent:
+          type: string
+          description: Full Markdown representation of document
+        structuredOutput:
+          $ref: '#/components/schemas/DocumentOutput'
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        processingDuration:
+          type: integer
+          description: Processing time in milliseconds
+        processedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          description: Expiration date (30 days after processing)
+
+    DocumentOutput:
+      type: object
+      required:
+        - topics
+        - decisions
+        - actions
+        - lno_tasks
+      properties:
+        topics:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          example: ["Q4 Strategy", "Budget Planning"]
+        decisions:
+          type: array
+          items:
+            type: string
+          example: ["Hire 3 engineers by EOY"]
+        actions:
+          type: array
+          items:
+            type: string
+          example: ["Schedule design review"]
+        lno_tasks:
+          type: object
+          required:
+            - leverage
+            - neutral
+            - overhead
+          properties:
+            leverage:
+              type: array
+              items:
+                type: string
+              example: ["Define metrics for Q4"]
+            neutral:
+              type: array
+              items:
+                type: string
+              example: ["Update documentation"]
+            overhead:
+              type: array
+              items:
+                type: string
+              example: ["File expense reports"]
+
+    ProcessingLog:
+      type: object
+      required:
+        - operation
+        - status
+        - timestamp
+      properties:
+        operation:
+          type: string
+          enum: [upload, convert, summarize, store, retry, error]
+        status:
+          type: string
+          enum: [started, completed, failed]
+        duration:
+          type: integer
+          description: Duration in milliseconds
+          nullable: true
+        error:
+          type: string
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      required:
+        - success
+        - error
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+        code:
+          type: string
