@@ -5,11 +5,12 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Upload, FileText, Lightbulb, CheckCircle2, ListTodo, MoveRight } from 'lucide-react';
+import { Upload, FileText, Lightbulb, CheckCircle2, ListTodo, MoveRight, AlertCircle, Loader2 } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
 
 // Type definitions
 type TaskCategory = 'leverage' | 'neutral' | 'overhead';
+type FileUploadStatus = 'idle' | 'uploading' | 'processing' | 'completed' | 'failed';
 
 interface Task {
   id: string;
@@ -17,13 +18,17 @@ interface Task {
   category: TaskCategory;
 }
 
+interface UploadedFileInfo {
+  id: string;
+  name: string;
+  size: number;
+  uploadedAt: number;
+  status: FileUploadStatus;
+  error?: string;
+}
+
 interface NotesData {
-  files: Array<{
-    id: string;
-    name: string;
-    size: number;
-    uploadedAt: number;
-  }>;
+  files: UploadedFileInfo[];
   topics: Array<{
     id: string;
     text: string;
@@ -44,22 +49,9 @@ interface NotesData {
   };
 }
 
-// Mock data for demonstration
+// Mock data for demonstration (will be replaced by API data)
 const initialData: NotesData = {
-  files: [
-    {
-      id: '1',
-      name: 'Q4-strategy-meeting.pdf',
-      size: 245000,
-      uploadedAt: 1728198000000 // Static timestamp: Oct 6, 2024, 5:00 AM
-    },
-    {
-      id: '2',
-      name: 'product-roadmap-notes.docx',
-      size: 156000,
-      uploadedAt: 1728194400000 // Static timestamp: Oct 6, 2024, 4:00 AM
-    }
-  ],
+  files: [],
   topics: [
     { id: 't1', text: 'Q4 Product Roadmap Planning' },
     { id: 't2', text: 'Team Hiring Strategy for Engineering' },
@@ -147,6 +139,8 @@ export default function Home() {
   const [data, setData] = useState<NotesData>(initialData);
   const [isDragging, setIsDragging] = useState(false);
   const [draggedTask, setDraggedTask] = useState<Task | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // File upload handlers
@@ -185,20 +179,110 @@ export default function Home() {
     }
   };
 
-  const handleFilesAdded = (files: File[]) => {
-    const newFiles = files.map((file, index) => ({
-      id: `${Date.now()}-${index}`,
-      name: file.name,
-      size: file.size,
-      uploadedAt: Date.now()
-    }));
+  const handleFilesAdded = async (files: File[]) => {
+    for (const file of files) {
+      const tempId = `temp-${Date.now()}-${Math.random()}`;
 
-    setData((prev) => ({
-      ...prev,
-      files: [...prev.files, ...newFiles]
-    }));
+      // Add file to UI immediately with 'uploading' status
+      const fileInfo: UploadedFileInfo = {
+        id: tempId,
+        name: file.name,
+        size: file.size,
+        uploadedAt: Date.now(),
+        status: 'uploading',
+      };
 
-    console.log('Files uploaded:', files);
+      setData((prev) => ({
+        ...prev,
+        files: [...prev.files, fileInfo],
+      }));
+
+      // Upload file to backend
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+          // Update file status to processing
+          setData((prev) => ({
+            ...prev,
+            files: prev.files.map((f) =>
+              f.id === tempId
+                ? { ...f, id: result.fileId, status: 'processing' }
+                : f
+            ),
+          }));
+
+          // Show success toast
+          const sizeInMB = (file.size / (1024 * 1024)).toFixed(1);
+          showToast(`${file.name} (${sizeInMB}MB) uploaded - Processing...`);
+
+          // Log to console (FR-006: Observable by design)
+          console.log('[UPLOAD SUCCESS]', {
+            fileId: result.fileId,
+            filename: file.name,
+            size: file.size,
+            status: result.status,
+            timestamp: new Date().toISOString(),
+          });
+        } else {
+          // Upload failed - update status
+          setData((prev) => ({
+            ...prev,
+            files: prev.files.map((f) =>
+              f.id === tempId
+                ? { ...f, status: 'failed', error: result.error || 'Upload failed' }
+                : f
+            ),
+          }));
+
+          // Show error toast
+          showToast(`Failed to upload ${file.name}: ${result.error}`, 'error');
+
+          // Log error to console
+          console.error('[UPLOAD ERROR]', {
+            filename: file.name,
+            error: result.error,
+            code: result.code,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      } catch (error) {
+        // Network or unexpected error
+        setData((prev) => ({
+          ...prev,
+          files: prev.files.map((f) =>
+            f.id === tempId
+              ? {
+                  ...f,
+                  status: 'failed',
+                  error: error instanceof Error ? error.message : 'Network error',
+                }
+              : f
+          ),
+        }));
+
+        showToast(`Failed to upload ${file.name}`, 'error');
+
+        console.error('[UPLOAD NETWORK ERROR]', {
+          filename: file.name,
+          error: error instanceof Error ? error.message : 'Unknown error',
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+  };
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToastMessage(message);
+    setTimeout(() => setToastMessage(null), 5000);
   };
 
   // Task drag and drop handlers
@@ -254,8 +338,54 @@ export default function Home() {
     });
   };
 
+  const getStatusBadge = (status: FileUploadStatus) => {
+    switch (status) {
+      case 'uploading':
+        return (
+          <Badge variant="secondary" className="flex items-center gap-1">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Uploading
+          </Badge>
+        );
+      case 'processing':
+        return (
+          <Badge variant="default" className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Processing
+          </Badge>
+        );
+      case 'completed':
+        return (
+          <Badge variant="default" className="bg-green-600 hover:bg-green-700">
+            Completed
+          </Badge>
+        );
+      case 'failed':
+        return (
+          <Badge variant="destructive" className="flex items-center gap-1">
+            <AlertCircle className="h-3 w-3" />
+            Failed
+          </Badge>
+        );
+      default:
+        return <Badge variant="secondary">Unknown</Badge>;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed top-4 right-4 z-50 animate-in slide-in-from-top">
+          <Card className="border-primary shadow-lg">
+            <CardContent className="flex items-center gap-3 p-4">
+              <CheckCircle2 className="h-5 w-5 text-green-500" />
+              <p className="text-sm font-medium">{toastMessage}</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* Header */}
       <header className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur-sm">
         <div className="mx-auto max-w-7xl px-6 py-4">
@@ -271,7 +401,7 @@ export default function Home() {
             </div>
             <div className="flex items-center gap-3">
               <Badge variant="secondary" className="px-4 py-2">
-                {data.files.length} Documents Processed
+                {data.files.length} Documents
               </Badge>
               <ThemeToggle />
             </div>
@@ -285,7 +415,7 @@ export default function Home() {
         <section>
           <div className="mb-4 flex items-center gap-3">
             <Upload className="h-6 w-6 text-primary" />
-            <h2 className="text-xl font-semibold">Documents & Files</h2>
+            <h2 className="text-xl font-semibold">Upload Documents</h2>
           </div>
 
           <Card
@@ -305,6 +435,7 @@ export default function Home() {
                 ref={fileInputRef}
                 type="file"
                 multiple
+                accept=".pdf,.docx,.txt,.md"
                 onChange={handleFileSelect}
                 className="hidden"
                 aria-label="File input"
@@ -315,7 +446,7 @@ export default function Home() {
                   {isDragging ? 'Drop files here' : 'Drag & drop files or click to browse'}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Supports PDF, DOCX, TXT files
+                  Supports PDF, DOCX, TXT files (max 10MB)
                 </p>
               </div>
             </CardContent>
@@ -333,11 +464,12 @@ export default function Home() {
                         <p className="text-sm text-muted-foreground">
                           {formatFileSize(file.size)} • {formatDate(file.uploadedAt)}
                         </p>
+                        {file.error && (
+                          <p className="text-sm text-destructive mt-1">{file.error}</p>
+                        )}
                       </div>
                     </div>
-                    <Badge variant="default" className="bg-green-600 hover:bg-green-700">
-                      Processed
-                    </Badge>
+                    {getStatusBadge(file.status)}
                   </CardContent>
                 </Card>
               ))}

@@ -123,6 +123,39 @@ json```
 5. **code-reviewer** = MUST run after ANY code generation
 6. **debugger** = ONLY for investigation, never fixes directly
 
+---
+
+## 🤖 AUTOMATIC AGENT INVOCATION PROTOCOL
+
+**The assistant MUST proactively invoke these agents at specific checkpoints:**
+
+### Checkpoint 1: After ANY Code Write/Modify
+```
+IF assistant writes/modifies code THEN
+  IMMEDIATELY invoke code-reviewer agent
+  WAIT for review approval before proceeding
+```
+
+### Checkpoint 2: Before Marking Task Complete
+```
+IF task involves implementation THEN
+  IMMEDIATELY invoke test-runner agent
+  WAIT for all tests to pass
+  IF tests fail THEN invoke debugger agent
+```
+
+### Checkpoint 3: On Error/Failure Detection
+```
+IF error/exception/test failure detected THEN
+  IMMEDIATELY invoke debugger agent
+  NEVER attempt fixes without diagnosis
+  APPLY corrective plan from debug report
+```
+
+**VIOLATION = INVALID COMPLETION**
+
+---
+
 ## THE GOLDEN RULE
 **"If a user can't test it, we didn't ship it."**
 Every commit, every PR, every task must add value that a real user can experience. No exceptions.

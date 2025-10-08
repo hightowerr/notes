@@ -59,18 +59,25 @@ For every task, enforce this exact sequence:
 - Delegate implementation to make the test pass
 - Implementation must be minimal and focused
 
-**Step 3: Code Review**
-- Use `code-reviewer` to verify code quality, patterns, and spec alignment
-- Must log to `.claude/reviews/<task>.md` and update `.claude/state/<task>.json` with `review: pass|fail`
+**Step 3: Code Review (MANDATORY - AUTOMATIC)**
+- After implementation completes, IMMEDIATELY invoke `code-reviewer` agent
+- Use Task tool: `subagent_type: code-reviewer`
+- Provide: files modified, task requirements, constitutional principles
+- BLOCK until `.claude/reviews/<task>.md` shows `review: pass`
+- IF review fails: Apply feedback, re-invoke code-reviewer
 
-**Step 4: Test Execution**
-- Use `test-runner` to execute tests
-- Verify all tests pass; update `.claude/state/<task>.json` with `tests: pass|fail`
+**Step 4: Test Execution (MANDATORY - AUTOMATIC)**
+- After code review passes, IMMEDIATELY invoke `test-runner` agent
+- Use Task tool: `subagent_type: test-runner`
+- BLOCK until all tests pass
+- IF any test fails: Proceed to Step 5 (Debug)
 
-**Step 5: Debug (If Needed)**
-- If tests fail, analyze failure with test-runner output
-- Invoke `debugger` to produce fix plan in `.claude/logs/debug-<task>.md`
-- Only proceed once `debugger` updates `.claude/state/<task>.json` with `debug: complete`
+**Step 5: Debug (MANDATORY IF TESTS FAIL - AUTOMATIC)**
+- ON test failure, IMMEDIATELY invoke `debugger` agent
+- Use Task tool: `subagent_type: debugger`
+- WAIT for `.claude/logs/debug-<task>.md` with corrective plan
+- APPLY fixes from corrective plan
+- LOOP back to Step 3 (code review the fixes)
 
 **Step 6: Task Completion**
 - Mark task complete in `tasks.md` only when all steps pass
