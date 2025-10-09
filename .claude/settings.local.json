@@ -3,9 +3,14 @@
     "allow": [
       "Bash(npm run test:run:*)",
       "Bash(source:*)",
-      "Bash(nvm:*)"
+      "Bash(nvm:*)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "shadcn"
+  ]
 }

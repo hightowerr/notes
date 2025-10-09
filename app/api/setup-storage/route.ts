@@ -33,11 +33,11 @@ export async function POST() {
       message: 'Storage bucket created successfully',
       bucketName: data.name
     });
-  } catch (error: any) {
+  } catch (error) {
     return NextResponse.json({
       success: false,
       message: 'Failed to create storage bucket',
-      error: error.message || 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 });
   }
 }

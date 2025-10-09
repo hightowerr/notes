@@ -136,7 +136,7 @@ export async function POST(request: NextRequest) {
 
     // FR-011: Force low confidence for testing
     if (forceLowConfidence) {
-      aiResult.confidence = calculateLowConfidence(aiResult.output);
+      aiResult.confidence = calculateLowConfidence();
     }
 
     const summarizeDuration = Date.now() - summarizeStartTime;
@@ -171,7 +171,7 @@ export async function POST(request: NextRequest) {
     const expiresAt = new Date(processedAt);
     expiresAt.setDate(expiresAt.getDate() + 30); // Add 30 days
 
-    const { data: processedDoc, error: insertError } = await supabase
+    const { error: insertError } = await supabase
       .from('processed_documents')
       .insert({
         id: docId,
@@ -236,12 +236,13 @@ export async function POST(request: NextRequest) {
       },
     });
 
-  } catch (error: any) {
+  } catch (error) {
     const processingDuration = Date.now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : 'Processing failed';
 
     // Log error operation
     if (fileId) {
-      await logOperation(fileId, 'error', 'failed', processingDuration, error.message);
+      await logOperation(fileId, 'error', 'failed', processingDuration, errorMessage);
 
       // Update file status to failed
       await supabase
@@ -253,14 +254,14 @@ export async function POST(request: NextRequest) {
     console.error('[PROCESS ERROR]', {
       fileId: fileId || 'unknown',
       duration: processingDuration,
-      error: error.message,
-      stack: error.stack,
+      error: errorMessage,
+      stack: error instanceof Error ? error.stack : undefined,
     });
 
     return Response.json(
       {
         success: false,
-        error: error.message || 'Processing failed',
+        error: errorMessage,
         code: 'PROCESSING_ERROR',
       },
       { status: 500 }

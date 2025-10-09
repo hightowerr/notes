@@ -191,8 +191,12 @@ export function validateFileUpload(file: File): { valid: boolean; error?: string
     };
   }
 
-  // Check MIME type
-  if (!ALLOWED_MIME_TYPES.includes(file.type as any)) {
+  // Check MIME type with proper type narrowing
+  const isAllowedMimeType = (type: string): type is typeof ALLOWED_MIME_TYPES[number] => {
+    return (ALLOWED_MIME_TYPES as readonly string[]).includes(type);
+  };
+
+  if (!isAllowedMimeType(file.type)) {
     return {
       valid: false,
       error: `Unsupported file format: ${file.type}. Supported formats: PDF, DOCX, TXT, MD`,
@@ -202,7 +206,11 @@ export function validateFileUpload(file: File): { valid: boolean; error?: string
 
   // Check file extension as additional validation
   const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
-  if (!ALLOWED_FILE_EXTENSIONS.includes(extension as any)) {
+  const isAllowedExtension = (ext: string): ext is typeof ALLOWED_FILE_EXTENSIONS[number] => {
+    return (ALLOWED_FILE_EXTENSIONS as readonly string[]).includes(ext);
+  };
+
+  if (!isAllowedExtension(extension)) {
     return {
       valid: false,
       error: `Unsupported file extension: ${extension}. Supported extensions: ${ALLOWED_FILE_EXTENSIONS.join(', ')}`,
