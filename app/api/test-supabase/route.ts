@@ -18,11 +18,11 @@ export async function GET() {
       bucketsFound: buckets?.length || 0,
       buckets: buckets?.map(b => b.name) || []
     });
-  } catch (error: any) {
+  } catch (error) {
     return NextResponse.json({
       success: false,
       message: 'Supabase connection failed',
-      error: error.message || 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 });
   }
 }

@@ -29,11 +29,11 @@ export async function POST(request: Request) {
       message: 'File uploaded successfully',
       fileName: data.path
     });
-  } catch (error: any) {
+  } catch (error) {
     return NextResponse.json({
       success: false,
       message: 'Upload failed',
-      error: error.message || 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error'
     }, { status: 500 });
   }
 }

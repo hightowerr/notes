@@ -185,7 +185,7 @@ The /tasks command validates slice compliance before generating tasks.md. Any
 task failing the Three Laws (SEE, DO, VERIFY) is rejected and restructured.
 
 **Runtime Guidance**: See `CLAUDE.md` and `.claude/SYSTEM_RULES.md` in repository
-root for agent-specific development instructions and slice enforcement protocol.
+root for agent-specific development instructions and slice enforcement protocol
 
 ---
 **Version**: 1.1.1 | **Ratified**: 2025-10-05 | **Last Amended**: 2025-10-08

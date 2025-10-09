@@ -7,23 +7,40 @@
 import mammoth from 'mammoth';
 import { generateContentHash } from '@/lib/schemas';
 
+// Type definition for pdf-parse module
+type PdfParser = (dataBuffer: Buffer) => Promise<{
+  numpages: number;
+  numrender: number;
+  info: Record<string, unknown> & { Title?: string };
+  metadata: Record<string, unknown> | null;
+  version: string;
+  text: string;
+}>;
+
 // Dynamic import for pdf-parse with error suppression
 // The pdf-parse library has buggy test code that runs at import time
 // We suppress the ENOENT error for its test file path
-let pdfParserCache: any = null;
-async function getPdfParser() {
+let pdfParserCache: PdfParser | null = null;
+async function getPdfParser(): Promise<PdfParser> {
   if (pdfParserCache) return pdfParserCache;
 
   try {
     const pdfParse = await import('pdf-parse');
-    pdfParserCache = pdfParse.default;
+    pdfParserCache = pdfParse.default as PdfParser;
     return pdfParserCache;
-  } catch (error: any) {
+  } catch (error) {
     // Ignore the test file ENOENT error from pdf-parse's buggy code
-    if (error?.code === 'ENOENT' && error?.path?.includes('test/data')) {
+    if (
+      error instanceof Error &&
+      'code' in error &&
+      error.code === 'ENOENT' &&
+      'path' in error &&
+      typeof error.path === 'string' &&
+      error.path.includes('test/data')
+    ) {
       // The module still loads despite this error, try to use it anyway
       const pdfParse = await import('pdf-parse');
-      pdfParserCache = pdfParse.default;
+      pdfParserCache = pdfParse.default as PdfParser;
       return pdfParserCache;
     }
     throw error;
@@ -80,7 +97,11 @@ export async function convertToMarkdown(
     }
 
     // Generate content hash
-    const contentHash = await generateContentHash(fileBuffer.buffer);
+    // Convert Buffer to ArrayBuffer - Node.js Buffer needs conversion to Web API ArrayBuffer
+    const arrayBuffer = new ArrayBuffer(fileBuffer.length);
+    const view = new Uint8Array(arrayBuffer);
+    fileBuffer.copy(view);
+    const contentHash = await generateContentHash(arrayBuffer);
 
     const duration = Date.now() - startTime;
     console.log('[CONVERT COMPLETE]', {
@@ -134,16 +155,24 @@ async function convertPdfToMarkdown(buffer: Buffer): Promise<string> {
 
     return markdown;
 
-  } catch (error: any) {
+  } catch (error) {
     // Suppress pdf-parse's buggy test file error, but still log other errors
-    if (error?.code !== 'ENOENT' || !error?.path?.includes('test/data')) {
+    const shouldSuppressError =
+      error instanceof Error &&
+      'code' in error &&
+      error.code === 'ENOENT' &&
+      'path' in error &&
+      typeof error.path === 'string' &&
+      error.path.includes('test/data');
+
+    if (!shouldSuppressError) {
       console.error('[PDF] Primary extraction failed:', error);
     }
 
     // Try OCR fallback
     try {
       return await applyOcrFallback(buffer);
-    } catch (ocrError) {
+    } catch {
       throw new ConversionError(
         'PDF extraction failed and OCR fallback unsuccessful',
         error instanceof Error ? error : undefined
@@ -154,13 +183,14 @@ async function convertPdfToMarkdown(buffer: Buffer): Promise<string> {
 
 /**
  * Convert DOCX to Markdown
- * Uses mammoth library for semantic conversion
+ * Uses mammoth library to extract raw text, then formats as markdown
  * @param buffer - DOCX file buffer
  * @returns Markdown string
  */
 async function convertDocxToMarkdown(buffer: Buffer): Promise<string> {
   try {
-    const result = await mammoth.convertToMarkdown({ buffer });
+    // Mammoth only has convertToHtml and extractRawText - we use extractRawText
+    const result = await mammoth.extractRawText({ buffer });
 
     if (result.messages && result.messages.length > 0) {
       console.warn('[DOCX] Conversion warnings:', result.messages);
@@ -170,7 +200,8 @@ async function convertDocxToMarkdown(buffer: Buffer): Promise<string> {
       throw new ConversionError('DOCX conversion produced empty output');
     }
 
-    return result.value;
+    // Format the extracted text as markdown with basic paragraph structure
+    return formatTextAsMarkdown(result.value);
 
   } catch (error) {
     throw new ConversionError(
@@ -217,21 +248,15 @@ async function applyOcrFallback(buffer: Buffer): Promise<string> {
   // TODO: Implement full OCR with Tesseract.js if needed
   // For P0, we'll return a placeholder to indicate OCR was attempted
 
-  const placeholder = `# Document Processed via OCR
+  const placeholder = `# Document Processing Notice
 
-> **Note:** This document appears to be a scanned image or has low text content.
-> OCR (Optical Character Recognition) processing was attempted.
+This document appears to be a scanned image or contains minimal extractable text content.
 
-## Content
+**File Size:** ${(buffer.length / 1024).toFixed(2)} KB
 
-This is a placeholder for OCR-extracted content. Full OCR implementation
-requires additional processing time and the Tesseract.js library.
+**Status:** Unable to extract text content for AI summarization.
 
-For P0 (Proof of Agency), we prioritize text-based PDFs. Scanned documents
-may require manual review or enhanced OCR processing.
-
----
-*File size: ${(buffer.length / 1024).toFixed(2)} KB*
+**Next Steps:** This document requires manual review or additional processing with OCR tools.
 `;
 
   console.log('[OCR FALLBACK] Returning placeholder content for testing');

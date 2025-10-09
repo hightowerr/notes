@@ -74,7 +74,7 @@ export async function POST(request: Request) {
     const storagePath = `${contentHash.substring(0, 8)}-${safeName}`;
 
     // Upload file to Supabase storage
-    const { data: uploadData, error: uploadError } = await supabase
+    const { error: uploadError } = await supabase
       .storage
       .from('notes')
       .upload(storagePath, arrayBuffer, {

@@ -139,10 +139,39 @@ Guidelines:
 - Ensure all extracted items are meaningful strings
 - For LNO classification, consider impact vs effort ratio
 
+**Task Extraction Strategy:**
+- For meeting notes/action-oriented docs: Extract explicit tasks and action items mentioned in the document
+- For informational docs (policies, guides, reports, reference materials): Infer actionable tasks that a reader would naturally need to do with this specific content
+  * Insurance document → Infer tasks like "Review [specific coverage types mentioned]", "Compare [specific policy options discussed]"
+  * Strategy document → Infer tasks like "Evaluate impact of [specific strategy mentioned]", "Align team on [specific objectives listed]"
+  * Reference/cheat sheet → Infer tasks like "Study and memorize [specific concepts covered]", "Apply [specific techniques/formulas shown]"
+  * Product documentation → Infer tasks like "Test [specific features described]", "Integrate [specific APIs documented]"
+
+**Critical Rules for Task Generation:**
+- Base ALL tasks on actual content present in the document - reference specific topics, concepts, or items mentioned
+- DO NOT generate generic tasks like "Implement OCR" or "Develop strategy" unless the document explicitly discusses those topics
+- If the document is purely reference material (cheat sheet, glossary, formula list): infer study/application tasks based on the specific content
+- If no meaningful tasks can be inferred from the content, leave arrays empty rather than fabricating unrelated tasks
+- LNO classification should reflect the strategic value of tasks based on document context
+
+**Meta-Content Detection:**
+- If the document is a system notice, error message, or processing placeholder (e.g., "Document Processing Notice", "Unable to extract"), extract metadata about the notice itself, not fabricated tasks
+  * Topics: Document type/status (e.g., ["processing notice", "unreadable document"])
+  * Decisions: Empty array (no decisions in system messages)
+  * Actions: What user should do (e.g., ["Manual review required", "Provide text-based version"])
+  * LNO Tasks: Categorize the required action (usually Overhead for manual fixes)
+- DO NOT fabricate tasks about "implementing OCR" or "developing strategies" - these are system-level tasks, not user tasks from the document
+- Only extract content that would be actionable for the document's reader
+
+**LNO Classification:**
+- **Leverage**: High-impact tasks that drive key decisions or create significant value (e.g., strategic planning, critical evaluations)
+- **Neutral**: Standard operational tasks necessary for understanding or applying the content (e.g., reviewing details, studying concepts)
+- **Overhead**: Low-value administrative tasks (e.g., filing, archiving, basic documentation)
+
 Document Content:
 ${markdown}
 
-Extract the structured data following the required schema.`;
+Extract the structured data following the required schema. Ensure tasks are grounded in the actual document content, not generic placeholders.`;
 }
 
 /**
@@ -189,6 +218,20 @@ function calculateConfidence(output: DocumentOutput): number {
     ...output.lno_tasks.overhead,
   ].join(' ');
 
+  // Check for OCR fallback or system placeholder content
+  const ocrPlaceholderPatterns = [
+    /document processing notice/i,
+    /unable to extract/i,
+    /requires manual review/i,
+    /ocr tools/i,
+    /minimal extractable text/i,
+  ];
+
+  if (ocrPlaceholderPatterns.some(pattern => pattern.test(allContent))) {
+    // Force very low confidence for OCR placeholder documents
+    return 0.3;
+  }
+
   // If total content is suspiciously short, reduce confidence
   if (allContent.length < 50) {
     score -= 0.15;
@@ -213,9 +256,8 @@ function calculateConfidence(output: DocumentOutput): number {
 /**
  * Calculate confidence score with forced low value (test-only)
  * Used for testing FR-011 review_required flag
- * @param _output - Extracted document output (unused)
  * @returns Low confidence score < 0.8
  */
-export function calculateLowConfidence(_output: DocumentOutput): number {
+export function calculateLowConfidence(): number {
   return 0.65; // Force low confidence for testing
 }

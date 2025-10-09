@@ -116,17 +116,19 @@ export async function GET(
       status: file.status,
     });
 
-  } catch (error: any) {
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Failed to fetch status';
+
     console.error('[STATUS ERROR] Unexpected error:', {
       fileId,
-      error: error.message,
-      stack: error.stack,
+      error: errorMessage,
+      stack: error instanceof Error ? error.stack : undefined,
     });
 
     return Response.json(
       {
         success: false,
-        error: error.message || 'Failed to fetch status',
+        error: errorMessage,
         code: 'PROCESSING_ERROR',
       },
       { status: 500 }

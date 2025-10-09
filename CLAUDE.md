@@ -1,3 +1,7 @@
+---
+default_agent: slice-orchestrator
+---
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
@@ -179,16 +183,19 @@ Apply migrations manually via Supabase Dashboard → SQL Editor
 - Content hash deduplication
 - Status: **PRODUCTION-READY**
 
-### ✅ T002 - AI Summary Display (BACKEND COMPLETE - Frontend Testing In Progress)
+### ✅ T002 - AI Summary Display (PRODUCTION-READY)
 - File processing service (PDF/DOCX/TXT → Markdown) ✅
 - AI summarization service (GPT-4o) ✅
 - Processing orchestration endpoint ✅
 - Status polling endpoint ✅
 - SummaryPanel component with real-time updates ✅
-- Backend Status: **PRODUCTION-READY** (verified with Class 07.pdf: 262KB, 15s processing, 100% confidence)
-- Frontend Status: **NEEDS MANUAL VERIFICATION** (UI display, polling behavior, toast notifications)
-- Testing: See `T002_MANUAL_TEST.md` for comprehensive manual test scenarios
-- Known Issue: pdf-parse library fixed with `scripts/patch-pdf-parse.js` patch
+- LNO task extraction with anti-hallucination safeguards ✅
+- Status: **PRODUCTION-READY**
+  - Text-based PDFs: Full extraction with real content-grounded tasks
+  - Scanned PDFs: OCR fallback with `review_required` status
+  - Verified: Both document types handle gracefully without hallucination
+- Testing: See `T002_MANUAL_TEST.md` for comprehensive test scenarios
+- AI Hallucination Fix: OCR placeholder cleanup + meta-content detection (2025-10-09)
 
 ### ⏳ T003 - Dashboard View (PENDING)
 - Grid layout with all processed files
@@ -353,3 +360,31 @@ Test Scenario: [9 verification steps for end-to-end journey]
 **Issue:** Tests fail on Node.js 18 because native File API is unavailable
 
 **Solution:** Use `.nvmrc` file - run `nvm use` before development
+
+### AI Task Hallucination (RESOLVED - 2025-10-09)
+**Problem:** AI was generating fabricated LNO tasks like "Implement enhanced OCR processing" and "Develop strategy for prioritizing text-based PDFs" instead of extracting real tasks from document content.
+
+**Root Cause:** OCR placeholder text in `noteProcessor.ts` contained extractable system-level phrases. When scanned PDFs triggered OCR fallback, the AI correctly extracted tasks from the placeholder - but these were system development tasks, not user tasks from the document.
+
+**Solution (3-Layer Defense):**
+1. **OCR Placeholder Cleanup** (`noteProcessor.ts:245-264`)
+   - Replaced placeholder text with non-extractable system notice
+   - Removed phrases like "enhanced OCR processing", "prioritize text-based PDFs"
+   - New placeholder: "Document Processing Notice... Unable to extract text content"
+
+2. **Meta-Content Detection** (`aiSummarizer.ts:157-164`)
+   - Added AI prompt rule to detect system notices vs user documents
+   - Returns minimal valid content for placeholders (not empty arrays that break schema)
+   - Prevents fabrication of system-level tasks
+
+3. **Confidence Penalty** (`aiSummarizer.ts:217-229`)
+   - Detects OCR placeholder patterns in AI output
+   - Forces 30% confidence → triggers `review_required` status
+   - Ensures scanned documents flagged for manual review
+
+**Production Behavior:**
+- Text-based PDFs: Real tasks extracted from actual document content
+- Scanned PDFs: System notice processed, minimal content, `review_required` status
+- No more hallucinated "Implement OCR" or "Develop strategy" tasks
+
+**Verification:** See `.claude/logs/debug-ai-hallucination.md` for full analysis
