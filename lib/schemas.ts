@@ -95,6 +95,7 @@ export const LogOperation = z.enum([
   'store',
   'retry',
   'error',
+  'cleanup',
 ]);
 
 export type LogOperationType = z.infer<typeof LogOperation>;
@@ -170,6 +171,20 @@ export const ErrorResponseSchema = z.object({
 });
 
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
+
+// Cleanup response schema (T006)
+export const CleanupResponseSchema = z.object({
+  success: z.literal(true),
+  deleted: z.object({
+    files: z.number().int().nonnegative(),
+    storage_mb: z.number().nonnegative(),
+  }),
+  errors: z.array(z.string()),
+  dryRun: z.boolean().optional(),
+  duration_ms: z.number().int().nonnegative().optional(),
+});
+
+export type CleanupResponse = z.infer<typeof CleanupResponseSchema>;
 
 // File validation helper
 export function validateFileUpload(file: File): { valid: boolean; error?: string; code?: ErrorCodeType } {
