@@ -161,8 +161,13 @@ export async function GET(
       );
     }
 
+    // Normalize processed_documents (Supabase may return array or object depending on query)
+    const processedDoc = Array.isArray(fileData.processed_documents)
+      ? fileData.processed_documents[0]
+      : fileData.processed_documents;
+
     // Check if document has been processed
-    if (!fileData.processed_documents || fileData.processed_documents.length === 0) {
+    if (!processedDoc) {
       return NextResponse.json(
         {
           success: false,
@@ -172,8 +177,6 @@ export async function GET(
         { status: 400 }
       );
     }
-
-    const processedDoc = fileData.processed_documents[0];
 
     // Validate structured output against schema
     const validationResult = DocumentOutputSchema.safeParse(processedDoc.structured_output);
