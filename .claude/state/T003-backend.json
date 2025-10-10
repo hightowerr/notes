@@ -1,0 +1,53 @@
+{
+  "agent": "backend-engineer",
+  "task_id": "T003-backend",
+  "status": "complete",
+  "test": "written",
+  "impl": "done",
+  "files": [
+    "app/api/documents/route.ts",
+    "__tests__/contract/documents.test.ts"
+  ],
+  "plan_doc": ".claude/docs/be-impl-T003.md",
+  "api_contract": {
+    "endpoint": "GET /api/documents",
+    "query_params": {
+      "status": "pending | processing | completed | failed | review_required | all (default: all)",
+      "sort": "date | name | confidence | size (default: date)",
+      "order": "asc | desc (default: desc)"
+    },
+    "response_success": {
+      "success": true,
+      "documents": [
+        {
+          "id": "string (uuid)",
+          "name": "string",
+          "size": "number (bytes)",
+          "mimeType": "string",
+          "uploadedAt": "string (ISO 8601)",
+          "status": "string",
+          "confidence": "number (0-1, optional - only if processed)",
+          "processingDuration": "number (ms, optional - only if processed)",
+          "summary": {
+            "topics": ["string"],
+            "decisions": ["string"],
+            "actions": ["string"],
+            "lno_tasks": {
+              "leverage": ["string"],
+              "neutral": ["string"],
+              "overhead": ["string"]
+            }
+          }
+        }
+      ]
+    },
+    "errors": {
+      "400": "Invalid query parameter (status/sort/order)",
+      "500": "Database query failed"
+    }
+  },
+  "database_changes": "None - uses existing tables (uploaded_files, processed_documents)",
+  "enables_user_action": "User can fetch all uploaded documents with filtering and sorting via API",
+  "frontend_ready": true,
+  "notes": "API endpoint ready for frontend dashboard. Tests written covering all filtering and sorting scenarios. No database migrations needed."
+}
