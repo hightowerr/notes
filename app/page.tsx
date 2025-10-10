@@ -25,6 +25,36 @@ interface UploadedFileInfo {
   processingDuration?: number;
 }
 
+// Client-side file validation (T004)
+const validateFileBeforeUpload = (file: File): { valid: boolean; error?: string } => {
+  const MAX_SIZE = 10 * 1024 * 1024; // 10MB
+  const ALLOWED_TYPES = [
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'text/plain',
+    'text/markdown',
+  ];
+
+  // Check file size
+  if (file.size > MAX_SIZE) {
+    const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+    return {
+      valid: false,
+      error: `File too large: ${file.name} (${sizeMB}MB). Maximum size: 10MB`,
+    };
+  }
+
+  // Check MIME type
+  if (!ALLOWED_TYPES.includes(file.type)) {
+    return {
+      valid: false,
+      error: `Unsupported file type: ${file.name}. Please use PDF, DOCX, or TXT files.`,
+    };
+  }
+
+  return { valid: true };
+};
+
 export default function Home() {
   const [files, setFiles] = useState<UploadedFileInfo[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -146,7 +176,32 @@ export default function Home() {
   };
 
   const handleFilesAdded = async (files: File[]) => {
+    let errorCount = 0; // Track validation errors for staggered display
+
     for (const file of files) {
+      // Client-side validation FIRST (T004)
+      const validation = validateFileBeforeUpload(file);
+      if (!validation.valid) {
+        // Stagger toast display for multiple errors (better UX)
+        const delay = errorCount * 100; // 100ms between toasts
+        setTimeout(() => {
+          toast.error(validation.error!);
+        }, delay);
+
+        errorCount++;
+
+        // Log to console immediately (no delay)
+        console.error('[CLIENT VALIDATION]', {
+          filename: file.name,
+          size: file.size,
+          type: file.type,
+          error: validation.error,
+          timestamp: new Date().toISOString(),
+        });
+
+        continue; // Skip this file, don't upload
+      }
+
       const tempId = `temp-${Date.now()}-${Math.random()}`;
 
       // Add file to UI immediately with 'uploading' status
@@ -376,7 +431,10 @@ export default function Home() {
                   {isDragging ? 'Drop files here' : 'Upload your documents'}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Drag & drop or click to browse • PDF, DOCX, TXT (max 10MB)
+                  Drag & drop or click to browse
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Accepts: PDF, DOCX, TXT, MD • Maximum: 10MB
                 </p>
               </div>
             </CardContent>

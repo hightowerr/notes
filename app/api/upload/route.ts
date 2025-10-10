@@ -41,9 +41,16 @@ export async function POST(request: Request) {
     // Validate file size and format
     const validation = validateFileUpload(file);
     if (!validation.valid) {
+      // Enhanced error message with filename
+      const enhancedError = validation.code === 'FILE_TOO_LARGE'
+        ? `File too large: ${file.name} (${(file.size / (1024 * 1024)).toFixed(1)}MB). Maximum size: 10MB`
+        : validation.code === 'UNSUPPORTED_FORMAT'
+        ? `Unsupported file type: ${file.name}. Please use PDF, DOCX, or TXT files.`
+        : validation.error!;
+
       const errorResponse: ErrorResponse = {
         success: false,
-        error: validation.error!,
+        error: enhancedError,
         code: validation.code!,
       };
 
@@ -52,12 +59,33 @@ export async function POST(request: Request) {
         filename: file.name,
         size: file.size,
         type: file.type,
-        error: validation.error,
+        error: enhancedError,
         code: validation.code,
         timestamp: new Date().toISOString(),
       });
 
-      return NextResponse.json(errorResponse, { status: 400 });
+      // Log rejected upload to processing_logs table (T004)
+      const duration = Date.now() - startTime;
+      await supabase
+        .from('processing_logs')
+        .insert({
+          file_id: null, // No file ID yet for rejected uploads
+          operation: 'upload',
+          status: 'failed',
+          duration,
+          error: enhancedError,
+          metadata: {
+            filename: file.name,
+            size: file.size,
+            mime_type: file.type,
+            rejection_reason: validation.code,
+          },
+          timestamp: new Date().toISOString(),
+        });
+
+      // Return appropriate HTTP status code (413 for size, 400 for format)
+      const statusCode = validation.code === 'FILE_TOO_LARGE' ? 413 : 400;
+      return NextResponse.json(errorResponse, { status: statusCode });
     }
 
     // Generate unique file ID

@@ -42,7 +42,7 @@ describe('POST /api/upload - Contract Tests', () => {
       expect(data.code).toBe('INVALID_FILE');
     });
 
-    it('should reject file larger than 10MB', async () => {
+    it('should reject file larger than 10MB with HTTP 413', async () => {
       const largeBuffer = Buffer.alloc(11 * 1024 * 1024); // 11MB
       const file = new File([largeBuffer], 'large-file.pdf', { type: 'application/pdf' });
 
@@ -57,9 +57,10 @@ describe('POST /api/upload - Contract Tests', () => {
       const response = await POST(request);
       const data = await response.json();
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(413); // T004: Changed from 400 to 413
       expect(data.success).toBe(false);
       expect(data.error).toContain('10MB');
+      expect(data.error).toContain('large-file.pdf'); // T004: Should include filename
       expect(data.code).toBe('FILE_TOO_LARGE');
     });
 
@@ -81,7 +82,8 @@ describe('POST /api/upload - Contract Tests', () => {
 
       expect(response.status).toBe(400);
       expect(data.success).toBe(false);
-      expect(data.error).toContain('format');
+      expect(data.error).toContain('Unsupported file type'); // T004: Enhanced error message
+      expect(data.error).toContain('presentation.pptx'); // T004: Should include filename
       expect(data.code).toBe('UNSUPPORTED_FORMAT');
     });
 
