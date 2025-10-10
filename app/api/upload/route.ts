@@ -19,6 +19,7 @@ import {
   type ErrorResponse,
 } from '@/lib/schemas';
 import { randomUUID } from 'crypto';
+import { processingQueue } from '@/lib/services/processingQueue';
 
 export async function POST(request: Request) {
   const startTime = Date.now();
@@ -151,6 +152,12 @@ export async function POST(request: Request) {
       return NextResponse.json(errorResponse, { status: 500 });
     }
 
+    // Check queue status and enqueue job (T005: Concurrent upload management)
+    const queueResult = processingQueue.enqueue(fileId, file.name);
+
+    // Determine initial status based on queue result
+    const initialStatus = queueResult.immediate ? 'processing' : 'pending';
+
     // Insert file metadata into uploaded_files table
     const { error: dbError } = await supabase
       .from('uploaded_files')
@@ -162,7 +169,8 @@ export async function POST(request: Request) {
         content_hash: contentHash,
         uploaded_at: new Date().toISOString(),
         storage_path: storagePath,
-        status: 'processing', // FR-001: Automatic processing starts immediately
+        status: initialStatus,
+        queue_position: queueResult.queuePosition, // T005: Track queue position
       });
 
     if (dbError) {
@@ -238,23 +246,27 @@ export async function POST(request: Request) {
         timestamp: new Date().toISOString(),
       });
 
-    // Trigger automatic processing (FR-001: Automatic detection on upload)
-    const processUrl = new URL('/api/process', request.url);
-    fetch(processUrl.toString(), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fileId }),
-    }).catch(error => {
-      console.error('[UPLOAD] Failed to trigger processing:', error);
-    });
+    // Trigger automatic processing only if not queued (FR-001 + T005)
+    if (queueResult.immediate) {
+      const processUrl = new URL('/api/process', request.url);
+      fetch(processUrl.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId }),
+      }).catch(error => {
+        console.error('[UPLOAD] Failed to trigger processing:', error);
+      });
+    }
 
-    // Return success response
+    // Return success response (T005: Include queue position)
     const successResponse: UploadSuccessResponse = {
       success: true,
       fileId,
-      status: 'processing',
-      message: `File uploaded successfully. Processing started.`,
-      queuePosition: null, // Will be implemented in T005 (concurrent uploads)
+      status: initialStatus,
+      message: queueResult.immediate
+        ? `File uploaded successfully. Processing started.`
+        : `File uploaded successfully. Queued at position ${queueResult.queuePosition}.`,
+      queuePosition: queueResult.queuePosition,
     };
 
     return NextResponse.json(successResponse, { status: 201 });

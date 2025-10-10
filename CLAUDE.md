@@ -89,10 +89,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Retry logic for invalid JSON (adjusts temperature/tokens)
 - Confidence scoring: <80% flags as "review required"
 
+**`lib/services/processingQueue.ts`** - Concurrent upload management (T005)
+- Enforces max 3 parallel processing jobs
+- FIFO queue for additional uploads
+- In-memory state (P0 acceptable, resets on server restart)
+- Automatic queue progression on job completion
+- Singleton pattern for shared state across API routes
+
 ### Database Schema (Supabase)
 
 **Tables:**
-- `uploaded_files` - File metadata, status tracking
+- `uploaded_files` - File metadata, status tracking, queue_position (T005)
 - `processed_documents` - AI outputs, Markdown content, 30-day auto-expiry
 - `processing_logs` - Metrics, errors, retry attempts
 
@@ -102,8 +109,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### API Endpoints
 
-- `POST /api/upload` - File upload with validation (client + server), deduplication, automatic processing trigger
-  - Returns: 200 (success), 400 (invalid format), 413 (too large), 409 (duplicate)
+- `POST /api/upload` - File upload with validation (client + server), deduplication, automatic processing trigger, queue management (T005)
+  - Returns: 201 (success), 400 (invalid format), 413 (too large), 409 (duplicate)
+  - Response includes: `status` ('processing' | 'pending'), `queuePosition` (null if immediate, number if queued)
 - `POST /api/process` - Orchestrates conversion → summarization → storage pipeline
 - `GET /api/status/[fileId]` - Real-time status polling for frontend (used by upload page)
 - `GET /api/documents` - Retrieve all documents with filtering and sorting (used by dashboard)
@@ -113,7 +121,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Frontend Architecture
 
 **Main Components:**
-- `app/page.tsx` - Upload UI with drag-and-drop, client-side validation, status polling (2s interval), SummaryPanel integration
+- `app/page.tsx` - Upload UI with drag-and-drop, multi-file support, client-side validation, status polling (2s interval), SummaryPanel integration, Queue Status Summary (T005)
 - `app/dashboard/page.tsx` - Dashboard with grid layout, filtering, sorting, card expand/collapse
 - `app/components/SummaryPanel.tsx` - Displays topics, decisions, actions, LNO tasks in 3 columns
 
@@ -143,8 +151,11 @@ OPENAI_API_KEY=sk-proj-...
 **Database Migrations:**
 - `supabase/migrations/001_create_initial_tables.sql` - uploaded_files, processing_logs
 - `supabase/migrations/002_create_processing_tables.sql` - processed_documents, 30-day expiry trigger
+- `supabase/migrations/003_add_queue_position.sql` - queue_position column for concurrent uploads (T005)
 
 Apply migrations manually via Supabase Dashboard → SQL Editor
+
+**⚠️ IMPORTANT:** After applying migration 003, restart the dev server for queue management to work correctly.
 
 ## Design Principles (SYSTEM_RULES.md)
 
@@ -219,6 +230,17 @@ Apply migrations manually via Supabase Dashboard → SQL Editor
 - Staggered toast display for multiple errors (100ms delay) ✅
 - Status: **PRODUCTION-READY**
 - Testing: See `T004_MANUAL_TEST.md` (8/8 scenarios passing)
+
+### ✅ T005 - Concurrent Upload Queue (COMPLETE)
+- Processing queue service (max 3 parallel jobs) ✅
+- FIFO queue management with automatic progression ✅
+- Queue status display with position numbers ✅
+- Queue Status Summary (Processing/Queued/Complete counts) ✅
+- Toast notifications differentiate queued vs immediate processing ✅
+- Status: **PRODUCTION-READY**
+- Backend Tests: 18/18 passing
+- Testing: See `.claude/testing/T005-manual-test.md` (7 scenarios)
+- **Note:** Requires migration 003 (queue_position column) applied to database
 
 ## Data Structure (AI Output)
 

@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Upload, FileText, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
+import { Upload, FileText, AlertCircle, Loader2, CheckCircle2, Clock } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
 import SummaryPanel from '@/app/components/SummaryPanel';
 import { toast, Toaster } from 'sonner';
@@ -19,6 +19,7 @@ interface UploadedFileInfo {
   size: number;
   uploadedAt: number;
   status: FileUploadStatus;
+  queuePosition?: number;
   error?: string;
   summary?: DocumentOutput;
   confidence?: number;
@@ -228,18 +229,27 @@ export default function Home() {
         const result = await response.json();
 
         if (response.ok && result.success) {
-          // Update file status to processing
+          // Update file status to processing or pending (queued)
           setFiles((prev) =>
             prev.map((f) =>
               f.id === tempId
-                ? { ...f, id: result.fileId, status: 'processing' }
+                ? {
+                    ...f,
+                    id: result.fileId,
+                    status: result.status, // 'processing' or 'pending'
+                    queuePosition: result.queuePosition ?? undefined,
+                  }
                 : f
             )
           );
 
-          // Show success toast
+          // Show appropriate toast based on queue status
           const sizeInMB = (file.size / (1024 * 1024)).toFixed(1);
-          toast.success(`${file.name} (${sizeInMB}MB) uploaded - Processing...`);
+          if (result.queuePosition !== null && result.queuePosition !== undefined) {
+            toast.info(`${file.name} (${sizeInMB}MB) uploaded - Queued at position ${result.queuePosition}`);
+          } else {
+            toast.success(`${file.name} (${sizeInMB}MB) uploaded - Processing...`);
+          }
 
           // Start status polling
           startPolling(result.fileId, file.name);
@@ -315,13 +325,22 @@ export default function Home() {
     });
   };
 
-  const getStatusBadge = (status: FileUploadStatus) => {
+  const getStatusBadge = (status: FileUploadStatus, queuePosition?: number) => {
     switch (status) {
       case 'uploading':
         return (
           <Badge variant="secondary" className="flex items-center gap-1.5 px-3 py-1.5 bg-info/10 text-info border-info/30">
             <Loader2 className="h-3.5 w-3.5 animate-spin" aria-label="Uploading" />
             <span className="font-medium">Uploading</span>
+          </Badge>
+        );
+      case 'pending':
+        return (
+          <Badge variant="secondary" className="flex items-center gap-1.5 px-3 py-1.5 bg-accent/50 text-accent-foreground border-accent/30">
+            <Clock className="h-3.5 w-3.5" aria-label="Queued" />
+            <span className="font-medium">
+              {queuePosition ? `Queued - Position ${queuePosition}` : 'Queued'}
+            </span>
           </Badge>
         );
       case 'processing':
@@ -461,6 +480,21 @@ export default function Home() {
               animate={{ opacity: 1 }}
               transition={{ duration: 0.3 }}
             >
+              {/* Queue Status Summary */}
+              {files.length > 0 && (
+                <div className="flex gap-2 flex-wrap">
+                  <Badge variant="outline" className="px-3 py-1.5">
+                    Processing: {files.filter(f => f.status === 'processing').length}
+                  </Badge>
+                  <Badge variant="secondary" className="px-3 py-1.5">
+                    Queued: {files.filter(f => f.status === 'pending').length}
+                  </Badge>
+                  <Badge variant="outline" className="px-3 py-1.5">
+                    Complete: {files.filter(f => f.status === 'completed' || f.status === 'review_required').length}
+                  </Badge>
+                </div>
+              )}
+
               <AnimatePresence>
                 {files.map((file, index) => (
                   <motion.div
@@ -498,7 +532,7 @@ export default function Home() {
                             )}
                           </div>
                         </div>
-                        {getStatusBadge(file.status)}
+                        {getStatusBadge(file.status, file.queuePosition)}
                       </CardContent>
                     </Card>
 

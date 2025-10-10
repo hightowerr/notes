@@ -17,6 +17,7 @@ import { createClient } from '@supabase/supabase-js';
 import { convertToMarkdown } from '@/lib/services/noteProcessor';
 import { extractStructuredData, calculateLowConfidence } from '@/lib/services/aiSummarizer';
 import type { LogOperationType, LogStatusType } from '@/lib/schemas';
+import { processingQueue } from '@/lib/services/processingQueue';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
@@ -220,7 +221,22 @@ export async function POST(request: NextRequest) {
       actionsCount: aiResult.output.actions.length,
     });
 
-    // 11. Return success response
+    // 11. Mark job as complete and process next queued job (T005)
+    const nextFileId = await processingQueue.complete(fileId);
+    if (nextFileId) {
+      // Trigger processing for next queued file
+      console.log('[PROCESS] Triggering processing for next queued file:', nextFileId);
+      const processUrl = new URL('/api/process', request.url);
+      fetch(processUrl.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileId: nextFileId }),
+      }).catch(error => {
+        console.error('[PROCESS] Failed to trigger processing for next queued file:', error);
+      });
+    }
+
+    // 12. Return success response
     return Response.json({
       success: true,
       documentId: docId,
@@ -257,6 +273,22 @@ export async function POST(request: NextRequest) {
       error: errorMessage,
       stack: error instanceof Error ? error.stack : undefined,
     });
+
+    // Mark job as complete (even on failure) and process next queued job (T005)
+    if (fileId) {
+      const nextFileId = await processingQueue.complete(fileId);
+      if (nextFileId) {
+        console.log('[PROCESS] Triggering processing for next queued file after failure:', nextFileId);
+        const processUrl = new URL('/api/process', request.url);
+        fetch(processUrl.toString(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileId: nextFileId }),
+        }).catch(error => {
+          console.error('[PROCESS] Failed to trigger processing for next queued file:', error);
+        });
+      }
+    }
 
     return Response.json(
       {

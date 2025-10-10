@@ -1,0 +1,32 @@
+{
+  "agent": "backend-engineer",
+  "task_id": "t005-backend",
+  "status": "complete",
+  "test": "written",
+  "impl": "done",
+  "files": [
+    "lib/services/processingQueue.ts",
+    "lib/services/__tests__/processingQueue.test.ts",
+    "app/api/upload/route.ts",
+    "app/api/process/route.ts",
+    "supabase/migrations/003_add_queue_position.sql"
+  ],
+  "plan_doc": ".claude/docs/backend-engineer-t005.md",
+  "enables_user_action": "Backend enforces max 3 concurrent processing jobs and queues additional uploads in FIFO order",
+  "api_contract": {
+    "upload_response": {
+      "queuePosition": "number | null (null if immediate, position if queued)",
+      "status": "'processing' | 'pending'",
+      "message": "Descriptive message with queue position"
+    },
+    "queue_service": {
+      "enqueue": "Returns immediate: boolean, queuePosition: number | null",
+      "complete": "Marks job complete and triggers next queued job",
+      "getStatus": "Returns activeCount, queuedCount, queuedJobs[]"
+    }
+  },
+  "database_changes": "Added queue_position column to uploaded_files table (migration 003)",
+  "frontend_ready": true,
+  "test_results": "18/18 tests passing",
+  "notes": "Queue service uses in-memory state (acceptable for P0). Database queue_position is for observability only. Process endpoint automatically triggers next queued job on completion or failure."
+}
