@@ -92,6 +92,11 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, sortField, sortOrder]);
 
+  // Clear selection when filters change (prevents selecting documents that are no longer visible)
+  useEffect(() => {
+    setSelectedDocuments(new Set());
+  }, [statusFilter, sortField, sortOrder]);
+
   // Toggle card expansion
   const toggleExpand = (id: string) => {
     const newExpanded = new Set(expandedCards);
@@ -185,6 +190,19 @@ export default function DashboardPage() {
           const doc = documents.find(d => d.id === docId);
           if (!doc) continue;
 
+          // Validate document is ready for export
+          if (doc.status !== 'completed' && doc.status !== 'review_required') {
+            console.warn(`[Dashboard] Skipping ${doc.name}: status=${doc.status}`);
+            failCount++;
+            continue;
+          }
+
+          if (!doc.summary) {
+            console.warn(`[Dashboard] Skipping ${doc.name}: no summary available`);
+            failCount++;
+            continue;
+          }
+
           const response = await fetch(`/api/export/${docId}?format=${format}`);
 
           if (!response.ok) {
@@ -219,7 +237,12 @@ export default function DashboardPage() {
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
 
-      toast.success(`${successCount} document${successCount !== 1 ? 's' : ''} exported successfully${failCount > 0 ? ` (${failCount} failed)` : ''}`);
+      // Show appropriate success message based on results
+      if (failCount > 0) {
+        toast.success(`${successCount} document${successCount !== 1 ? 's' : ''} exported successfully (${failCount} skipped - not ready for export)`);
+      } else {
+        toast.success(`${successCount} document${successCount !== 1 ? 's' : ''} exported successfully`);
+      }
 
       // Clear selection after successful export
       deselectAll();
