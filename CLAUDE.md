@@ -102,15 +102,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### API Endpoints
 
-- `POST /api/upload` - File upload with validation, deduplication, automatic processing trigger
+- `POST /api/upload` - File upload with validation (client + server), deduplication, automatic processing trigger
+  - Returns: 200 (success), 400 (invalid format), 413 (too large), 409 (duplicate)
 - `POST /api/process` - Orchestrates conversion → summarization → storage pipeline
-- `GET /api/status/[fileId]` - Real-time status polling for frontend
+- `GET /api/status/[fileId]` - Real-time status polling for frontend (used by upload page)
+- `GET /api/documents` - Retrieve all documents with filtering and sorting (used by dashboard)
+  - Query params: `status`, `sort`, `order`
 - `GET /api/test-supabase` - Connection health check (dev only)
 
 ### Frontend Architecture
 
 **Main Components:**
-- `app/page.tsx` - Upload UI with status polling (2s interval), SummaryPanel integration
+- `app/page.tsx` - Upload UI with drag-and-drop, client-side validation, status polling (2s interval), SummaryPanel integration
+- `app/dashboard/page.tsx` - Dashboard with grid layout, filtering, sorting, card expand/collapse
 - `app/components/SummaryPanel.tsx` - Displays topics, decisions, actions, LNO tasks in 3 columns
 
 **shadcn/ui Components:**
@@ -197,10 +201,24 @@ Apply migrations manually via Supabase Dashboard → SQL Editor
 - Testing: See `T002_MANUAL_TEST.md` for comprehensive test scenarios
 - AI Hallucination Fix: OCR placeholder cleanup + meta-content detection (2025-10-09)
 
-### ⏳ T003 - Dashboard View (PENDING)
-- Grid layout with all processed files
-- Filtering and sorting
-- Quick preview and expansion
+### ✅ T003 - Dashboard View (COMPLETE)
+- Grid layout with all processed files ✅
+- Filtering by status (All/Completed/Processing/Review Required/Failed) ✅
+- Sorting by date/name/confidence/size ✅
+- Card expand/collapse for full summary ✅
+- Responsive design (1/2/3 column layout) ✅
+- Status: **PRODUCTION-READY**
+- Testing: See `.claude/testing/T003-manual-test.md`
+
+### ✅ T004 - Error Validation (COMPLETE)
+- Client-side pre-upload validation (instant feedback) ✅
+- Server-side validation (defense in depth) ✅
+- Enhanced error messages with filename and size ✅
+- HTTP 413 for oversized files, 400 for invalid formats ✅
+- Database logging of all rejections to `processing_logs` ✅
+- Staggered toast display for multiple errors (100ms delay) ✅
+- Status: **PRODUCTION-READY**
+- Testing: See `T004_MANUAL_TEST.md` (8/8 scenarios passing)
 
 ## Data Structure (AI Output)
 
@@ -251,9 +269,10 @@ __tests__/
 
 | Case | Behavior |
 |------|----------|
-| Unsupported file format | Return 400 with descriptive error |
-| File >10MB | Return 400 "FILE_TOO_LARGE" |
-| Duplicate file (same hash) | Return 409 "DUPLICATE_FILE" |
+| Unsupported file format | Client: Instant toast rejection. Server: 400 with descriptive error |
+| File >10MB | Client: Instant toast rejection. Server: 413 "FILE_TOO_LARGE" |
+| Duplicate file (same hash) | Server: 409 "DUPLICATE_FILE" |
+| Multiple invalid files | Client: Staggered toasts (100ms delay between each) |
 | Unreadable PDF | OCR fallback (placeholder), mark for review |
 | Invalid AI JSON | Retry once with adjusted parameters |
 | Confidence <80% | Mark as "review_required" status |

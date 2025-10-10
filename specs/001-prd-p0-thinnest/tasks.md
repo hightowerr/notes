@@ -213,7 +213,9 @@
 
 ## Phase 2: Edge Case Handling (Robustness)
 
-### T004 [P] [SLICE] User receives clear error when uploading invalid or oversized file
+### ✅ T004 [P] [SLICE] User receives clear error when uploading invalid or oversized file
+**Status**: ✅ COMPLETE (2025-10-10)
+**Test Status**: 8/8 manual scenarios passing | Scenario 3 fix applied (staggered toasts)
 **User Story**: As a user, when I try to upload an unsupported file type or a file >10MB, I receive immediate feedback explaining why the upload failed and what formats/sizes are accepted
 
 **Implementation Scope**:

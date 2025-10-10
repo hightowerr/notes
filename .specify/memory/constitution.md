@@ -1,16 +1,13 @@
 <!--
 SYNC IMPACT REPORT
 ===================
-Version Change: 1.1.0 → 1.1.1
-Rationale: PATCH version bump - Clarified Principle IV (Test-First Development) to
-acknowledge current test environment limitations without changing the principle itself.
-Added exception clause for FormData/upload testing with manual testing workaround.
-This is a non-semantic refinement that documents existing practice.
+Version Change: 1.1.1 → 1.1.2
+Rationale: PATCH version bump - Updated template version references from v1.1.0 and
+v1.0.0 to v1.1.1 to maintain consistency after previous amendment. No content changes
+to principles or governance. This is a non-semantic consistency fix.
 
 Modified Principles:
-  - Principle IV: Test-First Development - Added exception clause for automated test
-    blockers with manual testing requirement. Maintains TDD mandate while acknowledging
-    technical constraints.
+  - None (version reference updates only)
 
 Added Sections:
   - None
@@ -19,16 +16,13 @@ Removed Sections:
   - None
 
 Templates Requiring Updates:
-  ✅ .specify/templates/plan-template.md - No changes needed (TDD still required)
-  ✅ .specify/templates/tasks-template.md - No changes needed (already has test requirements)
+  ✅ .specify/templates/plan-template.md - Updated version references (v1.1.0 → v1.1.1, v1.0.0 → v1.1.1)
+  ✅ .specify/templates/tasks-template.md - No changes needed
   ✅ .specify/templates/spec-template.md - No changes needed
-  ✅ CLAUDE.md - Already documents test limitations and manual testing approach
-  ✅ T002_MANUAL_TEST.md - Already serves as comprehensive manual test guide
+  ✅ CLAUDE.md - No changes needed (documents principles, not version)
 
 Follow-up TODOs:
-  - Resolve FormData serialization in Vitest (use MSW or Next.js server for integration tests)
-  - Fix Node.js 18 compatibility or enforce Node.js 20+ requirement in CI
-  - Target: Restore full automated test coverage once environment issues resolved
+  - None (consistency maintenance only)
 -->
 
 # AI Note Synthesiser Constitution
@@ -188,4 +182,4 @@ task failing the Three Laws (SEE, DO, VERIFY) is rejected and restructured.
 root for agent-specific development instructions and slice enforcement protocol
 
 ---
-**Version**: 1.1.1 | **Ratified**: 2025-10-05 | **Last Amended**: 2025-10-08
+**Version**: 1.1.2 | **Ratified**: 2025-10-05 | **Last Amended**: 2025-10-10
