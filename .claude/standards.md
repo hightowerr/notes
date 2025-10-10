@@ -45,6 +45,22 @@
 - **pdf-parse**: PDF text extraction (requires postinstall patch)
 - **Unified**: Document parsing (PDF/DOCX/TXT → Markdown)
 
+### Production Services
+
+- **Processing Queue** (`lib/services/processingQueue.ts`):
+  - Max 3 concurrent uploads processing in parallel
+  - FIFO queue for additional uploads
+  - In-memory state (singleton pattern)
+  - Automatic progression when jobs complete
+  - Database tracking via `uploaded_files.queue_position` column
+
+- **Automatic Cleanup** (`lib/jobs/cleanupExpiredFiles.ts`):
+  - Triggered by Vercel Cron (daily 2 AM UTC) or manual POST /api/cleanup
+  - Deletes expired documents (30-day retention via `expires_at` column)
+  - CASCADE deletion: uploaded_files → processed_documents → storage files
+  - Dry-run mode available (?dryRun=true query param)
+  - Structured logging with cleanup metrics
+
 ## Project Structure
 
 ```
@@ -83,10 +99,13 @@ project-root/
 │   ├── testing/                 # Manual test procedures
 │   └── context/                 # Feature context packages
 │
-├── .specify/specs/               # Feature specifications
-│   └── <feature>/
-│       ├── spec.md              # Feature requirements
-│       └── tasks.md             # Implementation tasks
+├── .specify/
+│   ├── specs/                   # Feature specifications
+│   │   └── <feature>/
+│   │       ├── spec.md          # Feature requirements
+│   │       └── tasks.md         # Implementation tasks
+│   └── memory/                  # Project memory
+│       └── constitution.md      # Core architectural principles
 │
 ├── public/                       # Static assets
 ├── supabase/                     # Supabase migrations and config
@@ -180,34 +199,38 @@ Every implementation must:
 
 ## State File Format
 
-Every agent writes `.claude/state/<task-id>.json` upon completion:
+Every agent writes `.claude/state/<task-id>.json` upon completion.
+
+### Required Fields (All Agents)
 
 ```json
 {
   "agent": "agent-name",
   "task_id": "unique-task-identifier",
   "status": "complete|blocked|in-progress",
-  "test": "written|skipped|failed",
-  "impl": "done|partial|blocked",
   "files": [
     "path/to/modified/file1.ts",
     "path/to/modified/file2.tsx"
   ],
-  "plan_doc": ".claude/docs/<agent>-<task>.md",
-  "enables_user_action": "User can now [specific action that user performs]",
-  "notes": "Optional context, blockers, or special considerations"
+  "enables_user_action": "User can now [specific action that user performs]"
 }
 ```
 
-### Required Fields
-
+**Field definitions:**
 - **agent**: Which agent created this state
 - **task_id**: Unique identifier for task
-- **status**: Current task status
+- **status**: Current task status (complete | blocked | in-progress)
 - **files**: All files modified (relative paths from project root)
-- **enables_user_action**: What user can now do (be specific)
+- **enables_user_action**: Specific action user can now perform (be concrete)
 
-### Optional Fields (Agent-Specific)
+### Optional Fields (All Agents)
+
+- **test**: Test status (written | skipped | failed)
+- **impl**: Implementation status (done | partial | blocked)
+- **plan_doc**: Path to implementation plan (`.claude/docs/<agent>-<task>.md`)
+- **notes**: Context, blockers, or special considerations
+
+### Agent-Specific Extensions
 
 **frontend-ui-builder adds:**
 ```json
@@ -529,7 +552,7 @@ return { error: 'Email validation failed' };
 
 ### Retry Logic
 
-For external API calls (e.g., AI SDK):
+**Generic retry pattern** for external API calls:
 
 ```typescript
 const MAX_RETRIES = 3;
@@ -544,7 +567,7 @@ async function callWithRetry<T>(
   } catch (error) {
     if (retries > 0) {
       console.warn(`Retrying... (${MAX_RETRIES - retries + 1}/${MAX_RETRIES})`);
-      await new Promise(resolve => 
+      await new Promise(resolve =>
         setTimeout(resolve, BACKOFF_MS * (MAX_RETRIES - retries + 1))
       );
       return callWithRetry(operation, retries - 1);
@@ -553,6 +576,42 @@ async function callWithRetry<T>(
   }
 }
 ```
+
+**Project-specific AI SDK retry pattern** (from `lib/services/aiSummarizer.ts`):
+
+```typescript
+// AI SDK uses streamObject with Zod schema validation
+async function extractWithRetry(
+  content: string,
+  retries = 1
+): Promise<ExtractedData> {
+  try {
+    const { object } = await streamObject({
+      model: openai('gpt-4o'),
+      schema: summarySchema,
+      prompt: content,
+      temperature: 0.2,
+      maxTokens: 1500
+    });
+    return await object;
+  } catch (error) {
+    // Retry ONLY for invalid JSON responses
+    if (retries > 0 && error.message?.includes('Invalid JSON')) {
+      console.warn(`Retrying with adjusted parameters (attempt ${2 - retries}/2)`);
+      return extractWithRetry(content, retries - 1, {
+        temperature: 0.3,  // Slightly higher for more flexibility
+        maxTokens: 2000    // More tokens for complex schemas
+      });
+    }
+    throw error;
+  }
+}
+```
+
+**Key differences:**
+- AI SDK retries only for JSON parsing failures (not rate limits)
+- Adjusts `temperature` and `maxTokens` on retry (not just backoff)
+- Uses Vercel AI SDK's `streamObject` with Zod schemas
 
 ### HTTP Status Codes
 
@@ -615,9 +674,7 @@ describe('ComponentName or FunctionName', () => {
 
 ### Manual Testing
 
-When automated testing blocked (e.g., FormData limitation):
-
-Create `.claude/testing/<task>-manual.md`:
+When automated testing blocked, create `.claude/testing/<task>-manual.md`:
 
 ```markdown
 # Manual Test: [Task Name]
@@ -644,79 +701,105 @@ Create `.claude/testing/<task>-manual.md`:
 - [Edge case 2]
 
 ## Results
-**Tested by**: [Name]  
-**Date**: [Date]  
-**Status**: PASS | FAIL  
+**Tested by**: [Name]
+**Date**: [Date]
+**Status**: PASS | FAIL
 **Notes**: [Any observations]
 ```
 
 Reference manual test pattern: `T002_MANUAL_TEST.md`
+
+### Known Testing Limitations
+
+**FormData serialization failure (Vitest + Next.js)**
+
+**Issue:** File properties (name, type, size) become `undefined` when passed through `Next.js Request.formData()` in test environment.
+
+**Root cause:**
+- Incompatibility between undici's FormData and Next.js API route handlers in Vitest
+- File objects serialize to strings during `Request.formData()` call
+- Constructor shows 'String' instead of 'File' in test environment
+
+**Affected areas:**
+- File upload tests (`POST /api/upload`)
+- FormData parsing in API routes
+- Multipart form handling
+
+**Workaround:**
+- Use manual testing approach (see `T002_MANUAL_TEST.md` pattern)
+- Automated tests still cover: component logic, schemas, database operations, processing services
+- API contract tests exist but require manual execution via browser/Postman
+
+**Future fixes:**
+- Use MSW (Mock Service Worker) to intercept before Next.js serialization
+- Run actual Next.js server for integration tests
+- Wait for Vitest/Next.js FormData support improvements
 
 ## Communication Standards
 
 ### Progress Updates Format
 
 ```
-🔄 Task: [task-name]
-📍 Phase: [Context/Implementation/Review/Testing/Debug]
-🤖 Agent: [agent-name]
-📊 Status: [brief status update]
+Task: [task-name]
+Phase: [Context/Implementation/Review/Testing/Debug]
+Agent: [agent-name]
+Status: [brief status update]
 ```
 
 **Example:**
 ```
-🔄 Task: add-tag-filtering
-📍 Phase: Implementation
-🤖 Agent: frontend-ui-builder
-📊 Status: Installing ShadCN Select component
+Task: add-tag-filtering
+Phase: Implementation
+Agent: frontend-ui-builder
+Status: Installing ShadCN Select component
 ```
 
 ### Completion Reports Format
 
 ```
-✅ Task Complete: [task-name]
-👤 User Can Now: [specific action enabled]
-📁 Files Modified: [count] files
-🧪 Tests: [X passed / Y total]
-📝 Notes: [any important context]
-🔜 Next: [next task or "Feature complete"]
+Task Complete: [task-name]
+User Can Now: [specific action enabled]
+Files Modified: [count] files
+Tests: [X passed / Y total]
+Notes: [any important context]
+Next: [next task or "Feature complete"]
 ```
 
 **Example:**
 ```
-✅ Task Complete: add-tag-filtering
-👤 User Can Now: Filter notes by tags using dropdown menu
-📁 Files Modified: 3 files
-🧪 Tests: 8 passed / 8 total
-📝 Notes: Uses ShadCN Select component, mobile-responsive
-🔜 Next: add-tag-bulk-operations
+Task Complete: add-tag-filtering
+User Can Now: Filter notes by tags using dropdown menu
+Files Modified: 3 files
+Tests: 8 passed / 8 total
+Notes: Uses ShadCN Select component, mobile-responsive
+Next: add-tag-bulk-operations
 ```
 
 ### Escalation Triggers
 
 When to stop and ask orchestrator/user:
 
-🚨 **Ambiguous requirements**
+**Ambiguous requirements**
 - Task description unclear
 - Acceptance criteria conflict
 - Multiple valid interpretations
 
-🚨 **Missing dependencies**
+**Missing dependencies**
 - Required library not installed
 - Environment variables not set
 - Database tables don't exist
 
-🚨 **Repeated failures**
+**Repeated failures**
 - Same test failing after 3+ fix attempts
 - Root cause can't be identified
 - Circular dependency issues
 
-🚨 **Scope violations**
+**Scope violations**
 - Task requires files outside `files_in_scope`
 - Breaking changes to existing APIs
 - Architecture deviation needed
 
-🚨 **Technical blockers**
+**Technical blockers**
 - MCP tools not working
 - Test environment broken
 - Build failing for unknown reason
@@ -784,6 +867,40 @@ nvm use 20
 - **Token limits**: Monitor token usage for large documents
 - **Low confidence**: Flag summaries for manual review if confidence < threshold
 
+### AI Task Hallucination (RESOLVED - 2025-10-09)
+
+**Problem:** AI generated fabricated tasks from OCR placeholder text instead of extracting real tasks from document content.
+
+**Example hallucinations:**
+- "Implement enhanced OCR processing"
+- "Develop strategy for prioritizing text-based PDFs"
+
+**Root cause:** OCR placeholder text in `noteProcessor.ts` contained extractable system-level phrases. When scanned PDFs triggered OCR fallback, AI correctly extracted tasks from placeholder - but these were system development tasks, not user tasks.
+
+**Solution (3-layer defense):**
+
+1. **OCR Placeholder Cleanup** (`noteProcessor.ts:245-264`)
+   - Replaced placeholder with non-extractable system notice
+   - Removed phrases like "enhanced OCR processing", "prioritize text-based PDFs"
+   - New placeholder: "Document Processing Notice... Unable to extract text content"
+
+2. **Meta-Content Detection** (`aiSummarizer.ts:157-164`)
+   - Added AI prompt rule to detect system notices vs user documents
+   - Returns minimal valid content for placeholders (not empty arrays that break schema)
+   - Prevents fabrication of system-level tasks
+
+3. **Confidence Penalty** (`aiSummarizer.ts:217-229`)
+   - Detects OCR placeholder patterns in AI output
+   - Forces 30% confidence → triggers `review_required` status
+   - Ensures scanned documents flagged for manual review
+
+**Production behavior:**
+- Text-based PDFs: Real tasks extracted from actual document content
+- Scanned PDFs: System notice processed, minimal content, `review_required` status
+- No more hallucinated "Implement OCR" or "Develop strategy" tasks
+
+**Verification:** See `.claude/logs/debug-ai-hallucination.md` for full analysis
+
 ## Quick Reference
 
 ### State File Locations
@@ -800,32 +917,24 @@ nvm use 20
 ### Common Commands
 
 ```bash
-# Install ShadCN component
-npx shadcn-ui@latest add <component>
+# Development
+npm run dev              # Start dev server (http://localhost:3000)
+npm run build            # Build for production
+npm run start            # Start production server
+npm run lint             # Run ESLint
+nvm use                  # Switch to Node 20+ (from .nvmrc)
 
-# Run all tests
-npm test
+# Testing
+npm run test             # Run tests in watch mode
+npm run test:ui          # Run tests with Vitest UI
+npm run test:run         # Run tests once (CI mode)
+npm run test:run -- <file>  # Run specific test file
 
-# Run specific test file
-npm test -- path/to/test.test.ts
+# Type checking
+npm run type-check       # Run TypeScript compiler
 
-# Run tests in watch mode
-npm test -- --watch
-
-# Type check
-npm run type-check
-
-# Build project
-npm run build
-
-# Run development server
-npm run dev
-
-# Format code (if configured)
-npm run format
-
-# Lint code
-npm run lint
+# ShadCN components
+npx shadcn-ui@latest add <component>  # Install component via CLI
 ```
 
 ### Environment Variables

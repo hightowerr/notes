@@ -551,6 +551,7 @@ export default function Home() {
                               confidence={file.confidence || 0}
                               filename={file.name}
                               processingDuration={file.processingDuration || 0}
+                              fileId={file.id}
                             />
                           </motion.div>
                         )}
