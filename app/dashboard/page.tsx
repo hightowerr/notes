@@ -13,7 +13,11 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Alert } from '@/components/ui/alert';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Download, Package } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { toast } from 'sonner';
+import JSZip from 'jszip';
 
 type DocumentStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'review_required' | 'all';
 type SortField = 'date' | 'name' | 'confidence' | 'size';
@@ -50,6 +54,8 @@ export default function DashboardPage() {
   const [sortField, setSortField] = useState<SortField>('date');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
+  const [selectedDocuments, setSelectedDocuments] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState(false);
 
   // Fetch documents from API
   const fetchDocuments = async () => {
@@ -83,6 +89,12 @@ export default function DashboardPage() {
   // Fetch on mount and when filters change
   useEffect(() => {
     fetchDocuments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, sortField, sortOrder]);
+
+  // Clear selection when filters change (prevents selecting documents that are no longer visible)
+  useEffect(() => {
+    setSelectedDocuments(new Set());
   }, [statusFilter, sortField, sortOrder]);
 
   // Toggle card expansion
@@ -136,12 +148,158 @@ export default function DashboardPage() {
     return 'destructive';
   };
 
+  // Toggle document selection
+  const toggleDocumentSelection = (docId: string) => {
+    const newSelection = new Set(selectedDocuments);
+    if (newSelection.has(docId)) {
+      newSelection.delete(docId);
+    } else {
+      newSelection.add(docId);
+    }
+    setSelectedDocuments(newSelection);
+  };
+
+  // Select all visible documents
+  const selectAll = () => {
+    const completedDocs = documents.filter(d => d.status === 'completed' || d.status === 'review_required');
+    setSelectedDocuments(new Set(completedDocs.map(d => d.id)));
+  };
+
+  // Deselect all documents
+  const deselectAll = () => {
+    setSelectedDocuments(new Set());
+  };
+
+  // Bulk export documents
+  const handleBulkExport = async (format: 'json' | 'markdown') => {
+    if (selectedDocuments.size === 0) {
+      toast.error('Please select at least one document to export');
+      return;
+    }
+
+    setExporting(true);
+
+    try {
+      const zip = new JSZip();
+      let successCount = 0;
+      let failCount = 0;
+
+      // Fetch each selected document's export
+      for (const docId of selectedDocuments) {
+        try {
+          const doc = documents.find(d => d.id === docId);
+          if (!doc) continue;
+
+          // Validate document is ready for export
+          if (doc.status !== 'completed' && doc.status !== 'review_required') {
+            console.warn(`[Dashboard] Skipping ${doc.name}: status=${doc.status}`);
+            failCount++;
+            continue;
+          }
+
+          if (!doc.summary) {
+            console.warn(`[Dashboard] Skipping ${doc.name}: no summary available`);
+            failCount++;
+            continue;
+          }
+
+          const response = await fetch(`/api/export/${docId}?format=${format}`);
+
+          if (!response.ok) {
+            console.error(`[Dashboard] Failed to export ${doc.name}:`, await response.text());
+            failCount++;
+            continue;
+          }
+
+          const content = await response.text();
+          const sanitizedFilename = doc.name.replace(/\.[^/.]+$/, '');
+          const extension = format === 'json' ? 'json' : 'md';
+          zip.file(`${sanitizedFilename}-summary.${extension}`, content);
+          successCount++;
+        } catch (error) {
+          console.error('[Dashboard] Error exporting document:', error);
+          failCount++;
+        }
+      }
+
+      if (successCount === 0) {
+        throw new Error('Failed to export any documents');
+      }
+
+      // Generate and download ZIP
+      const zipBlob = await zip.generateAsync({ type: 'blob' });
+      const url = window.URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `summaries-export-${new Date().toISOString().split('T')[0]}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+      // Show appropriate success message based on results
+      if (failCount > 0) {
+        toast.success(`${successCount} document${successCount !== 1 ? 's' : ''} exported successfully (${failCount} skipped - not ready for export)`);
+      } else {
+        toast.success(`${successCount} document${successCount !== 1 ? 's' : ''} exported successfully`);
+      }
+
+      // Clear selection after successful export
+      deselectAll();
+    } catch (error) {
+      console.error('[Dashboard] Bulk export error:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to export documents');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold">Document Dashboard</h1>
         <ThemeToggle />
       </div>
+
+      {/* Bulk Export Controls */}
+      {selectedDocuments.size > 0 && (
+        <div className="mb-4 p-4 bg-muted rounded-lg flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <Package className="h-5 w-5 text-primary" />
+            <span className="font-medium">{selectedDocuments.size} document{selectedDocuments.size !== 1 ? 's' : ''} selected</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleBulkExport('json')}
+              disabled={exporting}
+              className="flex items-center gap-1.5"
+            >
+              <Download className="h-4 w-4" />
+              {exporting ? 'Exporting...' : 'Export JSON'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleBulkExport('markdown')}
+              disabled={exporting}
+              className="flex items-center gap-1.5"
+            >
+              <Download className="h-4 w-4" />
+              {exporting ? 'Exporting...' : 'Export Markdown'}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={deselectAll}
+              disabled={exporting}
+            >
+              Clear Selection
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Filters and Sort Controls */}
       <div className="flex flex-col sm:flex-row gap-4 mb-6">
@@ -179,6 +337,18 @@ export default function DashboardPage() {
             {sortOrder === 'asc' ? '↑' : '↓'}
           </Button>
         </div>
+
+        {/* Select All Button */}
+        {documents.filter(d => d.status === 'completed' || d.status === 'review_required').length > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={selectedDocuments.size === 0 ? selectAll : deselectAll}
+            className="ml-auto"
+          >
+            {selectedDocuments.size === 0 ? 'Select All' : 'Deselect All'}
+          </Button>
+        )}
       </div>
 
       {/* Document Count */}
@@ -240,19 +410,32 @@ export default function DashboardPage() {
             return (
               <Card key={doc.id} className="flex flex-col">
                 <CardHeader>
-                  <CardTitle className="text-lg truncate" title={doc.name}>
-                    {doc.name}
-                  </CardTitle>
-                  <CardDescription>
-                    {formatSize(doc.size)} • {formatDate(doc.uploadedAt)}
-                  </CardDescription>
-                  <div className="flex gap-2 mt-2">
-                    <Badge variant={getStatusBadgeVariant(doc.status)}>{doc.status.replace('_', ' ')}</Badge>
-                    {doc.confidence !== undefined && (
-                      <Badge variant={getConfidenceBadgeVariant(doc.confidence)}>
-                        {Math.round(doc.confidence * 100)}% confidence
-                      </Badge>
+                  <div className="flex items-start gap-3">
+                    {/* Checkbox for bulk export (only for completed documents) */}
+                    {(doc.status === 'completed' || doc.status === 'review_required') && doc.summary && (
+                      <Checkbox
+                        checked={selectedDocuments.has(doc.id)}
+                        onCheckedChange={() => toggleDocumentSelection(doc.id)}
+                        aria-label={`Select ${doc.name} for export`}
+                        className="mt-1"
+                      />
                     )}
+                    <div className="flex-1">
+                      <CardTitle className="text-lg truncate" title={doc.name}>
+                        {doc.name}
+                      </CardTitle>
+                      <CardDescription>
+                        {formatSize(doc.size)} • {formatDate(doc.uploadedAt)}
+                      </CardDescription>
+                      <div className="flex gap-2 mt-2">
+                        <Badge variant={getStatusBadgeVariant(doc.status)}>{doc.status.replace('_', ' ')}</Badge>
+                        {doc.confidence !== undefined && (
+                          <Badge variant={getConfidenceBadgeVariant(doc.confidence)}>
+                            {Math.round(doc.confidence * 100)}% confidence
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </CardHeader>
 

@@ -2,18 +2,22 @@
 
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
-import { Lightbulb, CheckCircle2, MoveRight, ListTodo, AlertCircle, Clock, TrendingUp, Activity, AlertTriangle } from 'lucide-react';
+import { Lightbulb, CheckCircle2, MoveRight, ListTodo, AlertCircle, Clock, TrendingUp, Activity, AlertTriangle, Download } from 'lucide-react';
 import type { DocumentOutput } from '@/lib/schemas';
+import { useState } from 'react';
+import { toast } from 'sonner';
 
 interface SummaryPanelProps {
   summary: DocumentOutput;
   confidence: number;
   filename: string;
   processingDuration: number;
+  fileId: string;
 }
 
 export default function SummaryPanel({
@@ -21,10 +25,74 @@ export default function SummaryPanel({
   confidence,
   filename,
   processingDuration,
+  fileId,
 }: SummaryPanelProps) {
   const isLowConfidence = confidence < 0.8;
   const durationInSeconds = (processingDuration / 1000).toFixed(1);
   const confidencePercent = Math.round(confidence * 100);
+  const [exportingFormat, setExportingFormat] = useState<string | null>(null);
+
+  // Handle export to JSON
+  const handleExportJSON = async () => {
+    try {
+      setExportingFormat('json');
+      const response = await fetch(`/api/export/${fileId}?format=json`);
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to export JSON');
+      }
+
+      // Create blob and trigger download
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${filename.replace(/\.[^/.]+$/, '')}-summary.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+      toast.success('Summary exported as JSON');
+    } catch (error) {
+      console.error('[SummaryPanel] Export JSON error:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to export JSON');
+    } finally {
+      setExportingFormat(null);
+    }
+  };
+
+  // Handle export to Markdown
+  const handleExportMarkdown = async () => {
+    try {
+      setExportingFormat('markdown');
+      const response = await fetch(`/api/export/${fileId}?format=markdown`);
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to export Markdown');
+      }
+
+      // Create blob and trigger download
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${filename.replace(/\.[^/.]+$/, '')}-summary.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+      toast.success('Summary exported as Markdown');
+    } catch (error) {
+      console.error('[SummaryPanel] Export Markdown error:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to export Markdown');
+    } finally {
+      setExportingFormat(null);
+    }
+  };
 
   return (
     <div className="animate-in slide-in-from-bottom duration-500 fade-in">
@@ -43,6 +111,31 @@ export default function SummaryPanel({
               <CardDescription className="text-base">{filename}</CardDescription>
             </div>
             <div className="flex flex-col gap-2">
+              {/* Export Buttons */}
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportJSON}
+                  disabled={exportingFormat !== null}
+                  className="flex items-center gap-1.5"
+                  aria-label="Export summary as JSON"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {exportingFormat === 'json' ? 'Exporting...' : 'JSON'}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportMarkdown}
+                  disabled={exportingFormat !== null}
+                  className="flex items-center gap-1.5"
+                  aria-label="Export summary as Markdown"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {exportingFormat === 'markdown' ? 'Exporting...' : 'Markdown'}
+                </Button>
+              </div>
               {isLowConfidence && (
                 <Badge variant="outline" className="border-warning text-warning flex items-center gap-1.5 px-3 py-1">
                   <AlertCircle className="h-3.5 w-3.5" aria-label="Low confidence warning" />

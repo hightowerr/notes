@@ -126,6 +126,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `GET /api/cleanup` - Returns cleanup endpoint information and usage (T006)
 - `POST /api/cleanup` - Manual cleanup trigger, deletes expired documents (T006)
   - Query params: `dryRun=true` (preview without deletion)
+- `GET /api/export/[fileId]` - Export document summary as JSON or Markdown (T007)
+  - Query params: `format=json|markdown`
+  - Returns formatted file with proper Content-Disposition headers
 - `GET /api/test-supabase` - Connection health check (dev only)
 
 ### Frontend Architecture
@@ -263,6 +266,17 @@ Apply migrations manually via Supabase Dashboard → SQL Editor
 - Testing: See `.claude/testing/T006-manual-test.md` (8 scenarios)
 - **Note:** Cleanup runs automatically daily, manual trigger available for testing
 
+### ✅ T007 - Export Functionality (COMPLETE)
+- Single export (JSON/Markdown) from SummaryPanel with download buttons ✅
+- Bulk export with ZIP generation from Dashboard ✅
+- Selection UI with checkboxes on completed documents ✅
+- Auto-clear selections on filter change (prevents stale selections) ✅
+- Status validation before export (skips unprocessed documents) ✅
+- Status: **PRODUCTION-READY**
+- Testing: See `.claude/testing/T007-manual-test.md` (15 scenarios)
+- API: `GET /api/export/[fileId]?format=json|markdown`
+- **Important:** Export endpoint normalizes Supabase relationship format (array vs object)
+
 ## Data Structure (AI Output)
 
 ```typescript
@@ -388,6 +402,25 @@ Test Scenario: [9 verification steps for end-to-end journey]
 3. Include comprehensive error handling
 4. Add structured logging for observability
 5. Test with both success and failure scenarios
+
+### Supabase Relationship Query Pattern
+When querying nested relationships with `.single()`, Supabase may return the relationship as:
+- A single object (most common)
+- A single-item array (sometimes)
+- `null` (when no related record exists)
+
+**Always normalize before accessing:**
+```typescript
+const processedDoc = Array.isArray(fileData.processed_documents)
+  ? fileData.processed_documents[0]
+  : fileData.processed_documents;
+
+if (!processedDoc) {
+  // Handle missing data
+}
+```
+
+**Examples:** See `/api/export/[fileId]/route.ts` (lines 164-179) or `/api/documents/route.ts` (lines 116-118)
 
 ## Known Issues & Workarounds
 
