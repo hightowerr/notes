@@ -1,0 +1,117 @@
+{
+  "endpoint": "GET /api/outcomes",
+  "description": "Fetch the currently active outcome for the user. Returns null if no outcome is set.",
+  "request": {
+    "method": "GET",
+    "headers": {},
+    "queryParameters": {},
+    "body": null
+  },
+  "responses": {
+    "200": {
+      "description": "Active outcome found",
+      "body": {
+        "outcome": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "format": "uuid",
+              "example": "550e8400-e29b-41d4-a716-446655440000"
+            },
+            "direction": {
+              "type": "string",
+              "enum": ["increase", "decrease", "maintain", "launch", "ship"],
+              "example": "increase"
+            },
+            "object": {
+              "type": "string",
+              "example": "monthly recurring revenue"
+            },
+            "metric": {
+              "type": "string",
+              "example": "25% within 6 months"
+            },
+            "clarifier": {
+              "type": "string",
+              "example": "enterprise customer acquisition"
+            },
+            "assembled_text": {
+              "type": "string",
+              "example": "Increase the monthly recurring revenue by 25% within 6 months through enterprise customer acquisition"
+            },
+            "created_at": {
+              "type": "string",
+              "format": "datetime",
+              "example": "2025-10-11T10:00:00Z"
+            },
+            "updated_at": {
+              "type": "string",
+              "format": "datetime",
+              "example": "2025-10-11T10:00:00Z"
+            }
+          }
+        }
+      }
+    },
+    "404": {
+      "description": "No active outcome found (not an error, valid state)",
+      "body": {
+        "outcome": {
+          "type": "null",
+          "value": null
+        },
+        "message": {
+          "type": "string",
+          "value": "No active outcome set"
+        }
+      }
+    },
+    "500": {
+      "description": "Server error (database failure)",
+      "body": {
+        "error": {
+          "type": "string",
+          "value": "DATABASE_ERROR"
+        },
+        "message": {
+          "type": "string",
+          "example": "Failed to fetch outcome"
+        }
+      }
+    }
+  },
+  "sideEffects": [],
+  "testScenarios": [
+    {
+      "name": "Fetch existing active outcome",
+      "given": "Active outcome exists with direction='increase'",
+      "when": "GET /api/outcomes",
+      "then": "Returns 200 with full outcome object including assembled_text"
+    },
+    {
+      "name": "Fetch when no outcome set",
+      "given": "No active outcome in database",
+      "when": "GET /api/outcomes",
+      "then": "Returns 404 with outcome=null and message"
+    },
+    {
+      "name": "Fetch after outcome replacement",
+      "given": "Old outcome was deactivated, new outcome created",
+      "when": "GET /api/outcomes",
+      "then": "Returns 200 with new outcome only (old outcome not included)"
+    },
+    {
+      "name": "Database connection failure",
+      "given": "Supabase database is unreachable",
+      "when": "GET /api/outcomes",
+      "then": "Returns 500 with DATABASE_ERROR"
+    }
+  ],
+  "notes": [
+    "This endpoint fetches only the active outcome (is_active = true)",
+    "If multiple active outcomes exist (database constraint violation), returns first found",
+    "Outcome object fields map from DB snake_case (object_text) to API camelCase (object)",
+    "Used by OutcomeDisplay component on mount and after updates"
+  ]
+}

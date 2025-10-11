@@ -1,0 +1,156 @@
+{
+  "endpoint": "POST /api/outcomes",
+  "description": "Create or update user outcome statement. If active outcome exists, requires confirmation dialog in UI before calling this endpoint.",
+  "request": {
+    "method": "POST",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "direction": {
+        "type": "string",
+        "enum": ["increase", "decrease", "maintain", "launch", "ship"],
+        "required": true,
+        "description": "Direction verb for outcome statement"
+      },
+      "object": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 100,
+        "required": true,
+        "description": "Object of control (what to change)",
+        "example": "monthly recurring revenue"
+      },
+      "metric": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 100,
+        "required": true,
+        "description": "Performance metric with timeframe",
+        "example": "25% within 6 months"
+      },
+      "clarifier": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 150,
+        "required": true,
+        "description": "Contextual clarifier (method/scope)",
+        "example": "enterprise customer acquisition"
+      }
+    }
+  },
+  "responses": {
+    "201": {
+      "description": "Outcome created successfully (first time)",
+      "body": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "example": "550e8400-e29b-41d4-a716-446655440000"
+        },
+        "assembled_text": {
+          "type": "string",
+          "description": "Fully assembled outcome statement",
+          "example": "Increase the monthly recurring revenue by 25% within 6 months through enterprise customer acquisition"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "datetime",
+          "example": "2025-10-11T10:00:00Z"
+        },
+        "message": {
+          "type": "string",
+          "example": "Outcome created successfully. Re-scoring 47 actions..."
+        }
+      }
+    },
+    "200": {
+      "description": "Outcome updated successfully (replaced existing)",
+      "body": {
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "assembled_text": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "datetime",
+          "example": "2025-10-11T10:05:00Z"
+        },
+        "message": {
+          "type": "string",
+          "example": "Outcome updated. Re-scoring 47 actions..."
+        }
+      }
+    },
+    "400": {
+      "description": "Validation error (invalid fields)",
+      "body": {
+        "error": {
+          "type": "string",
+          "value": "VALIDATION_ERROR"
+        },
+        "details": {
+          "type": "object",
+          "description": "Field-level error messages",
+          "example": {
+            "object": "Object must be between 3 and 100 characters",
+            "metric": "Metric must be at least 3 characters"
+          }
+        }
+      }
+    },
+    "500": {
+      "description": "Server error (database failure)",
+      "body": {
+        "error": {
+          "type": "string",
+          "value": "DATABASE_ERROR"
+        },
+        "message": {
+          "type": "string",
+          "example": "Failed to save outcome"
+        }
+      }
+    }
+  },
+  "sideEffects": [
+    "Deactivates existing active outcome (is_active = false) before creating new one",
+    "Triggers async recompute job to re-score all actions against new outcome",
+    "Updates user_outcomes.updated_at timestamp"
+  ],
+  "testScenarios": [
+    {
+      "name": "Create first outcome (no existing outcome)",
+      "given": "No active outcome exists for user",
+      "when": "POST /api/outcomes with valid data",
+      "then": "Returns 201, creates outcome with is_active=true, triggers recompute"
+    },
+    {
+      "name": "Update existing outcome (replace)",
+      "given": "Active outcome exists",
+      "when": "POST /api/outcomes with different data",
+      "then": "Returns 200, deactivates old outcome, creates new active outcome, triggers recompute"
+    },
+    {
+      "name": "Validation error - object too short",
+      "given": "Request with object='ab' (2 chars)",
+      "when": "POST /api/outcomes",
+      "then": "Returns 400 with validation error details"
+    },
+    {
+      "name": "Validation error - invalid direction",
+      "given": "Request with direction='grow' (not in enum)",
+      "when": "POST /api/outcomes",
+      "then": "Returns 400 with validation error details"
+    },
+    {
+      "name": "Launch direction omits 'the' article",
+      "given": "Request with direction='launch'",
+      "when": "POST /api/outcomes",
+      "then": "assembled_text starts with 'Launch beta...' (not 'Launch the beta...')"
+    }
+  ]
+}
