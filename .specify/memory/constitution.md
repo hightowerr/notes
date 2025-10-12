@@ -1,10 +1,11 @@
 <!--
 SYNC IMPACT REPORT
 ===================
-Version Change: 1.1.2 → 1.1.3
-Rationale: PATCH version bump - Updated plan-template.md version reference from v1.1.1
-to v1.1.2 to maintain consistency. No content changes to principles or governance.
-This is a non-semantic consistency fix following T005 completion.
+Version Change: 1.1.3 → 1.1.4
+Rationale: PATCH version bump - Updated plan-template.md version references from v1.1.2
+to v1.1.3 to maintain consistency. The constitution itself was already at v1.1.3, but the
+plan template still referenced the older v1.1.2. This is a non-semantic consistency fix
+to ensure all templates reference the current constitution version.
 
 Modified Principles:
   - None (version reference updates only)
@@ -16,8 +17,8 @@ Removed Sections:
   - None
 
 Templates Requiring Updates:
-  ✅ .specify/templates/plan-template.md - Updated version reference (v1.1.1 → v1.1.2)
-  ✅ .specify/templates/tasks-template.md - No changes needed
+  ✅ .specify/templates/plan-template.md - Updated version references (v1.1.2 → v1.1.3)
+  ✅ .specify/templates/tasks-template.md - No changes needed (no version references found)
   ✅ .specify/templates/spec-template.md - No changes needed
   ✅ CLAUDE.md - No changes needed (documents principles, not version)
 
@@ -182,4 +183,4 @@ task failing the Three Laws (SEE, DO, VERIFY) is rejected and restructured.
 root for agent-specific development instructions and slice enforcement protocol
 
 ---
-**Version**: 1.1.3 | **Ratified**: 2025-10-05 | **Last Amended**: 2025-10-10
+**Version**: 1.1.4 | **Ratified**: 2025-10-05 | **Last Amended**: 2025-10-11

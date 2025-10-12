@@ -47,7 +47,7 @@
 ## Constitution Check
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-Verify compliance with AI Note Synthesiser Constitution v1.1.2:
+Verify compliance with AI Note Synthesiser Constitution v1.1.3:
 
 - [ ] **Autonomous by Default**: Feature operates without manual triggers (Sense → Reason → Act)
 - [ ] **Deterministic Outputs**: JSON schemas documented and validated with retry logic
@@ -225,4 +225,4 @@ directories captured above]
 - [ ] Complexity deviations documented
 
 ---
-*Based on Constitution v1.1.2 - See `.specify/memory/constitution.md`*
+*Based on Constitution v1.1.3 - See `.specify/memory/constitution.md`*

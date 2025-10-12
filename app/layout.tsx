@@ -16,6 +16,10 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "AI Note Synthesiser - Autonomous Document Analysis",
   description: "AI-powered note synthesis with automatic topic extraction, decision tracking, and L/N/O task categorization",
+  viewport: {
+    width: 'device-width',
+    initialScale: 1,
+  },
 };
 
 export default function RootLayout({

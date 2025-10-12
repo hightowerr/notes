@@ -3,9 +3,12 @@
 import { useState, useRef, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Upload, FileText, AlertCircle, Loader2, CheckCircle2, Clock } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Upload, FileText, AlertCircle, Loader2, CheckCircle2, Clock, Target } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
 import SummaryPanel from '@/app/components/SummaryPanel';
+import { OutcomeDisplay } from '@/app/components/OutcomeDisplay';
+import { OutcomeBuilder } from '@/app/components/OutcomeBuilder';
 import { toast, Toaster } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { DocumentOutput, StatusResponse, FileStatusType } from '@/lib/schemas';
@@ -59,6 +62,8 @@ const validateFileBeforeUpload = (file: File): { valid: boolean; error?: string 
 export default function Home() {
   const [files, setFiles] = useState<UploadedFileInfo[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [outcomeModalOpen, setOutcomeModalOpen] = useState(false);
+  const [editingOutcome, setEditingOutcome] = useState<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingIntervalsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
@@ -329,14 +334,14 @@ export default function Home() {
     switch (status) {
       case 'uploading':
         return (
-          <Badge variant="secondary" className="flex items-center gap-1.5 px-3 py-1.5 bg-info/10 text-info border-info/30">
+          <Badge className="flex items-center gap-1.5 px-3 py-1.5 bg-info-bg text-info-text border-0">
             <Loader2 className="h-3.5 w-3.5 animate-spin" aria-label="Uploading" />
             <span className="font-medium">Uploading</span>
           </Badge>
         );
       case 'pending':
         return (
-          <Badge variant="secondary" className="flex items-center gap-1.5 px-3 py-1.5 bg-accent/50 text-accent-foreground border-accent/30">
+          <Badge variant="secondary" className="flex items-center gap-1.5 px-3 py-1.5">
             <Clock className="h-3.5 w-3.5" aria-label="Queued" />
             <span className="font-medium">
               {queuePosition ? `Queued - Position ${queuePosition}` : 'Queued'}
@@ -345,28 +350,28 @@ export default function Home() {
         );
       case 'processing':
         return (
-          <Badge className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground">
+          <Badge className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-2 text-text-on-primary border-0">
             <Loader2 className="h-3.5 w-3.5 animate-spin" aria-label="Processing" />
             <span className="font-medium">Processing</span>
           </Badge>
         );
       case 'completed':
         return (
-          <Badge className="flex items-center gap-1.5 px-3 py-1.5 bg-success text-success-foreground">
+          <Badge className="flex items-center gap-1.5 px-3 py-1.5 bg-success-bg text-success-text border-0">
             <CheckCircle2 className="h-3.5 w-3.5" aria-label="Complete" />
             <span className="font-medium">Complete</span>
           </Badge>
         );
       case 'review_required':
         return (
-          <Badge variant="outline" className="flex items-center gap-1.5 px-3 py-1.5 bg-warning/10 border-warning text-warning">
+          <Badge className="flex items-center gap-1.5 px-3 py-1.5 bg-warning-bg text-warning-text border-0">
             <AlertCircle className="h-3.5 w-3.5" aria-label="Review required" />
             <span className="font-medium">Review Required</span>
           </Badge>
         );
       case 'failed':
         return (
-          <Badge variant="destructive" className="flex items-center gap-1.5 px-3 py-1.5">
+          <Badge className="flex items-center gap-1.5 px-3 py-1.5 bg-destructive-bg text-destructive-text border-0">
             <AlertCircle className="h-3.5 w-3.5" aria-label="Failed" />
             <span className="font-medium">Failed</span>
           </Badge>
@@ -377,24 +382,61 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-bg-layer-1">
       {/* Toast Notifications */}
       <Toaster position="top-right" richColors />
 
+      {/* Outcome Display Banner (shown when active outcome exists) */}
+      <OutcomeDisplay onEdit={(outcome) => {
+        setEditingOutcome({
+          direction: outcome.direction,
+          object: outcome.object_text,
+          metric: outcome.metric_text,
+          clarifier: outcome.clarifier
+        });
+        setOutcomeModalOpen(true);
+      }} />
+
+      {/* Outcome Builder Modal */}
+      <OutcomeBuilder
+        open={outcomeModalOpen}
+        onOpenChange={(open) => {
+          setOutcomeModalOpen(open);
+          if (!open) {
+            setEditingOutcome(null);
+          }
+        }}
+        initialValues={editingOutcome}
+        isEditMode={!!editingOutcome}
+        onSuccess={() => {
+          console.log('[Home] Outcome saved successfully');
+          setEditingOutcome(null);
+        }}
+      />
+
       {/* Header */}
-      <header className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur-sm">
+      <header className="sticky top-0 z-10 border-b-0 bg-bg-layer-2 shadow-2layer-md">
         <div className="mx-auto max-w-7xl px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <FileText className="h-8 w-8 text-primary" />
+              <FileText className="h-8 w-8 text-primary-2" />
               <div>
-                <h1 className="text-2xl font-bold">AI Note Synthesiser</h1>
-                <p className="text-sm text-muted-foreground">
+                <h1 className="text-2xl font-bold text-text-heading">AI Note Synthesiser</h1>
+                <p className="text-sm text-text-muted">
                   Autonomous document analysis and structured insights
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setOutcomeModalOpen(true)}
+                className="gap-2"
+              >
+                <Target className="h-4 w-4" />
+                Set Outcome
+              </Button>
               <Badge variant="secondary" className="px-4 py-2">
                 {files.length} {files.length === 1 ? 'Document' : 'Documents'}
               </Badge>
@@ -409,8 +451,8 @@ export default function Home() {
         {/* File Upload Section */}
         <section>
           <div className="mb-4 flex items-center gap-3">
-            <Upload className="h-6 w-6 text-primary" />
-            <h2 className="text-xl font-semibold">Upload Documents</h2>
+            <Upload className="h-6 w-6 text-primary-2" />
+            <h2 className="text-xl font-semibold text-text-heading">Upload Documents</h2>
           </div>
 
           <Card
@@ -421,8 +463,8 @@ export default function Home() {
             onClick={() => fileInputRef.current?.click()}
             className={`relative overflow-hidden cursor-pointer border-2 border-dashed transition-all duration-300 hover-lift ${
               isDragging
-                ? 'border-primary bg-primary/10 scale-[1.02]'
-                : 'border-border hover:border-primary/50'
+                ? 'border-primary-2 bg-primary-2/10 scale-[1.02]'
+                : 'border-border-subtle hover:border-primary-2/50'
             }`}
           >
             <div className={`absolute inset-0 gradient-primary-subtle opacity-0 transition-opacity duration-300 ${
@@ -438,21 +480,21 @@ export default function Home() {
                 className="hidden"
                 aria-label="File input"
               />
-              <div className={`rounded-full bg-primary/10 p-6 transition-transform duration-300 ${
+              <div className={`rounded-full bg-primary-2/10 p-6 transition-transform duration-300 ${
                 isDragging ? 'scale-110' : 'scale-100'
               }`}>
                 <Upload className={`h-12 w-12 transition-colors duration-300 ${
-                  isDragging ? 'text-primary' : 'text-primary/60'
+                  isDragging ? 'text-primary-2' : 'text-primary-2/60'
                 }`} />
               </div>
               <div className="space-y-2">
-                <p className="text-xl font-semibold">
+                <p className="text-xl font-semibold text-text-heading">
                   {isDragging ? 'Drop files here' : 'Upload your documents'}
                 </p>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm text-text-muted">
                   Drag & drop or click to browse
                 </p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-text-muted">
                   Accepts: PDF, DOCX, TXT, MD • Maximum: 10MB
                 </p>
               </div>
@@ -463,11 +505,11 @@ export default function Home() {
             <Card className="mt-6 border-dashed overflow-hidden relative">
               <div className="absolute inset-0 gradient-primary-subtle opacity-20" />
               <CardContent className="relative flex flex-col items-center justify-center py-16 text-center">
-                <div className="rounded-full bg-primary/10 p-8 mb-6">
-                  <FileText className="h-16 w-16 text-primary/60" />
+                <div className="rounded-full bg-primary-2/10 p-8 mb-6">
+                  <FileText className="h-16 w-16 text-primary-2/60" />
                 </div>
-                <p className="text-xl font-semibold mb-2">No documents uploaded yet</p>
-                <p className="text-sm text-muted-foreground max-w-md">
+                <p className="text-xl font-semibold mb-2 text-text-heading">No documents uploaded yet</p>
+                <p className="text-sm text-text-muted max-w-md">
                   Upload a file above to get started with AI-powered analysis.
                   We&apos;ll extract topics, decisions, actions, and categorize tasks automatically.
                 </p>
@@ -505,20 +547,20 @@ export default function Home() {
                     exit={{ opacity: 0, scale: 0.95 }}
                     transition={{ duration: 0.3, delay: index * 0.05 }}
                   >
-                    <Card className="transition-all duration-300 hover:shadow-md hover:bg-accent/30 overflow-hidden">
+                    <Card className="overflow-hidden">
                       <CardContent className="flex items-center justify-between p-4">
                         <div className="flex items-center gap-3">
                           <motion.div
                             initial={{ scale: 0 }}
                             animate={{ scale: 1 }}
                             transition={{ type: "spring", stiffness: 200, damping: 15 }}
-                            className="rounded-full bg-primary/10 p-2"
+                            className="rounded-full bg-primary-2/10 p-2"
                           >
-                            <FileText className="h-5 w-5 text-primary" />
+                            <FileText className="h-5 w-5 text-primary-2" />
                           </motion.div>
                           <div>
-                            <p className="font-medium">{file.name}</p>
-                            <p className="text-sm text-muted-foreground">
+                            <p className="font-medium text-text-body">{file.name}</p>
+                            <p className="text-sm text-text-muted">
                               {formatFileSize(file.size)} • {formatDate(file.uploadedAt)}
                             </p>
                             {file.error && (
@@ -565,8 +607,8 @@ export default function Home() {
       </main>
 
       {/* Footer */}
-      <footer className="mt-16 border-t">
-        <div className="mx-auto max-w-7xl px-6 py-6 text-center text-sm text-muted-foreground">
+      <footer className="mt-16 border-t-0 bg-bg-layer-2 shadow-2layer-sm">
+        <div className="mx-auto max-w-7xl px-6 py-6 text-center text-sm text-text-muted">
           <p>AI Note Synthesiser - Powered by Next.js 15, React 19, and TypeScript</p>
         </div>
       </footer>

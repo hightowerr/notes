@@ -6,7 +6,10 @@
       "Bash(nvm:*)",
       "Bash(cat:*)",
       "Bash(git add:*)",
-      "Bash(git commit -m \"$(cat <<''EOF''\nUpdate CLAUDE.md with T007 export functionality and Supabase pattern\n\nAdditions:\n- T007 export functionality status and testing info\n- Export API endpoint documentation (GET /api/export/[fileId])\n- Supabase relationship normalization pattern (critical for avoiding undefined errors)\n\nContext: T007 implementation revealed important pattern when querying\nSupabase relationships with .single() - they can return as object, array,\nor null. Added documented pattern to prevent future bugs.\n\nTesting references:\n- .claude/testing/T007-manual-test.md (15 scenarios)\n- Export endpoint examples in code\n\nPattern location: Common Development Patterns section\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
+      "Bash(git commit -m \"Update CLAUDE.md with T007 export functionality and Supabase pattern\")",
+      "Bash(pnpm dlx shadcn@latest add:*)",
+      "Bash(npm run lint)",
+      "Bash(npx tsc:*)"
     ],
     "deny": [],
     "ask": []
