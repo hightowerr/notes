@@ -126,6 +126,8 @@ export async function POST(request: Request) {
     const isUpdate = !!existingOutcome;
 
     // If existing outcome, deactivate it first (replacement flow)
+    let deactivatedOutcomeId: string | null = null;
+
     if (existingOutcome) {
       console.log('[Outcomes API] Deactivating existing outcome:', existingOutcome.id);
       const { error: deactivateError } = await supabase
@@ -140,6 +142,8 @@ export async function POST(request: Request) {
           { status: 500 }
         );
       }
+
+      deactivatedOutcomeId = existingOutcome.id;
     }
 
     // Insert new active outcome
@@ -159,6 +163,21 @@ export async function POST(request: Request) {
 
     if (insertError || !newOutcome) {
       console.error('[Outcomes API] Failed to insert outcome:', insertError);
+
+      if (deactivatedOutcomeId) {
+        const { error: reactivateError } = await supabase
+          .from('user_outcomes')
+          .update({ is_active: true, updated_at: new Date().toISOString() })
+          .eq('id', deactivatedOutcomeId);
+
+        if (reactivateError) {
+          console.error(
+            '[Outcomes API] Failed to reactivate previous outcome after insert failure:',
+            reactivateError
+          );
+        }
+      }
+
       return NextResponse.json(
         { error: 'DATABASE_ERROR', message: 'Failed to save outcome' },
         { status: 500 }
