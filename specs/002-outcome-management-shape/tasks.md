@@ -31,7 +31,7 @@
 
 ## Phase 1: P0 User Journeys (Must-Have Features)
 
-### T008 [SETUP] Database migration for user outcomes table
+### T008 [SETUP] [X] Database migration for user outcomes table
 
 **Rationale**: Blocking all outcome-related slices. Must be applied before any outcome data can be stored.
 
@@ -51,7 +51,7 @@
 
 ---
 
-### T009 [SLICE] [P] User creates first outcome statement and sees it displayed
+### T009 [SLICE] [P] [X] User creates first outcome statement and sees it displayed
 
 **User Story**: As a user visiting the app for the first time, I can fill a 4-field form to create an outcome statement, submit it, and immediately see the assembled outcome displayed in a header banner across all pages
 
@@ -112,7 +112,7 @@
 
 ---
 
-### T010 [SLICE] User edits existing outcome with confirmation dialog
+### T010 [SLICE] [X] User edits existing outcome with confirmation dialog
 
 **User Story**: As a user with an active outcome, I can click the edit icon, modify the outcome fields, and after confirming replacement, see the updated outcome displayed immediately
 
@@ -159,7 +159,7 @@
 
 ---
 
-### T011 [SLICE] [P] User's draft outcome is saved and recoverable after accidental close
+### T011 [SLICE] [P] [X] User's draft outcome is saved and recoverable after accidental close
 
 **User Story**: As a user filling the outcome form, if I accidentally close the modal without saving, the system preserves my draft in localStorage and offers to restore it when I reopen the form within 24 hours
 
@@ -201,7 +201,7 @@
 
 ## Phase 2: P1 User Journeys (Enhanced Features)
 
-### T012 [SLICE] [P] Async recompute job triggers when outcome changes
+### T012 [SLICE] [P] [X] Async recompute job triggers when outcome changes
 
 **User Story**: As a user who saves/updates an outcome, the system automatically re-scores all existing actions in the background against the new outcome context, and I see a toast notification showing progress
 
@@ -243,7 +243,7 @@
 
 ---
 
-### T013 [SLICE] [P] "Launch" and "Ship" directions omit "the" article in preview
+### T013 [SLICE] [P] [X] "Launch" and "Ship" directions omit "the" article in preview
 
 **User Story**: As a user selecting "Launch" or "Ship" direction, I see the preview omit the "the" article for natural phrasing (e.g., "Launch beta product..." not "Launch the beta product...")
 
@@ -272,7 +272,7 @@
 
 ---
 
-### T014 [SLICE] [P] Form validation displays helpful field-specific error messages
+### T014 [SLICE] [P] [X] Form validation displays helpful field-specific error messages
 
 **User Story**: As a user filling the outcome form, if I enter invalid data (too short, too long, empty), I see clear error messages below each field guiding me to fix the issue
 
@@ -312,7 +312,7 @@
 
 ## Phase 3: Polish & Enhancements
 
-### T015 [POLISH] [P] Mobile-responsive outcome form with sticky preview
+### T015 [POLISH] [P] [X] Mobile-responsive outcome form with sticky preview
 
 **User Story**: As a mobile user, I can fill the outcome form comfortably without horizontal scrolling, with the preview always visible at the bottom of my screen
 
@@ -347,7 +347,7 @@
 
 ---
 
-### T016 [POLISH] [P] Contract tests for outcome API endpoints
+### T016 [POLISH] [P] [X] Contract tests for outcome API endpoints
 
 **User Story**: As a developer, I can run automated tests to verify POST and GET /api/outcomes endpoints match their contracts and handle all response scenarios
 

@@ -1,8 +1,19 @@
 # Quickstart Guide: Outcome Management
 
 **Feature**: Outcome Management
-**Date**: 2025-10-11
+**Date**: 2025-10-11 (Updated: 2025-10-12)
 **Purpose**: Manual testing scenarios for verifying complete feature functionality
+
+## Testing Status
+
+**✅ Tested & Working:**
+- **T012 (Scenario 6)**: Async recompute job - Tested with dev server, console logs verified, retry logic confirmed
+- **T013 (Scenario 4)**: Launch/Ship article omission - Code verified, build passes, grammar logic confirmed
+
+**Notes:**
+- T012: Database schema fix applied (use `structured_output` + join through `uploaded_files`)
+- T013: Already implemented in T009, no additional changes needed
+- Both tasks marked as [X] complete in tasks.md
 
 ## Prerequisites
 

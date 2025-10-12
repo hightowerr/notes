@@ -261,3 +261,46 @@ function calculateConfidence(output: DocumentOutput): number {
 export function calculateLowConfidence(): number {
   return 0.65; // Force low confidence for testing
 }
+
+/**
+ * Re-score actions against a new outcome context
+ * Task: T012 - Async recompute job integration
+ *
+ * @param document - Processed document with structured_output
+ * @param outcomeText - Assembled outcome statement for context
+ * @returns Updated LNO task categorization (P0: returns original, AI rescoring deferred)
+ *
+ * NOTE: P0 implementation is a placeholder. Future enhancement will:
+ * - Use Vercel AI SDK to re-evaluate LNO task classifications
+ * - Consider outcome alignment when scoring tasks
+ * - Update processed_documents.structured_output with new classifications
+ */
+export async function scoreActions(
+  document: {
+    id: string;
+    structured_output: DocumentOutput;
+  },
+  outcomeText: string
+): Promise<{
+  leverage: string[];
+  neutral: string[];
+  overhead: string[];
+}> {
+  console.log('[ScoreActions] Re-scoring document:', {
+    documentId: document.id,
+    outcomeText: outcomeText.substring(0, 50) + '...',
+    actionCount: document.structured_output.actions?.length || 0,
+  });
+
+  // P0: Return original LNO classifications unchanged
+  // Future: Use AI to reclassify tasks based on outcome alignment
+  // Example: Tasks aligned with "Increase revenue" might move from Neutral → Leverage
+
+  console.log('[ScoreActions] P0 implementation: returning original classifications');
+
+  return {
+    leverage: document.structured_output.lno_tasks?.leverage || [],
+    neutral: document.structured_output.lno_tasks?.neutral || [],
+    overhead: document.structured_output.lno_tasks?.overhead || [],
+  };
+}

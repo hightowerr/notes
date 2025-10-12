@@ -1,0 +1,58 @@
+{
+  "agent": "slice-orchestrator",
+  "task_id": "T013",
+  "task_name": "Launch and Ship directions omit the article in preview",
+  "status": "complete",
+  "files": [
+    "lib/services/outcomeService.ts",
+    "specs/002-outcome-management-shape/tasks.md"
+  ],
+  "enables_user_action": "User selecting Launch or Ship direction sees grammatically correct preview without 'the' article (e.g., 'Launch beta product...' not 'Launch the beta product...')",
+  "implementation": {
+    "status": "done",
+    "approach": "Already implemented as part of T009 - conditional logic in assembleOutcome() function"
+  },
+  "test": {
+    "status": "verified",
+    "approach": "Code review and build verification",
+    "results": "Logic correctly checks for direction === 'launch' || direction === 'ship' and omits 'the' article"
+  },
+  "backend": {
+    "logic_location": "lib/services/outcomeService.ts:44-49",
+    "implementation": "Conditional check: if Launch/Ship then omit 'the', else include 'the'",
+    "formula": {
+      "launch_ship": "${capitalize(direction)} ${object} by ${metric} through ${clarifier}",
+      "others": "${capitalize(direction)} the ${object} by ${metric} through ${clarifier}"
+    }
+  },
+  "grammar_examples": {
+    "launch": "Launch beta product to 50 users by Q2 2025 through product hunt campaign",
+    "ship": "Ship v2 features by end of month through agile sprints",
+    "increase": "Increase the monthly recurring revenue by 25% within 6 months through enterprise customer acquisition",
+    "decrease": "Decrease the customer churn rate by 10% through proactive onboarding",
+    "maintain": "Maintain the service quality standards through continuous monitoring"
+  },
+  "verification": {
+    "build_status": "✅ Compiled successfully",
+    "typescript_compliance": "✅ Strict mode compliant",
+    "code_location": "lib/services/outcomeService.ts lines 44-49",
+    "used_by": [
+      "POST /api/outcomes endpoint",
+      "OutcomeBuilder component (real-time preview)",
+      "Database storage (assembled_text field)"
+    ]
+  },
+  "notes": [
+    "Implementation was already complete from T009",
+    "No additional code changes required",
+    "Marked as [X] complete in tasks.md",
+    "Grammar logic ensures natural phrasing for all direction types"
+  ],
+  "dependencies_satisfied": [
+    "T009 - assembleOutcome() function exists and is integrated"
+  ],
+  "next_steps": [
+    "T014 - Form validation with helpful error messages",
+    "Manual testing following quickstart.md Scenario 4"
+  ]
+}

@@ -14,8 +14,10 @@ import { Alert } from '@/components/ui/alert';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Download, Package } from 'lucide-react';
+import { Download, Package, Target } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { OutcomeDisplay } from '@/app/components/OutcomeDisplay';
+import { OutcomeBuilder } from '@/app/components/OutcomeBuilder';
 import { toast } from 'sonner';
 import JSZip from 'jszip';
 
@@ -56,6 +58,8 @@ export default function DashboardPage() {
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
   const [selectedDocuments, setSelectedDocuments] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
+  const [outcomeModalOpen, setOutcomeModalOpen] = useState(false);
+  const [editingOutcome, setEditingOutcome] = useState<any>(null);
 
   // Fetch documents from API
   const fetchDocuments = async () => {
@@ -256,9 +260,48 @@ export default function DashboardPage() {
 
   return (
     <div className="container mx-auto px-4 py-8">
+      {/* Outcome Display Banner */}
+      <OutcomeDisplay onEdit={(outcome) => {
+        setEditingOutcome({
+          direction: outcome.direction,
+          object: outcome.object_text,
+          metric: outcome.metric_text,
+          clarifier: outcome.clarifier
+        });
+        setOutcomeModalOpen(true);
+      }} />
+
+      {/* Outcome Builder Modal */}
+      <OutcomeBuilder
+        open={outcomeModalOpen}
+        onOpenChange={(open) => {
+          setOutcomeModalOpen(open);
+          if (!open) {
+            setEditingOutcome(null);
+          }
+        }}
+        initialValues={editingOutcome}
+        isEditMode={!!editingOutcome}
+        onSuccess={() => {
+          console.log('[Dashboard] Outcome saved successfully');
+          setEditingOutcome(null);
+        }}
+      />
+
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold">Document Dashboard</h1>
-        <ThemeToggle />
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setOutcomeModalOpen(true)}
+            className="gap-2"
+          >
+            <Target className="h-4 w-4" />
+            Set Outcome
+          </Button>
+          <ThemeToggle />
+        </div>
       </div>
 
       {/* Bulk Export Controls */}

@@ -109,6 +109,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `uploaded_files` - File metadata, status tracking, queue_position (T005)
 - `processed_documents` - AI outputs, Markdown content, 30-day auto-expiry
 - `processing_logs` - Metrics, errors, retry attempts
+- `user_outcomes` - User-defined outcome statements (T008-T011)
 
 **Storage:**
 - `notes/` - Original uploaded files (hash-based naming)
@@ -129,19 +130,84 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `GET /api/export/[fileId]` - Export document summary as JSON or Markdown (T007)
   - Query params: `format=json|markdown`
   - Returns formatted file with proper Content-Disposition headers
+- `GET /api/outcomes` - Fetch active outcome statement (T009)
+  - Returns: 200 with outcome object, or 404 if no active outcome
+- `POST /api/outcomes` - Create or update outcome statement (T009)
+  - Validates with Zod, assembles text, deactivates old outcome if exists
+  - Returns: 201 (created) or 200 (updated) with assembled text
 - `GET /api/test-supabase` - Connection health check (dev only)
 
 ### Frontend Architecture
 
 **Main Components:**
-- `app/page.tsx` - Upload UI with drag-and-drop, multi-file support, client-side validation, status polling (2s interval), SummaryPanel integration, Queue Status Summary (T005)
-- `app/dashboard/page.tsx` - Dashboard with grid layout, filtering, sorting, card expand/collapse
+- `app/page.tsx` - Upload UI with drag-and-drop, multi-file support, client-side validation, status polling (2s interval), SummaryPanel integration, Queue Status Summary (T005), Outcome banner and builder (T008-T011)
+- `app/dashboard/page.tsx` - Dashboard with grid layout, filtering, sorting, card expand/collapse, Outcome banner and builder (T008-T011)
 - `app/components/SummaryPanel.tsx` - Displays topics, decisions, actions, LNO tasks in 3 columns
+- `app/components/OutcomeBuilder.tsx` - Modal form for creating/editing outcome statements with real-time preview, draft recovery (T009-T011)
+- `app/components/OutcomeDisplay.tsx` - Persistent banner showing active outcome across all pages (T009)
+- `app/components/ConfirmReplaceDialog.tsx` - Confirmation dialog for replacing existing outcome (T010)
 
 **shadcn/ui Components:**
 - Install via: `pnpm dlx shadcn@latest add <component>`
 - Never create custom components when shadcn exists
-- Standard Tailwind colors only (no inline custom colors)
+- Use depth layer color system (see Design System section below)
+
+### Design System
+
+**Depth-Based Color Layering (4-Layer System):**
+The application uses a depth-based color system in `app/globals.css` that creates visual hierarchy through color contrast instead of borders:
+
+- `--bg-layer-1`: Page background (darkest in light mode, darkest in dark mode)
+- `--bg-layer-2`: Container/Card backgrounds
+- `--bg-layer-3`: Interactive elements (buttons, tabs, inputs)
+- `--bg-layer-4`: Elevated states (hover, selected, active)
+
+**Primary Brand Shades:**
+- `--primary-2`: Base brand color (oklch 0.55 0.22 264.53 - purple/blue)
+- `--primary-3`: Hover/Active states
+- `--primary-4`: Lightest accents
+
+**Semantic Colors:**
+Each semantic color has three variants:
+- `*-bg`: Background color for layer 3
+- `*-hover`: Hover state for layer 4
+- `*-text`: Text color with proper contrast
+
+Available: `success`, `warning`, `info`, `destructive`
+
+**Text Colors:**
+- `--text-heading`: High contrast for headings (oklch 0.10 in light, 0.98 in dark)
+- `--text-body`: Standard body text (oklch 0.25 in light, 0.85 in dark)
+- `--text-muted`: Secondary text (oklch 0.45 in light, 0.60 in dark)
+- `--text-on-primary`: White text on colored backgrounds
+
+**Two-Layer Shadow System:**
+Creates depth through inner highlight + outer shadow:
+
+- `.shadow-2layer-sm`: Subtle depth (badges, nav items, tabs)
+  - Combines: `inset 0 1px 0 rgba(255,255,255,0.1)` + `0 1px 2px rgba(0,0,0,0.1)`
+- `.shadow-2layer-md`: Standard depth (cards, dropdowns, modals)
+  - Combines: `inset 0 1px 0 rgba(255,255,255,0.15)` + `0 3px 6px rgba(0,0,0,0.15)`
+- `.shadow-2layer-lg`: Prominent depth (hover states, focused elements)
+  - Combines: `inset 0 2px 0 rgba(255,255,255,0.2)` + `0 6px 12px rgba(0,0,0,0.2)`
+
+**Gradient Utilities:**
+- `.gradient-shiny`: Premium "light from top" effect with built-in inner shadow
+- `.gradient-shiny-subtle`: Subtle gradient for interactive elements
+- `.hover-shadow-lift`: Smooth transform (-2px) + shadow transition on hover
+
+**Component Shadow Usage:**
+- Buttons: `shadow-2layer-sm` → `shadow-2layer-md` on hover
+- Cards: `shadow-2layer-md` → `shadow-2layer-lg` on hover
+- Badges: `shadow-2layer-sm` (static)
+- Headers/Footers: `shadow-2layer-md`
+
+**Important Rules:**
+- ❌ Never use borders (border-0) - rely on color contrast and shadows
+- ✅ Always use depth layers for backgrounds
+- ✅ Use semantic colors (`*-bg`, `*-text`) for status indicators
+- ✅ Apply `.hover-shadow-lift` for interactive elements
+- ✅ Ensure WCAG AA contrast (4.5:1 for text)
 
 ## Configuration
 
@@ -165,6 +231,7 @@ OPENAI_API_KEY=sk-proj-...
 - `supabase/migrations/001_create_initial_tables.sql` - uploaded_files, processing_logs
 - `supabase/migrations/002_create_processing_tables.sql` - processed_documents, 30-day expiry trigger
 - `supabase/migrations/003_add_queue_position.sql` - queue_position column for concurrent uploads (T005)
+- `supabase/migrations/004_create_user_outcomes.sql` - user_outcomes table for outcome management (T008)
 
 Apply migrations manually via Supabase Dashboard → SQL Editor
 
@@ -277,8 +344,56 @@ Apply migrations manually via Supabase Dashboard → SQL Editor
 - API: `GET /api/export/[fileId]?format=json|markdown`
 - **Important:** Export endpoint normalizes Supabase relationship format (array vs object)
 
-## Data Structure (AI Output)
+### ✅ T008-T011 - Outcome Management Core (COMPLETE)
+- **T008**: Database migration for `user_outcomes` table ✅
+  - Single active outcome per user (unique partial index)
+  - Auto-update trigger for `updated_at` timestamp
+  - Migration: `supabase/migrations/004_create_user_outcomes.sql`
+- **T009**: Create and display outcome statements ✅
+  - 4-field form: Direction, Object, Metric, Clarifier
+  - Real-time preview with `useDeferredValue` (<1000ms updates)
+  - Persistent banner across all pages
+  - GET/POST `/api/outcomes` endpoints
+  - Outcome assembly logic handles Launch/Ship article omission
+- **T010**: Edit with confirmation dialog ✅
+  - Pre-filled form when editing existing outcome
+  - Confirmation dialog prevents accidental replacement
+  - Different UI labels for edit vs create mode
+  - Backend deactivates old outcome, creates new one
+- **T011**: Draft recovery with localStorage ✅
+  - Auto-save draft on modal close (with setTimeout to avoid race condition)
+  - 24-hour expiry with lazy cleanup
+  - "Resume editing?" prompt when reopening
+  - Draft cleared after successful save
+  - Storage key: `outcome_draft_v1`
+- Status: **PRODUCTION-READY**
+- Services: `lib/services/outcomeService.ts` (assembly logic), `lib/hooks/useOutcomeDraft.ts` (draft management)
+- **Important:** Draft save uses setTimeout to ensure React Hook Form state is synchronized before reading values
 
+### ✅ T012 - Async Recompute Job (COMPLETE)
+- Background recompute service triggers when outcomes change ✅
+- Max 3 concurrent jobs with exponential backoff retry (1s, 2s, 4s) ✅
+- Non-blocking API response (queues job, returns immediately) ✅
+- Integration with POST `/api/outcomes` endpoint ✅
+- Success toast shows action count: "Re-scoring N actions..." ✅
+- Toast warning on permanent failure (FR-045) ✅
+- Status: **PRODUCTION-READY**
+- Service: `lib/services/recomputeService.ts`
+- AI Integration: `lib/services/aiSummarizer.ts` (scoreActions method)
+- **Debug Fix**: Corrected database schema query to use `structured_output` and join through `uploaded_files`
+- **Note**: P0 implementation fetches documents but doesn't modify them (AI rescoring deferred to future)
+
+### ✅ T013 - Launch/Ship Article Omission (COMPLETE)
+- Grammar logic for Launch/Ship directions (omits "the" article) ✅
+- Implemented in `assembleOutcome()` function ✅
+- Real-time preview reflects correct grammar ✅
+- Database stores grammatically correct assembled text ✅
+- Status: **PRODUCTION-READY**
+- **Note**: Already implemented as part of T009, verified and marked complete
+
+## Data Structures
+
+### AI Output (Document Summary)
 ```typescript
 {
   topics: string[],           // ["Budget Planning", "Team Restructure"]
@@ -291,6 +406,22 @@ Apply migrations manually via Supabase Dashboard → SQL Editor
   }
 }
 ```
+
+### Outcome Statement (User Input)
+```typescript
+{
+  direction: 'increase' | 'decrease' | 'maintain' | 'launch' | 'ship',
+  object_text: string,        // 3-100 chars: "monthly recurring revenue"
+  metric_text: string,        // 3-100 chars: "25% within 6 months"
+  clarifier: string,          // 3-150 chars: "enterprise customer acquisition"
+  assembled_text: string,     // Computed: "Increase the monthly recurring revenue by 25% within 6 months through enterprise customer acquisition"
+  is_active: boolean          // Only one active outcome per user
+}
+```
+
+**Assembly Formula:**
+- Launch/Ship: `"{Direction} {object} by {metric} through {clarifier}"` (no "the" article)
+- Others: `"{Direction} the {object} by {metric} through {clarifier}"`
 
 ## Testing
 
@@ -421,6 +552,29 @@ if (!processedDoc) {
 ```
 
 **Examples:** See `/api/export/[fileId]/route.ts` (lines 164-179) or `/api/documents/route.ts` (lines 116-118)
+
+### React Hook Form State Synchronization Pattern
+When reading form values immediately after user interaction (e.g., on modal close), React Hook Form may not have synchronized field state yet.
+
+**Problem:** `form.getValues()` returns stale/empty values when called during the same event loop as field onChange.
+
+**Solution:** Use `setTimeout` to defer reading until after form state updates:
+```typescript
+const handleModalClose = (open: boolean) => {
+  if (!open) {
+    // Defer to next event loop to ensure form state is synchronized
+    setTimeout(() => {
+      const values = form.getValues();
+      saveDraft(values);
+    }, 0);
+  }
+  onOpenChange(open);
+};
+```
+
+**When to use:** Any time you need to read form state immediately after user-triggered events (click, blur, close).
+
+**Example:** See `app/components/OutcomeBuilder.tsx:142-153` (draft save on modal close)
 
 ## Known Issues & Workarounds
 
