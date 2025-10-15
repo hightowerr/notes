@@ -35,8 +35,8 @@ code-reviewer → (verifies type safety)
   "task_id": "unique-id",
   "type_challenge": "Description of type problem",
   "affected_files": ["path/to/file.ts"],
-  "context_doc": ".claude/context/.md",
-  "curated_docs": ".claude/docs/curated/.md"
+  "context_doc": ".claude/context/<feature>.md",
+  "curated_docs": ".claude/docs/curated/<task>.md"
 }
 ```
 
@@ -90,22 +90,18 @@ cat path/to/file.ts           # Read implementation
 **For generics**:
 ```typescript
 // Example: Generic repository with constraints
-interface Repository {
-  find(id: string): Promise;
-  save(entity: T): Promise;
+interface Repository<T extends { id: string }> {
+  find(id: T['id']): Promise<T | null>;
+  save(entity: T): Promise<T>;
 }
 ```
 
 **For type utilities**:
 ```typescript
 // Example: Extract API response type
-type ApiResponse = {
-  success: true;
-  data: T;
-} | {
-  success: false;
-  error: string;
-};
+type ApiResponse<T> =
+  | { success: true; data: T }
+  | { success: false; error: string };
 ```
 
 **For type guards**:

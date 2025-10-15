@@ -171,7 +171,7 @@ After creating context file:
 **Return to orchestrator**:
 ```json
 {
-  "context_file": ".claude/context/.md",
+  "context_file": ".claude/context/<feature>.md",
   "patterns_found": ["service-layer", "shadcn-forms"],
   "dependencies": {
     "database": ["new table: tags"],
