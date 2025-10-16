@@ -181,7 +181,7 @@ Save to `.claude/logs/test-result-<task>.md`:
 ### If Tests PASS
 ```json
 {
-  "test_log": ".claude/logs/test-result-.md",
+  "test_log": ".claude/logs/test-result-<task>.md",
   "status": "pass",
   "tests_run": 12,
   "tests_passed": 12,
@@ -196,7 +196,7 @@ Task is complete. Orchestrator marks done.
 ### If Tests FAIL
 ```json
 {
-  "test_log": ".claude/logs/test-result-.md",
+  "test_log": ".claude/logs/test-result-<task>.md",
   "status": "fail",
   "tests_run": 12,
   "tests_passed": 10,
@@ -229,7 +229,7 @@ If automated tests not possible (e.g., FormData limitation):
 ## Manual Testing
 
 **Reason**: FormData serialization limitation in test environment
-**Manual Test Doc**: .claude/testing/-manual.md
+**Manual Test Doc**: .claude/testing/<task>-manual.md
 **Status**: Manual testing required before deployment
 ```
 

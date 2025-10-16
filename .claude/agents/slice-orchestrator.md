@@ -124,11 +124,11 @@ Mark task complete only when:
 ```json
 {
   "task_id": "unique-identifier",
-  "feature_path": ".specify/specs//",
+  "feature_path": ".specify/specs/<feature>/",
   "acceptance_criteria": ["criterion1", "criterion2"],
   "files_in_scope": ["path/to/file1.ts", "path/to/file2.tsx"],
-  "context_doc": ".claude/context/.md",
-  "curated_docs": ".claude/docs/curated/.md"
+  "context_doc": ".claude/context/<feature>.md",
+  "curated_docs": ".claude/docs/curated/<task>.md"
 }
 ```
 

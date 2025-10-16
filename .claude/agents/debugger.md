@@ -33,7 +33,7 @@ test-runner → (validates fixes)
 ```json
 {
   "task_id": "unique-id",
-  "test_log": ".claude/logs/test-result-.md",
+  "test_log": ".claude/logs/test-result-<task>.md",
   "failing_tests": [
     {
       "name": "test name",

@@ -63,7 +63,7 @@ export function useOutcomeDraft() {
   const saveDraft = (data: OutcomeInput) => {
     try {
       // Only save if there's actual content (not all empty)
-      const hasContent = data.object || data.metric || data.clarifier;
+      const hasContent = data.object || data.metric || data.clarifier || data.state_preference || data.daily_capacity_hours;
       console.log('[Draft] saveDraft called - hasContent:', !!hasContent, 'data:', data);
       if (!hasContent) {
         console.log('[Draft] No content to save, skipping');

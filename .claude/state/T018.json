@@ -1,0 +1,32 @@
+{
+  "agent": "slice-orchestrator",
+  "task_id": "T018",
+  "task_name": "Integration test for complete outcome creation and edit flow",
+  "status": "complete",
+  "files": [
+    "__tests__/integration/outcome-flow.test.tsx",
+    ".claude/context/002-outcome-management-shape.md",
+    ".claude/docs/curated/T018.md",
+    ".claude/logs/test-result-T018.md",
+    "specs/002-outcome-management-shape/tasks.md"
+  ],
+  "enables_user_action": "Developers can run an automated integration test that simulates creating and editing an outcome, confirming banner updates, toast feedback, and Supabase persistence end-to-end.",
+  "context_file": ".claude/context/002-outcome-management-shape.md",
+  "curated_docs": ".claude/docs/curated/T018.md",
+  "implementation": {
+    "status": "done",
+    "approach": "Added vitest integration spec that mounts the Home page, exercises OutcomeBuilder and OutcomeDisplay, and reuses real /api/outcomes handlers via mocked Supabase client plus recompute service spy."
+  },
+  "test": {
+    "status": "pass",
+    "command": "npm run test:run -- --pool=threads --poolOptions.threads.minThreads=1 --poolOptions.threads.maxThreads=1 outcome-flow.test.tsx",
+    "log": ".claude/logs/test-result-T018.md"
+  },
+  "dependencies_satisfied": [
+    "T009",
+    "T010"
+  ],
+  "next_steps": [
+    "T019 - Document manual outcome verification scenarios"
+  ]
+}

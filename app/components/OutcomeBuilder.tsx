@@ -33,6 +33,8 @@ import {
 } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 
 interface OutcomeBuilderProps {
@@ -77,7 +79,9 @@ export function OutcomeBuilder({ open, onOpenChange, onSuccess, initialValues, i
       direction: 'increase',
       object: '',
       metric: '',
-      clarifier: ''
+      clarifier: '',
+      state_preference: undefined,
+      daily_capacity_hours: undefined
     }
   });
 
@@ -124,7 +128,9 @@ export function OutcomeBuilder({ open, onOpenChange, onSuccess, initialValues, i
         direction: draft.direction,
         object: draft.object,
         metric: draft.metric,
-        clarifier: draft.clarifier
+        clarifier: draft.clarifier,
+        state_preference: draft.state_preference,
+        daily_capacity_hours: draft.daily_capacity_hours
       });
       setShowDraftPrompt(false);
       console.log('[Draft] Resumed draft');
@@ -157,6 +163,8 @@ export function OutcomeBuilder({ open, onOpenChange, onSuccess, initialValues, i
   const object = form.watch('object');
   const metric = form.watch('metric');
   const clarifier = form.watch('clarifier');
+  const statePreference = form.watch('state_preference');
+  const dailyCapacity = form.watch('daily_capacity_hours');
 
   // Defer preview updates to avoid blocking typing
   const deferredObject = useDeferredValue(object);
@@ -171,16 +179,27 @@ export function OutcomeBuilder({ open, onOpenChange, onSuccess, initialValues, i
     }
 
     try {
-      return assembleOutcome({
+      const outcomeText = assembleOutcome({
         direction,
         object: deferredObject,
         metric: deferredMetric,
         clarifier: deferredClarifier
       });
+
+      // Add context info if provided
+      const contextParts = [];
+      if (statePreference) contextParts.push(statePreference);
+      if (dailyCapacity) contextParts.push(`${dailyCapacity}h/day`);
+
+      if (contextParts.length > 0) {
+        return `${outcomeText} • ${contextParts.join(' • ')}`;
+      }
+
+      return outcomeText;
     } catch {
       return 'Invalid input';
     }
-  }, [direction, deferredObject, deferredMetric, deferredClarifier]);
+  }, [direction, deferredObject, deferredMetric, deferredClarifier, statePreference, dailyCapacity]);
 
   // Handle form submission (with confirmation if outcome exists)
   const onSubmit = async (data: OutcomeInput) => {
@@ -405,6 +424,69 @@ export function OutcomeBuilder({ open, onOpenChange, onSuccess, initialValues, i
                     <FormMessage />
                     <p className="text-xs text-muted-foreground">
                       {field.value.length}/150 characters
+                    </p>
+                  </FormItem>
+                )}
+              />
+
+              {/* State Preference Field */}
+              <FormField
+                control={form.control}
+                name="state_preference"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>What&apos;s your energy level today?</FormLabel>
+                    <FormControl>
+                      <RadioGroup
+                        onValueChange={field.onChange}
+                        value={field.value}
+                        className="flex flex-row gap-4"
+                      >
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="Energized" id="energized" />
+                          <Label htmlFor="energized" className="font-normal cursor-pointer">
+                            Energized
+                          </Label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="Low energy" id="low-energy" />
+                          <Label htmlFor="low-energy" className="font-normal cursor-pointer">
+                            Low energy
+                          </Label>
+                        </div>
+                      </RadioGroup>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {/* Daily Capacity Field */}
+              <FormField
+                control={form.control}
+                name="daily_capacity_hours"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>How many hours can you work on this daily?</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        placeholder="e.g., 2"
+                        min={0.25}
+                        max={24}
+                        step={0.25}
+                        className="h-11 md:h-10"
+                        {...field}
+                        value={field.value ?? ''}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          field.onChange(value === '' ? undefined : parseFloat(value));
+                        }}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                    <p className="text-xs text-muted-foreground">
+                      Range: 0.25 to 24 hours (15 minutes to full day)
                     </p>
                   </FormItem>
                 )}

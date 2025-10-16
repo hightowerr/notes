@@ -27,6 +27,10 @@ interface UploadedFileInfo {
   summary?: DocumentOutput;
   confidence?: number;
   processingDuration?: number;
+  filteringDecisions?: any; // T018: Filtering metadata from backend
+  allActions?: any[]; // T019: Unfiltered action list
+  filteringApplied?: boolean; // T019: Whether filtering was applied
+  exclusionReasons?: Array<{ action_text: string; reason: string }>; // T019: Exclusion reasons
 }
 
 // Client-side file validation (T004)
@@ -109,6 +113,10 @@ export default function Home() {
                   confidence: statusData.confidence,
                   processingDuration: statusData.processingDuration,
                   error: statusData.error,
+                  filteringDecisions: (statusData as any).filteringDecisions || undefined, // T018
+                  allActions: (statusData as any).allActions || undefined, // T019: Unfiltered actions
+                  filteringApplied: (statusData as any).filteringApplied || false, // T019
+                  exclusionReasons: (statusData as any).exclusionReasons || [], // T019
                 }
               : f
           )
@@ -594,6 +602,10 @@ export default function Home() {
                               filename={file.name}
                               processingDuration={file.processingDuration || 0}
                               fileId={file.id}
+                              filteringDecisions={file.filteringDecisions}
+                              allActions={file.allActions}
+                              filteringApplied={file.filteringApplied}
+                              exclusionReasons={file.exclusionReasons}
                             />
                           </motion.div>
                         )}

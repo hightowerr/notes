@@ -47,7 +47,7 @@ export async function GET(
     if (file.status === 'completed' || file.status === 'review_required') {
       const { data: processed, error: processedError } = await supabase
         .from('processed_documents')
-        .select('structured_output, confidence, processing_duration')
+        .select('structured_output, confidence, processing_duration, filtering_decisions')
         .eq('file_id', fileId)
         .single();
 
@@ -64,10 +64,32 @@ export async function GET(
       }
 
       if (processed) {
+        const filteringApplied = !!processed.filtering_decisions;
+
+        // T019: Construct response with both filtered and unfiltered action lists
+        const allActions = filteringApplied && processed.filtering_decisions
+          ? [...processed.filtering_decisions.included, ...processed.filtering_decisions.excluded]
+          : processed.structured_output.actions;
+
+        // Build exclusion reasons map for frontend
+        type ExcludedAction = {
+          text: string;
+          reason: string;
+        };
+        const exclusionReasons = filteringApplied && processed.filtering_decisions
+          ? processed.filtering_decisions.excluded.map((action: ExcludedAction) => ({
+              action_text: action.text,
+              reason: action.reason,
+            }))
+          : [];
+
         console.log('[STATUS] Returning completed status with summary:', {
           fileId,
           status: file.status,
           confidence: processed.confidence,
+          filteringApplied,
+          filteredActions: processed.structured_output.actions.length,
+          totalActions: allActions.length,
         });
 
         return Response.json({
@@ -76,6 +98,11 @@ export async function GET(
           summary: processed.structured_output,
           confidence: processed.confidence,
           processingDuration: processed.processing_duration,
+          filteringDecisions: processed.filtering_decisions || null, // T018: Include filtering metadata
+          // T019: Additional fields for toggle functionality
+          allActions, // Unfiltered list (included + excluded)
+          filteringApplied,
+          exclusionReasons,
         });
       }
     }

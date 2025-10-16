@@ -9,7 +9,15 @@
       "Bash(git commit -m \"Update CLAUDE.md with T007 export functionality and Supabase pattern\")",
       "Bash(pnpm dlx shadcn@latest add:*)",
       "Bash(npm run lint)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(bash .specify/scripts/bash/setup-plan.sh:*)",
+      "Bash(bash .specify/scripts/bash/check-prerequisites.sh:*)",
+      "Bash(dos2unix:*)",
+      "Bash(sed:*)",
+      "Bash(npm run dev)",
+      "Bash(npm run build:*)",
+      "Bash(.specify/scripts/bash/check-prerequisites.sh:*)",
+      "Bash(npm run lint:*)"
     ],
     "deny": [],
     "ask": []

@@ -35,8 +35,8 @@ test-runner → (automatic test validation)
   "task_id": "unique-id",
   "acceptance_criteria": ["API returns X", "data persists to Y"],
   "files_in_scope": ["app/api/route.ts", "lib/services/X.ts"],
-  "context_doc": ".claude/context/.md",
-  "curated_docs": ".claude/docs/curated/.md"
+  "context_doc": ".claude/context/<feature>.md",
+  "curated_docs": ".claude/docs/curated/<task>.md"
 }
 ```
 
@@ -212,7 +212,7 @@ Write `.claude/state/<task>-backend.json`:
     "lib/services/tagService.ts",
     "app/api/tags/__tests__/route.test.ts"
   ],
-  "plan_doc": ".claude/docs/be-impl-.md",
+  "plan_doc": ".claude/docs/be-impl-<task>.md",
   "api_contract": {
     "endpoint": "POST /api/tags",
     "request": { "tag": "string" },

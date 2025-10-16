@@ -380,7 +380,7 @@
 
 ---
 
-### T017 [POLISH] [P] Component tests for OutcomeBuilder and OutcomeDisplay
+### T017 [POLISH] [P] [X] Component tests for OutcomeBuilder and OutcomeDisplay
 
 **User Story**: As a developer, I can run automated tests to verify outcome UI components render correctly, handle user interactions, and display validation errors
 
@@ -389,20 +389,19 @@
   - Test: Renders 4 fields and preview
   - Test: Preview updates when fields change
   - Test: Validation errors display for invalid input
-  - Test: Submit button disabled when fields invalid
-  - Test: Calls onSubmit prop when form valid
+  - Test: Successful submission triggers toast, refresh hook, and close callbacks
   - Test: Draft recovery prompt appears when draft exists
 - **Tests**: OutcomeDisplay component tests (`app/components/__tests__/OutcomeDisplay.test.tsx`)
   - Test: Renders assembled outcome text
   - Test: Edit icon triggers modal open
-  - Test: Shows placeholder when no outcome set
-- **Setup**: React Testing Library, mock fetch API, mock localStorage
+  - Test: Refresh hook refetches latest outcome
+  - Test: Returns null when no outcome set (placeholder state)
+- **Setup**: React Testing Library, mock fetch API, Sonner toasts, and localStorage
 
 **Test Scenario**:
-1. Run `npm run test:run -- OutcomeBuilder.test.tsx`
-2. All component tests pass (6-8 tests)
-3. Run `npm run test:run -- OutcomeDisplay.test.tsx`
-4. All display tests pass (3-4 tests)
+1. Run `npm run test:run -- --pool=threads --poolOptions.threads.minThreads=1 --poolOptions.threads.maxThreads=1 app/components/__tests__/OutcomeBuilder.test.tsx app/components/__tests__/OutcomeDisplay.test.tsx`
+2. All component tests pass (9 total assertions)
+3. Command uses a single-thread worker pool to avoid Tinypool crashes observed with default settings
 
 **Files Modified**:
 - `app/components/__tests__/OutcomeBuilder.test.tsx` (create)
@@ -412,12 +411,12 @@
 
 ---
 
-### T018 [POLISH] Integration test for complete outcome creation and edit flow
+### T018 [POLISH] [X] Integration test for complete outcome creation and edit flow
 
 **User Story**: As a developer, I can run an end-to-end test that simulates a user creating, viewing, and editing an outcome to verify the complete journey works
 
 **Implementation Scope**:
-- **Tests**: Outcome flow integration test (`__tests__/integration/outcome-flow.test.ts`)
+- **Tests**: Outcome flow integration test (`__tests__/integration/outcome-flow.test.tsx`)
   - Test: Complete flow from empty state → create → display → edit → update
   - Simulates user interactions: form fill, submit, modal close, edit icon click
   - Verifies database state changes (active outcome created, old outcome deactivated)
@@ -437,7 +436,7 @@
 
 ---
 
-### T019 [POLISH] [P] Manual testing guide for outcome feature
+### T019 [POLISH] [P] [X] Manual testing guide for outcome feature
 
 **User Story**: As a QA tester or developer, I can follow a comprehensive manual testing guide to verify all outcome scenarios work correctly in a real browser environment
 

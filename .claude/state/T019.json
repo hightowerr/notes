@@ -1,0 +1,25 @@
+{
+  "agent": "slice-orchestrator",
+  "task_id": "T019",
+  "task_name": "Manual testing guide for outcome feature",
+  "status": "complete",
+  "files": [
+    "specs/002-outcome-management-shape/T008_MANUAL_TEST.md",
+    ".claude/context/002-outcome-management-shape.md",
+    "specs/002-outcome-management-shape/tasks.md"
+  ],
+  "enables_user_action": "QA testers can follow a structured manual checklist to validate all outcome scenarios—create, edit, recover drafts, handle failures, and confirm responsive UI—before release.",
+  "context_file": ".claude/context/002-outcome-management-shape.md",
+  "implementation": {
+    "status": "done",
+    "approach": "Authored a comprehensive manual QA guide aligned with quickstart scenarios, adding environment setup, eight core flows, performance checks, and result logging instructions."
+  },
+  "test": {
+    "status": "not_applicable",
+    "approach": "Documentation-only task; no automated tests executed."
+  },
+  "next_steps": [
+    "Execute manual scenarios prior to release and log findings.",
+    "Coordinate with QA to update tracker once validations pass."
+  ]
+}
