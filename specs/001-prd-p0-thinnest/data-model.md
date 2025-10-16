@@ -172,7 +172,8 @@ CREATE TABLE processing_logs (
   file_id UUID REFERENCES uploaded_files(id) ON DELETE CASCADE,
   document_id UUID REFERENCES processed_documents(id) ON DELETE CASCADE,
   operation TEXT NOT NULL CHECK (operation IN (
-    'upload', 'convert', 'summarize', 'store', 'retry', 'error'
+    'upload', 'convert', 'summarize', 'store', 'retry', 'error',
+    'cleanup', 'action_filtering_applied'
   )),
   status TEXT NOT NULL CHECK (status IN ('started', 'completed', 'failed')),
   duration INTEGER CHECK (duration >= 0),

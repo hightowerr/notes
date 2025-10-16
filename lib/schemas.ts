@@ -105,6 +105,7 @@ export const LogOperation = z.enum([
   'store',
   'retry',
   'error',
+  'action_filtering_applied',
   'cleanup',
 ]);
 

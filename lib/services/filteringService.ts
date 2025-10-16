@@ -9,18 +9,14 @@
  * T020: Includes logging to processing_logs table for transparency
  */
 
-import { Action } from '../schemas';
+import { Action, LogOperation } from '../schemas';
 import {
   UserContext,
   ExcludedAction,
   FilteringResult,
   FilteringDecision,
 } from '../schemas/filteringSchema';
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+import { supabase } from '@/lib/supabase';
 
 /**
  * Filter actions based on user context (outcome, state, capacity)
@@ -278,16 +274,19 @@ export function handleCapacityOverflow(
 export async function logFilteringOperation(
   fileId: string,
   context: UserContext,
-  result: { includedCount: number; excludedCount: number; totalActions: number },
+  result: {
+    includedCount: number;
+    excludedCount: number;
+    totalActions: number;
+    belowThresholdCount: number;
+    exceedsCapacityCount: number;
+  },
   duration: number
 ): Promise<void> {
   try {
-    const belowThresholdCount = result.excludedCount; // Simplified for now
-    const exceedsCapacityCount = 0; // Could be calculated if needed
-
-    await supabase.from('processing_logs').insert({
+    const { error } = await supabase.from('processing_logs').insert({
       file_id: fileId,
-      operation: 'action_filtering_applied',
+      operation: LogOperation.enum.action_filtering_applied,
       status: 'completed',
       duration,
       metadata: {
@@ -299,12 +298,16 @@ export async function logFilteringOperation(
         included_count: result.includedCount,
         excluded_count: result.excludedCount,
         exclusions: {
-          below_threshold: belowThresholdCount,
-          exceeds_capacity: exceedsCapacityCount,
+          below_threshold: result.belowThresholdCount,
+          exceeds_capacity: result.exceedsCapacityCount,
         },
       },
       timestamp: new Date().toISOString(),
     });
+
+    if (error) {
+      throw error;
+    }
 
     // Development mode: Enhanced console logging (T020)
     if (process.env.NODE_ENV === 'development') {
@@ -314,7 +317,9 @@ export async function logFilteringOperation(
       console.log(`- Capacity: ${context.capacity_hours}h`);
       console.log(`- Actions: ${result.totalActions} total → ${result.includedCount} included, ${result.excludedCount} excluded`);
       console.log(`- Duration: ${duration}ms`);
-      console.log(`- Exclusions: ${belowThresholdCount} below threshold, ${exceedsCapacityCount} exceed capacity`);
+      console.log(
+        `- Exclusions: ${result.belowThresholdCount} below threshold, ${result.exceedsCapacityCount} exceed capacity`
+      );
     }
   } catch (error) {
     // Don't fail filtering operation if logging fails
