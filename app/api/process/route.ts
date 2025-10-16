@@ -199,6 +199,13 @@ export async function POST(request: NextRequest) {
 
       const filterDuration = Date.now() - filterStartTime;
 
+      const belowThresholdCount = filterResult.excluded.filter(exclusion =>
+        exclusion.reason.startsWith('Below')
+      ).length;
+      const exceedsCapacityCount = filterResult.excluded.filter(exclusion =>
+        exclusion.reason.startsWith('Exceeds')
+      ).length;
+
       console.log('[PROCESS] Filtering applied:', {
         originalCount: scoredActions.length,
         filteredCount: finalActions.length,
@@ -213,6 +220,8 @@ export async function POST(request: NextRequest) {
           includedCount: finalActions.length,
           excludedCount: filterResult.excluded.length,
           totalActions: scoredActions.length,
+          belowThresholdCount,
+          exceedsCapacityCount,
         },
         filterDuration
       );
