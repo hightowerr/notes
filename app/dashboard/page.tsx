@@ -20,6 +20,7 @@ import { OutcomeDisplay } from '@/app/components/OutcomeDisplay';
 import { OutcomeBuilder } from '@/app/components/OutcomeBuilder';
 import { toast } from 'sonner';
 import JSZip from 'jszip';
+import type { Action } from '@/lib/schemas';
 
 type DocumentStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'review_required' | 'all';
 type SortField = 'date' | 'name' | 'confidence' | 'size';
@@ -28,7 +29,7 @@ type SortOrder = 'asc' | 'desc';
 interface DocumentSummary {
   topics: string[];
   decisions: string[];
-  actions: string[];
+  actions: (string | Action)[]; // Support both old string format and new Action objects
   lno_tasks: {
     leverage: string[];
     neutral: string[];
@@ -542,11 +543,15 @@ export default function DashboardPage() {
                         <p className="text-sm font-semibold mb-1">Actions ({doc.summary.actions.length})</p>
                         {doc.summary.actions.length > 0 ? (
                           <ul className="list-disc list-inside text-sm space-y-1">
-                            {doc.summary.actions.map((action, idx) => (
-                              <li key={idx} className="text-muted-foreground">
-                                {action}
-                              </li>
-                            ))}
+                            {doc.summary.actions.map((action, idx) => {
+                              // Handle both old string format and new Action object format
+                              const actionText = typeof action === 'string' ? action : action?.text || '';
+                              return (
+                                <li key={idx} className="text-muted-foreground">
+                                  {actionText}
+                                </li>
+                              );
+                            })}
                           </ul>
                         ) : (
                           <p className="text-sm text-muted-foreground">None identified</p>

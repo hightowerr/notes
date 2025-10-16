@@ -57,11 +57,21 @@ export const UploadedFileSchema = z.object({
 
 export type UploadedFile = z.infer<typeof UploadedFileSchema>;
 
+// Action item schema with metadata (T017)
+export const ActionSchema = z.object({
+  text: z.string().describe('Action description'),
+  estimated_hours: z.number().min(0.25).max(8).describe('Estimated time in hours (15min to full day)'),
+  effort_level: z.enum(['high', 'low']).describe('Effort level: high (deep focus) or low (routine)'),
+  relevance_score: z.number().min(0).max(1).optional().describe('Relevance to outcome (0-1, computed via semantic similarity)'),
+});
+
+export type Action = z.infer<typeof ActionSchema>;
+
 // Document output structure (matches data-model.md DocumentOutput)
 export const DocumentOutputSchema = z.object({
   topics: z.array(z.string()).min(1).describe('Key topics/themes from document'),
   decisions: z.array(z.string()).describe('Decisions made or documented'),
-  actions: z.array(z.string()).describe('Action items identified'),
+  actions: z.array(ActionSchema).describe('Action items with time/effort estimates'),
   lno_tasks: z.object({
     leverage: z.array(z.string()).describe('High-impact strategic tasks'),
     neutral: z.array(z.string()).describe('Necessary operational tasks'),

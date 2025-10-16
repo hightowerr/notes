@@ -4,9 +4,10 @@
  * Implements FR-003 (Data Extraction), FR-010 (Retry Logic), FR-011 (Confidence Flagging)
  */
 
-import { generateObject } from 'ai';
+import { generateObject, embed } from 'ai';
 import { openai } from '@ai-sdk/openai';
-import { DocumentOutputSchema, type DocumentOutput } from '@/lib/schemas';
+import { DocumentOutputSchema, type DocumentOutput, type Action } from '@/lib/schemas';
+import { createClient } from '@supabase/supabase-js';
 
 export class SummarizationError extends Error {
   constructor(message: string, public readonly originalError?: Error) {
@@ -78,6 +79,7 @@ export async function extractStructuredData(
       topicsCount: output.topics.length,
       decisionsCount: output.decisions.length,
       actionsCount: output.actions.length,
+      actionsWithEstimates: output.actions.filter(a => a.estimated_hours).length,
       lnoTasksCount:
         output.lno_tasks.leverage.length +
         output.lno_tasks.neutral.length +
@@ -126,7 +128,7 @@ function buildExtractionPrompt(markdown: string): string {
 Your task is to identify:
 1. **Topics**: Key themes, subjects, or areas discussed in the document
 2. **Decisions**: Explicit decisions that were made or documented
-3. **Actions**: Action items, tasks, or next steps identified
+3. **Actions**: Action items, tasks, or next steps identified (with time/effort estimates)
 4. **LNO Tasks**: Categorize tasks into three priority levels:
    - **Leverage**: High-impact strategic tasks that create significant value
    - **Neutral**: Necessary operational tasks that maintain the business
@@ -138,6 +140,20 @@ Guidelines:
 - If a category has no items, return an empty array
 - Ensure all extracted items are meaningful strings
 - For LNO classification, consider impact vs effort ratio
+
+**Action Item Requirements** (NEW):
+For each action, estimate:
+- **estimated_hours**: Time required in hours (0.25 to 8.0)
+  * 0.25 = 15 minutes (quick email, simple update)
+  * 0.5 = 30 minutes (short meeting, basic task)
+  * 1.0 = 1 hour (standard task)
+  * 2-4 = Half to full day (complex task)
+  * 6-8 = Full working day (major project work)
+- **effort_level**: Cognitive load required
+  * "high" = Requires deep focus, complex problem-solving, critical thinking
+  * "low" = Routine task, straightforward execution, low cognitive load
+
+Base estimates on typical professional work speeds. Consider task complexity, not urgency.
 
 **Task Extraction Strategy:**
 - For meeting notes/action-oriented docs: Extract explicit tasks and action items mentioned in the document
@@ -209,10 +225,15 @@ function calculateConfidence(output: DocumentOutput): number {
   }
 
   // Check for very short or suspicious content
+  // Map actions to text strings (handle both old string format and new Action objects)
+  const actionTexts = output.actions.map(action =>
+    typeof action === 'string' ? action : action.text
+  );
+
   const allContent = [
     ...output.topics,
     ...output.decisions,
-    ...output.actions,
+    ...actionTexts,
     ...output.lno_tasks.leverage,
     ...output.lno_tasks.neutral,
     ...output.lno_tasks.overhead,
@@ -260,6 +281,130 @@ function calculateConfidence(output: DocumentOutput): number {
  */
 export function calculateLowConfidence(): number {
   return 0.65; // Force low confidence for testing
+}
+
+/**
+ * Initialize Supabase client for database access
+ */
+function getSupabaseClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    throw new SummarizationError('Supabase configuration missing');
+  }
+
+  return createClient(supabaseUrl, supabaseKey);
+}
+
+/**
+ * Compute cosine similarity between two embedding vectors
+ * @param a - First embedding vector
+ * @param b - Second embedding vector
+ * @returns Similarity score (0-1, where 1 = identical)
+ */
+function cosineSimilarity(a: number[], b: number[]): number {
+  if (a.length !== b.length) {
+    throw new Error('Vectors must have the same length');
+  }
+
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+
+  for (let i = 0; i < a.length; i++) {
+    dotProduct += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+
+  normA = Math.sqrt(normA);
+  normB = Math.sqrt(normB);
+
+  if (normA === 0 || normB === 0) {
+    return 0; // Avoid division by zero
+  }
+
+  return dotProduct / (normA * normB);
+}
+
+/**
+ * Score actions against outcome using semantic similarity
+ * Task: T017 - AI extracts actions with relevance scores
+ *
+ * @param actions - Extracted actions with time/effort estimates
+ * @param outcomeText - Optional outcome statement for relevance scoring
+ * @returns Actions with relevance_score added (1.0 if no outcome)
+ */
+export async function scoreActionsWithSemanticSimilarity(
+  actions: Action[],
+  outcomeText?: string
+): Promise<Action[]> {
+  console.log('[ScoreActions] Starting semantic similarity scoring:', {
+    actionCount: actions.length,
+    hasOutcome: !!outcomeText,
+  });
+
+  // If no outcome exists, return actions with default 1.0 relevance (no filtering)
+  if (!outcomeText) {
+    console.log('[ScoreActions] No outcome found, returning default relevance 1.0');
+    return actions.map(action => ({
+      ...action,
+      relevance_score: 1.0,
+    }));
+  }
+
+  try {
+    const startTime = Date.now();
+
+    // Generate outcome embedding
+    const { embedding: outcomeEmbedding } = await embed({
+      model: openai.embedding('text-embedding-3-small'),
+      value: outcomeText,
+    });
+
+    console.log('[ScoreActions] Outcome embedding generated:', {
+      dimensions: outcomeEmbedding.length,
+    });
+
+    // Generate embeddings for each action and compute similarity
+    const scoredActions = await Promise.all(
+      actions.map(async (action) => {
+        const { embedding: actionEmbedding } = await embed({
+          model: openai.embedding('text-embedding-3-small'),
+          value: action.text,
+        });
+
+        const relevanceScore = cosineSimilarity(outcomeEmbedding, actionEmbedding);
+
+        return {
+          ...action,
+          relevance_score: Math.max(0, Math.min(1, relevanceScore)), // Clamp to 0-1
+        };
+      })
+    );
+
+    const duration = Date.now() - startTime;
+
+    console.log('[ScoreActions] Scoring complete:', {
+      duration,
+      scoredCount: scoredActions.length,
+      avgRelevance: (scoredActions.reduce((sum, a) => sum + (a.relevance_score || 0), 0) / scoredActions.length).toFixed(2),
+    });
+
+    return scoredActions;
+
+  } catch (error) {
+    console.error('[ScoreActions] Error during semantic similarity scoring:', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    // Fallback: Return actions with default 1.0 relevance (don't block processing)
+    return actions.map(action => ({
+      ...action,
+      relevance_score: 1.0,
+    }));
+  }
 }
 
 /**

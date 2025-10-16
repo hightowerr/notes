@@ -78,6 +78,12 @@ export function OutcomeDisplay({ onEdit }: OutcomeDisplayProps) {
     return null;
   }
 
+  // Build context display string
+  const contextParts = [];
+  if (outcome.state_preference) contextParts.push(outcome.state_preference);
+  if (outcome.daily_capacity_hours) contextParts.push(`${outcome.daily_capacity_hours}h/day`);
+  const contextText = contextParts.length > 0 ? ` • ${contextParts.join(' • ')}` : '';
+
   return (
     <div className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-16 items-center justify-between px-4">
@@ -85,8 +91,11 @@ export function OutcomeDisplay({ onEdit }: OutcomeDisplayProps) {
           <span className="text-2xl" aria-label="Target">
             🎯
           </span>
-          <p className="text-sm font-medium truncate" title={outcome.assembled_text}>
+          <p className="text-sm font-medium truncate" title={`${outcome.assembled_text}${contextText}`}>
             {outcome.assembled_text}
+            {contextText && (
+              <span className="text-muted-foreground">{contextText}</span>
+            )}
           </p>
         </div>
 

@@ -91,7 +91,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { direction, object, metric, clarifier } = validation.data;
+    const { direction, object, metric, clarifier, state_preference, daily_capacity_hours } = validation.data;
 
     // Assemble outcome text
     const assembledText = assembleOutcome({
@@ -156,7 +156,9 @@ export async function POST(request: Request) {
         metric_text: metric,
         clarifier,
         assembled_text: assembledText,
-        is_active: true
+        is_active: true,
+        state_preference: state_preference || null,
+        daily_capacity_hours: daily_capacity_hours || null
       })
       .select()
       .single();

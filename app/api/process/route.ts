@@ -15,9 +15,11 @@
 import { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { convertToMarkdown } from '@/lib/services/noteProcessor';
-import { extractStructuredData, calculateLowConfidence } from '@/lib/services/aiSummarizer';
+import { extractStructuredData, calculateLowConfidence, scoreActionsWithSemanticSimilarity } from '@/lib/services/aiSummarizer';
 import type { LogOperationType, LogStatusType } from '@/lib/schemas';
 import { processingQueue } from '@/lib/services/processingQueue';
+import { filterActions, shouldApplyFiltering, logFilteringOperation } from '@/lib/services/filteringService';
+import type { UserContext } from '@/lib/schemas/filteringSchema';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
@@ -143,6 +145,84 @@ export async function POST(request: NextRequest) {
     const summarizeDuration = Date.now() - summarizeStartTime;
     await logOperation(fileId, 'summarize', 'completed', summarizeDuration);
 
+    // 6.5. Score actions against active outcome (T017)
+    const scoreStartTime = Date.now();
+
+    // Fetch active outcome with context fields (T016, T018)
+    const { data: outcome } = await supabase
+      .from('user_outcomes')
+      .select('assembled_text, state_preference, daily_capacity_hours')
+      .eq('is_active', true)
+      .maybeSingle();
+
+    console.log('[PROCESS] Scoring actions against outcome:', {
+      hasOutcome: !!outcome,
+      outcomeText: outcome?.assembled_text?.substring(0, 50) + '...' || 'none',
+      actionCount: aiResult.output.actions.length,
+    });
+
+    // Score actions with semantic similarity
+    const scoredActions = await scoreActionsWithSemanticSimilarity(
+      aiResult.output.actions,
+      outcome?.assembled_text
+    );
+
+    const scoreDuration = Date.now() - scoreStartTime;
+    console.log('[PROCESS] Action scoring complete:', {
+      duration: scoreDuration,
+      avgRelevance: scoredActions.length > 0
+        ? (scoredActions.reduce((sum, a) => sum + (a.relevance_score || 0), 0) / scoredActions.length).toFixed(2)
+        : 'N/A',
+    });
+
+    // 6.6. Apply context-aware filtering (T018, T020)
+    let filteringDecision = null;
+    let finalActions = scoredActions;
+
+    if (outcome && shouldApplyFiltering(outcome)) {
+      const filterStartTime = Date.now();
+      console.log('[PROCESS] Applying context-aware filtering:', {
+        state: outcome.state_preference,
+        capacity: outcome.daily_capacity_hours + 'h',
+      });
+
+      const userContext: UserContext = {
+        goal: outcome.assembled_text || '',
+        state: outcome.state_preference as 'Energized' | 'Low energy',
+        capacity_hours: outcome.daily_capacity_hours || 0,
+        threshold: 0.90, // 90% relevance threshold
+      };
+
+      const filterResult = filterActions(scoredActions, userContext);
+      finalActions = filterResult.included;
+      filteringDecision = filterResult.decision;
+
+      const filterDuration = Date.now() - filterStartTime;
+
+      console.log('[PROCESS] Filtering applied:', {
+        originalCount: scoredActions.length,
+        filteredCount: finalActions.length,
+        excludedCount: filterResult.excluded.length,
+      });
+
+      // T020: Log filtering operation to processing_logs
+      await logFilteringOperation(
+        fileId,
+        userContext,
+        {
+          includedCount: finalActions.length,
+          excludedCount: filterResult.excluded.length,
+          totalActions: scoredActions.length,
+        },
+        filterDuration
+      );
+    } else {
+      console.log('[PROCESS] No filtering applied (no outcome or missing state/capacity)');
+    }
+
+    // Update the output with filtered actions
+    aiResult.output.actions = finalActions;
+
     // 7. Store Markdown and JSON in Supabase storage
     await logOperation(fileId, 'store', 'started');
     const storeStartTime = Date.now();
@@ -184,7 +264,8 @@ export async function POST(request: NextRequest) {
         confidence: aiResult.confidence,
         processing_duration: processingDuration,
         processed_at: processedAt.toISOString(),
-        expires_at: expiresAt.toISOString(), // ✅ FIX: Add expires_at field
+        expires_at: expiresAt.toISOString(),
+        filtering_decisions: filteringDecision, // T018: Store filtering metadata (NULL if no filtering)
       })
       .select()
       .single();

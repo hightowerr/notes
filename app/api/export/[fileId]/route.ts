@@ -47,8 +47,24 @@ function convertToMarkdown(filename: string, summary: z.infer<typeof DocumentOut
   // Actions section
   markdown += `## Action Items\n\n`;
   if (summary.actions && summary.actions.length > 0) {
-    summary.actions.forEach((action: string) => {
-      markdown += `- [ ] ${action}\n`;
+    summary.actions.forEach((action) => {
+      // Handle both old string format and new Action object format
+      const actionText = typeof action === 'string' ? action : action.text;
+      const estimatedHours = typeof action === 'object' ? action.estimated_hours : undefined;
+      const effortLevel = typeof action === 'object' ? action.effort_level : undefined;
+      const relevanceScore = typeof action === 'object' ? action.relevance_score : undefined;
+
+      markdown += `- [ ] ${actionText}`;
+      if (estimatedHours || effortLevel || relevanceScore !== undefined) {
+        markdown += ` (`;
+        const metadata = [];
+        if (estimatedHours) metadata.push(`${estimatedHours}h`);
+        if (effortLevel) metadata.push(`${effortLevel} effort`);
+        if (relevanceScore !== undefined) metadata.push(`${Math.round(relevanceScore * 100)}% relevant`);
+        markdown += metadata.join(', ');
+        markdown += `)`;
+      }
+      markdown += `\n`;
     });
   } else {
     markdown += `*No actions identified*\n`;
