@@ -8,6 +8,9 @@ import { generateObject, embed } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { DocumentOutputSchema, type DocumentOutput, type Action } from '@/lib/schemas';
 import { createClient } from '@supabase/supabase-js';
+import { generateTaskId } from './embeddingService';
+import { embeddingQueue } from './embeddingQueue';
+import type { EmbeddingTask } from './embeddingQueue';
 
 export class SummarizationError extends Error {
   constructor(message: string, public readonly originalError?: Error) {
@@ -408,24 +411,39 @@ export async function scoreActionsWithSemanticSimilarity(
 }
 
 /**
- * Re-score actions against a new outcome context
+ * Re-score actions against a new outcome context with reflection context
  * Task: T012 - Async recompute job integration
+ * Task: T023 - Reflection context injection
  *
  * @param document - Processed document with structured_output
  * @param outcomeText - Assembled outcome statement for context
+ * @param reflectionContext - Optional formatted reflection context string
  * @returns Updated LNO task categorization (P0: returns original, AI rescoring deferred)
  *
  * NOTE: P0 implementation is a placeholder. Future enhancement will:
  * - Use Vercel AI SDK to re-evaluate LNO task classifications
  * - Consider outcome alignment when scoring tasks
+ * - Inject reflection context into AI prompt for dynamic prioritization
  * - Update processed_documents.structured_output with new classifications
+ *
+ * Example AI Prompt (future):
+ * ```
+ * USER'S OUTCOME: "Increase monthly recurring revenue by 25% within 6 months"
+ *
+ * RECENT REFLECTIONS (weighted by recency):
+ * 1. "Feeling energized after client win" (weight: 1.00, Just now)
+ * 2. "Only have 1-hour blocks today" (weight: 0.95, 2 hours ago)
+ *
+ * Re-score these tasks...
+ * ```
  */
 export async function scoreActions(
   document: {
     id: string;
     structured_output: DocumentOutput;
   },
-  outcomeText: string
+  outcomeText: string,
+  reflectionContext?: string
 ): Promise<{
   leverage: string[];
   neutral: string[];
@@ -435,11 +453,21 @@ export async function scoreActions(
     documentId: document.id,
     outcomeText: outcomeText.substring(0, 50) + '...',
     actionCount: document.structured_output.actions?.length || 0,
+    hasReflectionContext: !!reflectionContext,
   });
 
+  // T023: Log reflection context if present
+  if (reflectionContext) {
+    console.log('[ScoreActions] Reflection context available:', {
+      reflectionLines: reflectionContext.split('\n').length,
+      preview: reflectionContext.substring(0, 100) + '...',
+    });
+  }
+
   // P0: Return original LNO classifications unchanged
-  // Future: Use AI to reclassify tasks based on outcome alignment
+  // Future: Use AI to reclassify tasks based on outcome alignment + reflection context
   // Example: Tasks aligned with "Increase revenue" might move from Neutral → Leverage
+  // Example: If reflection says "burnt out", prioritize low-effort tasks
 
   console.log('[ScoreActions] P0 implementation: returning original classifications');
 
@@ -448,4 +476,98 @@ export async function scoreActions(
     neutral: document.structured_output.lno_tasks?.neutral || [],
     overhead: document.structured_output.lno_tasks?.overhead || [],
   };
+}
+
+/**
+ * Generate and store embeddings for tasks in document
+ * Task: T023 - Automatic embedding generation during document processing
+ * Task: T026 - Queue embedding requests to prevent rate limiting
+ *
+ * @param documentId - Document UUID
+ * @param actions - Extracted actions from document
+ * @returns Success/failure counts and embedding status
+ */
+export async function generateAndStoreEmbeddings(
+  documentId: string,
+  actions: Action[]
+): Promise<{
+  success: number;
+  failed: number;
+  pending: number;
+  embeddingsStatus: 'completed' | 'pending' | 'failed';
+}> {
+  console.log('[GenerateEmbeddings] Starting embedding generation:', {
+    documentId,
+    actionCount: actions.length,
+  });
+
+  // If no actions, skip embedding generation
+  if (!actions || actions.length === 0) {
+    console.log('[GenerateEmbeddings] No actions to process, skipping embedding generation');
+    return {
+      success: 0,
+      failed: 0,
+      pending: 0,
+      embeddingsStatus: 'completed',
+    };
+  }
+
+  try {
+    // Prepare tasks for embedding generation
+    const tasks: EmbeddingTask[] = actions.map(action => ({
+      task_id: generateTaskId(action.text, documentId),
+      task_text: action.text,
+      document_id: documentId,
+    }));
+
+    console.log('[GenerateEmbeddings] Enqueuing tasks for embedding generation:', {
+      taskCount: tasks.length,
+      documentId: documentId.substring(0, 8) + '...',
+    });
+
+    // T026: Use queue to control rate of embedding requests
+    const result = await embeddingQueue.enqueue(tasks, documentId);
+
+    // T025: Determine overall embedding status
+    // - All completed → 'completed'
+    // - Some completed, some pending/failed → 'pending' (graceful degradation)
+    // - All pending/failed → 'pending' (no blocking)
+    let embeddingsStatus: 'completed' | 'pending' | 'failed';
+    if (result.success === tasks.length) {
+      embeddingsStatus = 'completed';
+    } else {
+      // Any failures or pending tasks → mark as 'pending' (FR-024)
+      embeddingsStatus = 'pending';
+    }
+
+    console.log('[GenerateEmbeddings] Embedding generation complete:', {
+      duration: result.duration,
+      total: tasks.length,
+      completed: result.success,
+      failed: result.failed,
+      pending: result.pending,
+      embeddingsStatus,
+    });
+
+    return {
+      success: result.success,
+      failed: result.failed,
+      pending: result.pending,
+      embeddingsStatus,
+    };
+
+  } catch (error) {
+    console.error('[GenerateEmbeddings] Unexpected error during embedding generation:', {
+      documentId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    // Graceful degradation: Mark all as pending (FR-024)
+    return {
+      success: 0,
+      failed: 0,
+      pending: actions.length,
+      embeddingsStatus: 'pending',
+    };
+  }
 }

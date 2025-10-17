@@ -1,8 +1,12 @@
 # Project Standards - Shared Knowledge Base
 
-**Last Updated**: 2025-10-09  
-**Purpose**: Single source of truth for all Claude Code agents  
+**Last Updated**: 2025-10-17
+**Purpose**: Single source of truth for all Claude Code agents
 **Usage**: All agents reference this to avoid duplication
+
+**Related Documentation:**
+- **CLAUDE.md** - Project overview, architecture, tech stack, implementation status
+- **This file** - Universal standards, patterns, workflows for all agents
 
 ## Tech Stack
 
@@ -413,6 +417,65 @@ All UI implementations must meet **WCAG 2.1 AA minimum**:
 - ✅ Use screen reader to verify (VoiceOver, NVDA, JAWS)
 - ✅ Check with browser dev tools (Lighthouse, axe)
 
+## Design System
+
+### Depth-Based Color Layering (4-Layer System)
+
+The application uses a depth-based color system in `app/globals.css` that creates visual hierarchy through color contrast instead of borders:
+
+**Background Layers:**
+- `--bg-layer-1`: Page background (darkest in light mode, darkest in dark mode)
+- `--bg-layer-2`: Container/Card backgrounds
+- `--bg-layer-3`: Interactive elements (buttons, tabs, inputs)
+- `--bg-layer-4`: Elevated states (hover, selected, active)
+
+**Primary Brand Shades:**
+- `--primary-2`: Base brand color (oklch 0.55 0.22 264.53 - purple/blue)
+- `--primary-3`: Hover/Active states
+- `--primary-4`: Lightest accents
+
+**Semantic Colors:**
+Each semantic color has three variants:
+- `*-bg`: Background color for layer 3
+- `*-hover`: Hover state for layer 4
+- `*-text`: Text color with proper contrast
+
+Available: `success`, `warning`, `info`, `destructive`
+
+**Text Colors:**
+- `--text-heading`: High contrast for headings (oklch 0.10 in light, 0.98 in dark)
+- `--text-body`: Standard body text (oklch 0.25 in light, 0.85 in dark)
+- `--text-muted`: Secondary text (oklch 0.45 in light, 0.60 in dark)
+- `--text-on-primary`: White text on colored backgrounds
+
+**Two-Layer Shadow System:**
+Creates depth through inner highlight + outer shadow:
+
+- `.shadow-2layer-sm`: Subtle depth (badges, nav items, tabs)
+  - Combines: `inset 0 1px 0 rgba(255,255,255,0.1)` + `0 1px 2px rgba(0,0,0,0.1)`
+- `.shadow-2layer-md`: Standard depth (cards, dropdowns, modals)
+  - Combines: `inset 0 1px 0 rgba(255,255,255,0.15)` + `0 3px 6px rgba(0,0,0,0.15)`
+- `.shadow-2layer-lg`: Prominent depth (hover states, focused elements)
+  - Combines: `inset 0 2px 0 rgba(255,255,255,0.2)` + `0 6px 12px rgba(0,0,0,0.2)`
+
+**Gradient Utilities:**
+- `.gradient-shiny`: Premium "light from top" effect with built-in inner shadow
+- `.gradient-shiny-subtle`: Subtle gradient for interactive elements
+- `.hover-shadow-lift`: Smooth transform (-2px) + shadow transition on hover
+
+**Component Shadow Usage:**
+- Buttons: `shadow-2layer-sm` → `shadow-2layer-md` on hover
+- Cards: `shadow-2layer-md` → `shadow-2layer-lg` on hover
+- Badges: `shadow-2layer-sm` (static)
+- Headers/Footers: `shadow-2layer-md`
+
+**Design System Rules:**
+- ❌ Never use borders (border-0) - rely on color contrast and shadows
+- ✅ Always use depth layers for backgrounds
+- ✅ Use semantic colors (`*-bg`, `*-text`) for status indicators
+- ✅ Apply `.hover-shadow-lift` for interactive elements
+- ✅ Ensure WCAG AA contrast (4.5:1 for text)
+
 ## ShadCN UI Conventions
 
 ### Installation (MANDATORY)
@@ -804,18 +867,199 @@ When to stop and ask orchestrator/user:
 - Test environment broken
 - Build failing for unknown reason
 
+## Common Development Patterns
+
+### Adding a New API Endpoint
+
+1. Create test file in `__tests__/contract/`
+2. Define Zod schema in `lib/schemas.ts`
+3. Implement handler in `app/api/[name]/route.ts`
+4. Add error handling with proper HTTP status codes
+5. Log operations to console and `processing_logs` table
+
+**Example structure:**
+```typescript
+// app/api/example/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { exampleSchema } from '@/lib/schemas';
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const validated = exampleSchema.parse(body);
+
+    // Business logic here
+
+    return NextResponse.json({ success: true }, { status: 200 });
+  } catch (error) {
+    console.error('[API:example]:', error);
+    return NextResponse.json(
+      { error: 'Validation failed' },
+      { status: 400 }
+    );
+  }
+}
+```
+
+### Adding a New Component
+
+1. Use shadcn if exists: `pnpm dlx shadcn@latest add <component>`
+2. Create in `app/components/` if custom needed
+3. Include TypeScript types for all props
+4. Support dark/light mode via `next-themes`
+5. Add test file in `app/components/__tests__/`
+
+**Example structure:**
+```typescript
+// app/components/Example.tsx
+interface ExampleProps {
+  title: string;
+  onAction: () => void;
+}
+
+export function Example({ title, onAction }: ExampleProps) {
+  return (
+    <div className="bg-layer-2 p-4 shadow-2layer-md">
+      <h2 className="text-heading">{title}</h2>
+      <button onClick={onAction}>Action</button>
+    </div>
+  );
+}
+```
+
+### Adding a New Service
+
+1. Create in `lib/services/`
+2. Export clear interface/types
+3. Include comprehensive error handling
+4. Add structured logging for observability
+5. Test with both success and failure scenarios
+
+**Example structure:**
+```typescript
+// lib/services/exampleService.ts
+export interface ExampleServiceResult {
+  success: boolean;
+  data?: unknown;
+  error?: string;
+}
+
+export async function processExample(input: string): Promise<ExampleServiceResult> {
+  try {
+    // Business logic here
+    console.log('[ExampleService]: Processing started');
+
+    return { success: true, data: result };
+  } catch (error) {
+    console.error('[ExampleService]:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+}
+```
+
+### Supabase Relationship Query Pattern
+
+When querying nested relationships with `.single()`, Supabase may return the relationship as:
+- A single object (most common)
+- A single-item array (sometimes)
+- `null` (when no related record exists)
+
+**Always normalize before accessing:**
+```typescript
+const processedDoc = Array.isArray(fileData.processed_documents)
+  ? fileData.processed_documents[0]
+  : fileData.processed_documents;
+
+if (!processedDoc) {
+  // Handle missing data
+  return NextResponse.json({ error: 'Document not found' }, { status: 404 });
+}
+
+// Now safe to use processedDoc
+```
+
+**Where to see examples:**
+- `app/api/export/[fileId]/route.ts` (lines 164-179)
+- `app/api/documents/route.ts` (lines 116-118)
+
+### React Hook Form State Synchronization Pattern
+
+When reading form values immediately after user interaction (e.g., on modal close), React Hook Form may not have synchronized field state yet.
+
+**Problem:** `form.getValues()` returns stale/empty values when called during the same event loop as field onChange.
+
+**Solution:** Use `setTimeout` to defer reading until after form state updates:
+```typescript
+const handleModalClose = (open: boolean) => {
+  if (!open) {
+    // Defer to next event loop to ensure form state is synchronized
+    setTimeout(() => {
+      const values = form.getValues();
+      saveDraft(values);
+    }, 0);
+  }
+  onOpenChange(open);
+};
+```
+
+**When to use:** Any time you need to read form state immediately after user-triggered events (click, blur, close).
+
+**Example:** See `app/components/OutcomeBuilder.tsx:142-153` (draft save on modal close)
+
+### Edge Cases & Error Handling Reference
+
+| Case | Behavior |
+|------|----------|
+| Unsupported file format | Client: Instant toast rejection. Server: 400 with descriptive error |
+| File >10MB | Client: Instant toast rejection. Server: 413 "FILE_TOO_LARGE" |
+| Duplicate file (same hash) | Server: 409 "DUPLICATE_FILE" |
+| Multiple invalid files | Client: Staggered toasts (100ms delay between each) |
+| Unreadable PDF | OCR fallback (placeholder), mark for review |
+| Invalid AI JSON | Retry once with adjusted parameters |
+| Confidence <80% | Mark as "review_required" status |
+| Processing >8s | Continue processing but log warning |
+
 ## Known Issues & Workarounds
+
+### pdf-parse Library Issue
+
+**Problem:** pdf-parse v1.1.1 executes test code at module import time, causing `ENOENT: ./test/data/05-versions-space.pdf` error.
+
+**Solution:** Automatic patch applied via `postinstall` hook:
+- `scripts/patch-pdf-parse.js` disables debug mode (`isDebugMode = false`)
+- Dynamic import in `noteProcessor.ts` prevents immediate execution
+- Patch runs after `npm install` / `pnpm install`
+
+**Verification:** After install, check that `node_modules/.pnpm/pdf-parse@1.1.1/node_modules/pdf-parse/index.js` contains `isDebugMode = false` (line 6)
+
+**When this affects you:**
+- First-time setup after `npm install`
+- After fresh clone of repository
+- After clearing `node_modules`
 
 ### FormData Testing Limitation
 
-**Issue**: FormData serialization fails in Vitest test environment  
-**Symptom**: Tests involving file uploads fail with serialization errors  
+**Issue**: FormData serialization fails in Vitest test environment
+**Symptom**: Tests involving file uploads fail with serialization errors
 **Workaround**: Use manual testing approach
 
 - Create manual test document in `.claude/testing/`
 - Follow pattern from `T002_MANUAL_TEST.md`
 - Document test steps and expected results
 - Verify manually before deployment
+
+**Root Cause:**
+- undici's FormData + Next.js Request incompatibility in test environment
+- File objects serialize to strings during Request.formData() call
+- Constructor shows 'String' instead of 'File'
+
+**Future Fix Options:**
+- Use MSW (Mock Service Worker) to intercept before Next.js serialization
+- Run actual Next.js server for integration tests
+- Wait for Vitest/Next.js FormData support improvements
 
 **When this affects you:**
 - Any file upload tests

@@ -6,6 +6,15 @@ default_agent: slice-orchestrator
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**See `.claude/standards.md` for universal standards that apply to all agents:**
+- TypeScript & code quality rules
+- TDD workflow (Red-Green-Refactor)
+- Design system & ShadCN conventions
+- Common development patterns
+- Error handling standards
+- Testing requirements
+- Known issues & workarounds
+
 ## Project Overview
 
 **AI Note Synthesiser** — An autonomous agent that detects uploaded note files, converts them to Markdown, summarizes content, and extracts structured data without manual intervention.
@@ -33,8 +42,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run test:ui` - Run tests with Vitest UI
 - `npm run test:run` - Run tests once (CI mode)
 - `npm run test:run -- <file>` - Run specific test file
+- `npm run test:unit` - Run unit tests only
+- `npm run test:contract` - Run contract tests only
+- `npm run test:integration` - Run integration tests only
 
-**Note:** 23/38 automated tests passing. 15 tests blocked by FormData serialization in test environment. Use manual testing (see `T002_MANUAL_TEST.md`) for upload/processing validation.
+**Note:** 27/44 automated tests passing (61% pass rate). Blockers: FormData serialization in test environment, test isolation timing. Use manual testing guides (`T002_MANUAL_TEST.md`, etc.) for upload/processing validation.
 
 ### Workflow Commands (.specify/)
 - `/plan` - Create implementation plan from feature spec
@@ -103,6 +115,289 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Dry-run mode for testing without deletion
 - Structured logging with cleanup metrics
 
+### Vector Embedding Infrastructure (T020-T027)
+
+**Purpose**: Enable sub-500ms semantic search across all document tasks using vector embeddings. During document processing, the system automatically generates 1536-dimension embeddings for each extracted task and stores them in pgvector for fast similarity matching.
+
+**Tech Stack**: OpenAI text-embedding-3-small via Vercel AI SDK, Supabase pgvector extension, IVFFlat index
+
+#### Embedding Generation Flow
+
+```
+1. Document Processing (Automatic)
+   ├─ POST /api/process completes task extraction
+   ├─ embeddingService.generateBatchEmbeddings(tasks)
+   │   ├─ Batch size: 50 tasks per batch
+   │   ├─ Queue rate limiting: max 3 concurrent documents
+   │   ├─ Individual task error handling (no batch blocking)
+   │   └─ Timeout: 10s per embedding API call
+   ├─ vectorStorage.storeEmbeddings(results)
+   │   ├─ Bulk insert to task_embeddings table
+   │   ├─ Status tracking: completed/pending/failed
+   │   └─ Error message logging for failures
+   └─ Update document.embeddings_status field
+       ├─ "completed": All tasks have embeddings
+       └─ "pending": Some/all embeddings failed (document still usable)
+
+2. Semantic Search (API)
+   ├─ POST /api/embeddings/search
+   ├─ Generate query embedding (same model)
+   ├─ Supabase RPC: search_similar_tasks(query_embedding, threshold, limit)
+   ├─ Returns: task_id, task_text, document_id, similarity (sorted)
+   └─ Response time: <500ms (95th percentile target)
+```
+
+**Key Services**:
+
+- **`lib/services/embeddingService.ts`** - OpenAI embedding generation
+  - `generateEmbedding(text: string)`: Single embedding via Vercel AI SDK `embed()` function
+  - `generateBatchEmbeddings(tasks: Task[])`: Batch processing with Promise.all (max 50 tasks)
+  - Error handling: Individual task failures don't block batch, status marked appropriately
+  - Returns: Array of `EmbeddingGenerationResult` with status (completed/pending/failed)
+
+- **`lib/services/vectorStorage.ts`** - Supabase pgvector operations
+  - `storeEmbeddings(embeddings: TaskEmbeddingInsert[])`: Bulk insert with conflict handling
+  - `searchSimilarTasks(queryEmbedding: number[], threshold: number, limit: number)`: Similarity search
+  - `getEmbeddingsByDocumentId(documentId: string)`: Query embeddings for document
+  - `deleteEmbeddingsByDocumentId(documentId: string)`: Manual cleanup (CASCADE handles automatic)
+
+- **`lib/services/embeddingQueue.ts`** - Rate limiting (T026)
+  - In-memory queue using `p-limit` library (max 3 concurrent document processing jobs)
+  - Each document processes tasks serially in batches of 50
+  - Prevents OpenAI API rate limiting during concurrent uploads
+  - Queue depth tracking for monitoring
+
+#### Search API Usage Patterns
+
+**Basic Search**:
+```typescript
+// Search for semantically similar tasks
+const response = await fetch('/api/embeddings/search', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    query: 'increase monthly revenue',
+    limit: 20,        // Optional, default 20
+    threshold: 0.7    // Optional, default 0.7 (0.0-1.0)
+  })
+});
+
+const data = await response.json();
+// {
+//   tasks: [
+//     {
+//       task_id: "abc123...",
+//       task_text: "Implement revenue tracking dashboard",
+//       document_id: "550e8400-e29b-41d4-a716-446655440000",
+//       similarity: 0.89
+//     },
+//     ...
+//   ],
+//   query: "increase monthly revenue",
+//   count: 15
+// }
+```
+
+**Check Embedding Status**:
+```typescript
+// Check if document has embeddings ready
+const statusResponse = await fetch(`/api/status/${fileId}`);
+const status = await statusResponse.json();
+
+if (status.embeddings_status === 'completed') {
+  // All embeddings generated successfully - safe to search
+} else if (status.embeddings_status === 'pending') {
+  // Some/all embeddings failed - document usable but search may miss tasks
+  // No automatic retry per FR-031
+}
+```
+
+**Handle Pending Embeddings**:
+```typescript
+// Query tasks with pending embeddings (for manual retry)
+const { data: pendingTasks } = await supabase
+  .from('task_embeddings')
+  .select('task_id, task_text, error_message')
+  .eq('document_id', fileId)
+  .eq('status', 'pending');
+
+// Note: Manual re-processing required - no automatic retry
+```
+
+#### Database Schema
+
+**task_embeddings Table**:
+```sql
+CREATE TABLE task_embeddings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id TEXT NOT NULL UNIQUE,              -- sha256(task_text + document_id)
+  task_text TEXT NOT NULL,
+  document_id UUID NOT NULL REFERENCES processed_documents(id) ON DELETE CASCADE,
+  embedding vector(1536) NOT NULL,           -- OpenAI text-embedding-3-small
+  status TEXT NOT NULL DEFAULT 'pending'     -- 'completed' | 'pending' | 'failed'
+    CHECK (status IN ('completed', 'pending', 'failed')),
+  error_message TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- IVFFlat index for fast similarity search (lists=100 for 10K embeddings)
+CREATE INDEX idx_task_embeddings_vector
+  ON task_embeddings USING ivfflat (embedding vector_cosine_ops)
+  WITH (lists = 100);
+
+-- Additional indexes
+CREATE INDEX idx_task_embeddings_task_id ON task_embeddings(task_id);
+CREATE INDEX idx_task_embeddings_document_id ON task_embeddings(document_id);
+CREATE INDEX idx_task_embeddings_status ON task_embeddings(status) WHERE status != 'completed';
+```
+
+**search_similar_tasks RPC Function**:
+```sql
+CREATE OR REPLACE FUNCTION search_similar_tasks(
+  query_embedding vector(1536),
+  match_threshold float DEFAULT 0.7,
+  match_count int DEFAULT 20
+)
+RETURNS TABLE (
+  task_id text,
+  task_text text,
+  document_id uuid,
+  similarity float
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    t.task_id,
+    t.task_text,
+    t.document_id,
+    1 - (t.embedding <=> query_embedding) AS similarity
+  FROM task_embeddings t
+  WHERE t.status = 'completed'
+    AND 1 - (t.embedding <=> query_embedding) > match_threshold
+  ORDER BY t.embedding <=> query_embedding
+  LIMIT match_count;
+END;
+$$;
+```
+
+#### Troubleshooting
+
+**Issue: Embeddings not being generated**
+
+**Symptoms**: task_embeddings table empty after document processing
+
+**Check**:
+1. Verify `OPENAI_API_KEY` environment variable is set correctly
+2. Check document processing completed successfully (`status = 'completed'`)
+3. Verify migrations 007, 008, 009 applied to database
+4. Check error logs for API failures: `grep "Embedding.*failed" logs/error.log`
+
+**Fix**: Ensure embedding service is hooked into processing pipeline in `lib/services/aiSummarizer.ts`
+
+---
+
+**Issue: Search returns empty results**
+
+**Symptoms**: POST /api/embeddings/search returns `{ tasks: [], count: 0 }`
+
+**Check**:
+1. Verify embeddings exist: `SELECT count(*) FROM task_embeddings WHERE status = 'completed';`
+2. Try lower threshold (0.3 for testing): `{ "query": "...", "threshold": 0.3 }`
+3. Check query embedding generated successfully (no 500 error)
+4. Verify pgvector index created: `\d task_embeddings` in psql
+
+**Fix**: Run `ANALYZE task_embeddings;` to refresh query planner statistics
+
+---
+
+**Issue: Search slower than 500ms**
+
+**Symptoms**: API response time exceeds 500ms for 200+ embeddings
+
+**Check**:
+1. Verify IVFFlat index exists: `\d task_embeddings` (should show ivfflat index)
+2. Check index lists parameter: Should be ~100 for 10K rows (scale formula: sqrt(row_count))
+3. Query plan using index: `EXPLAIN ANALYZE SELECT * FROM search_similar_tasks(...);`
+4. Database resource usage: Supabase dashboard → Database → Performance
+
+**Fix**: Rebuild index with correct lists parameter or upgrade to HNSW index for >100K embeddings
+
+---
+
+**Issue: Document marked "pending" despite upload success**
+
+**Symptoms**: `embeddings_status = 'pending'` after document processing completes
+
+**Expected Behavior**: This is intentional graceful degradation (FR-024)
+
+**Cause**: OpenAI API was unavailable during embedding generation. Document remains fully usable (summary displayed), but tasks won't appear in semantic search until embeddings generated.
+
+**Resolution**:
+1. Check error logs for root cause: `SELECT error_message FROM task_embeddings WHERE document_id = '{fileId}';`
+2. Common causes: API timeout, rate limiting, network issues, invalid API key
+3. **No automatic retry** (per FR-031) - requires manual re-processing if needed
+
+---
+
+**Issue: Rate limit errors from OpenAI API**
+
+**Symptoms**: Errors in logs: `"rate_limit_exceeded"` or `429 Too Many Requests`
+
+**Check**:
+1. Verify embedding queue active: Check `lib/services/embeddingQueue.ts` initialized
+2. Check concurrent upload count: Should be max 3 documents processing simultaneously
+3. Batch size: Should be 50 tasks per batch
+
+**Fix**: Ensure queue properly limits concurrency. If persistent, reduce batch size from 50 to 25 or add delay between batches.
+
+---
+
+#### Performance & Scale
+
+**P0 Scale Limits** (Current Implementation):
+- **Target**: 10,000 total tasks across all documents
+- **Search Performance**: <500ms at 10K scale (95th percentile)
+- **Storage**: ~62 MB for 10K embeddings (~6.2 KB per task)
+- **Index**: IVFFlat with lists=100 (optimal for 10K rows)
+- **Queue**: In-memory (resets on server restart, acceptable for P0)
+- **Concurrent Processing**: Max 3 documents simultaneously
+- **Batch Size**: 50 tasks per batch
+
+**Performance Benchmarks**:
+- Embedding generation: <2s added to document processing time
+- Single embedding: ~150ms average latency
+- Batch of 50 tasks: ~3-4s total (with queue rate limiting)
+- Search (200 embeddings): ~150-250ms
+- Search (10K embeddings): ~300-450ms
+
+**Future Scale Path** (Beyond 10K → 100K+ embeddings):
+1. **Vector Index Upgrade**: Migrate from IVFFlat to HNSW index
+   - IVFFlat: O(log N) search, rebuild required when lists parameter changes
+   - HNSW: O(log N) search, incremental updates, better recall at scale
+   - Migration SQL: `CREATE INDEX USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);`
+
+2. **Persistent Queue**: Replace in-memory queue with database-backed queue
+   - Add `embedding_queue` table (schema in data-model.md)
+   - Enable job persistence across server restarts
+   - Support priority-based processing
+
+3. **Batch Size Optimization**: Increase from 50 to 100-200 tasks per batch
+   - Requires OpenAI tier upgrade for higher rate limits
+   - Monitor for diminishing returns (network overhead vs parallelization)
+
+4. **Caching Layer**: Add Redis cache for frequently searched queries
+   - Cache query embeddings (avoid re-generating for common searches)
+   - TTL: 1 hour (balance freshness vs performance)
+
+**Monitoring Recommendations**:
+- Track search latency P50/P95/P99 percentiles
+- Alert if P95 exceeds 500ms threshold
+- Monitor embedding generation success rate (target >95%)
+- Track queue depth during peak upload periods
+
 ### Database Schema (Supabase)
 
 **Tables:**
@@ -110,6 +405,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `processed_documents` - AI outputs, Markdown content, 30-day auto-expiry
 - `processing_logs` - Metrics, errors, retry attempts
 - `user_outcomes` - User-defined outcome statements (T008-T011)
+- `task_embeddings` - Vector embeddings for semantic search (T020-T027, see Vector Embedding Infrastructure section)
 
 **Storage:**
 - `notes/` - Original uploaded files (hash-based naming)
@@ -135,6 +431,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `POST /api/outcomes` - Create or update outcome statement (T009)
   - Validates with Zod, assembles text, deactivates old outcome if exists
   - Returns: 201 (created) or 200 (updated) with assembled text
+- `POST /api/embeddings/search` - Semantic search across task embeddings (T024, T027)
+  - Request body: `{ query: string, limit?: number (default 20), threshold?: number (default 0.7) }`
+  - Returns: 200 with `{ tasks: SimilaritySearchResult[], query: string, count: number }`
+  - Response time target: <500ms (95th percentile)
+  - Error codes: 400 (invalid query/threshold), 500 (embedding generation failed), 503 (API unavailable)
 - `GET /api/test-supabase` - Connection health check (dev only)
 
 ### Frontend Architecture
@@ -154,60 +455,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Design System
 
-**Depth-Based Color Layering (4-Layer System):**
-The application uses a depth-based color system in `app/globals.css` that creates visual hierarchy through color contrast instead of borders:
+**See `.claude/standards.md` for complete design system documentation including:**
+- Depth-Based Color Layering (4-layer system with `--bg-layer-1` through `--bg-layer-4`)
+- Two-Layer Shadow System (`.shadow-2layer-sm/md/lg`)
+- Gradient utilities and hover effects
+- ShadCN UI conventions and component selection
+- Accessibility requirements (WCAG 2.1 AA)
 
-- `--bg-layer-1`: Page background (darkest in light mode, darkest in dark mode)
-- `--bg-layer-2`: Container/Card backgrounds
-- `--bg-layer-3`: Interactive elements (buttons, tabs, inputs)
-- `--bg-layer-4`: Elevated states (hover, selected, active)
+**Key Design Variables** (defined in `app/globals.css`):
+- **Background Layers**: `--bg-layer-1` (page) → `--bg-layer-4` (elevated states)
+- **Primary Brand**: `--primary-2` (base), `--primary-3` (hover), `--primary-4` (accent)
+- **Semantic Colors**: Each has `*-bg`, `*-hover`, `*-text` variants (success, warning, info, destructive)
+- **Text Colors**: `--text-heading`, `--text-body`, `--text-muted`, `--text-on-primary`
 
-**Primary Brand Shades:**
-- `--primary-2`: Base brand color (oklch 0.55 0.22 264.53 - purple/blue)
-- `--primary-3`: Hover/Active states
-- `--primary-4`: Lightest accents
+**Design Rules:**
+- ❌ Never use borders - rely on color contrast and shadows
+- ✅ Use depth layers for all backgrounds
+- ✅ Apply semantic colors for status indicators
+- ✅ Ensure WCAG AA contrast (4.5:1 minimum)
 
-**Semantic Colors:**
-Each semantic color has three variants:
-- `*-bg`: Background color for layer 3
-- `*-hover`: Hover state for layer 4
-- `*-text`: Text color with proper contrast
+### Mobile Responsiveness Status
+**Last Reviewed:** 2025-10-16
 
-Available: `success`, `warning`, `info`, `destructive`
+The application is **functional but requires optimization** for mobile devices. See `MOBILE_RESPONSIVENESS_REPORT.md` for comprehensive analysis.
 
-**Text Colors:**
-- `--text-heading`: High contrast for headings (oklch 0.10 in light, 0.98 in dark)
-- `--text-body`: Standard body text (oklch 0.25 in light, 0.85 in dark)
-- `--text-muted`: Secondary text (oklch 0.45 in light, 0.60 in dark)
-- `--text-on-primary`: White text on colored backgrounds
+**Critical Issues (P0):**
+- Header overflow on screens <375px
+- Dashboard filter controls overflow
+- SummaryPanel LNO tasks force horizontal scrolling
+- OutcomeBuilder modal cramped on mobile
 
-**Two-Layer Shadow System:**
-Creates depth through inner highlight + outer shadow:
+**Implementation Status:** Phase 1 fixes (critical issues) planned for Week 1. Full mobile optimization requires 2-3 weeks.
 
-- `.shadow-2layer-sm`: Subtle depth (badges, nav items, tabs)
-  - Combines: `inset 0 1px 0 rgba(255,255,255,0.1)` + `0 1px 2px rgba(0,0,0,0.1)`
-- `.shadow-2layer-md`: Standard depth (cards, dropdowns, modals)
-  - Combines: `inset 0 1px 0 rgba(255,255,255,0.15)` + `0 3px 6px rgba(0,0,0,0.15)`
-- `.shadow-2layer-lg`: Prominent depth (hover states, focused elements)
-  - Combines: `inset 0 2px 0 rgba(255,255,255,0.2)` + `0 6px 12px rgba(0,0,0,0.2)`
-
-**Gradient Utilities:**
-- `.gradient-shiny`: Premium "light from top" effect with built-in inner shadow
-- `.gradient-shiny-subtle`: Subtle gradient for interactive elements
-- `.hover-shadow-lift`: Smooth transform (-2px) + shadow transition on hover
-
-**Component Shadow Usage:**
-- Buttons: `shadow-2layer-sm` → `shadow-2layer-md` on hover
-- Cards: `shadow-2layer-md` → `shadow-2layer-lg` on hover
-- Badges: `shadow-2layer-sm` (static)
-- Headers/Footers: `shadow-2layer-md`
-
-**Important Rules:**
-- ❌ Never use borders (border-0) - rely on color contrast and shadows
-- ✅ Always use depth layers for backgrounds
-- ✅ Use semantic colors (`*-bg`, `*-text`) for status indicators
-- ✅ Apply `.hover-shadow-lift` for interactive elements
-- ✅ Ensure WCAG AA contrast (4.5:1 for text)
+**Testing:** Manual testing required at 320px, 375px, 414px, 768px breakpoints until automated Playwright tests implemented.
 
 ## Configuration
 
@@ -228,12 +508,17 @@ OPENAI_API_KEY=sk-proj-...
 **RLS Policies:** Public access for P0 development (see `docs/supabase-rls-policies.sql`)
 
 **Database Migrations:**
-- `supabase/migrations/001_create_initial_tables.sql` - uploaded_files, processing_logs
-- `supabase/migrations/002_create_processing_tables.sql` - processed_documents, 30-day expiry trigger
-- `supabase/migrations/003_add_queue_position.sql` - queue_position column for concurrent uploads (T005)
-- `supabase/migrations/004_create_user_outcomes.sql` - user_outcomes table for outcome management (T008)
+- `001_create_initial_tables.sql` - uploaded_files, processing_logs
+- `002_create_processing_tables.sql` - processed_documents, 30-day expiry trigger
+- `003_add_queue_position.sql` - queue_position column for concurrent uploads (T005)
+- `004_create_user_outcomes.sql` - user_outcomes table for outcome management (T008)
+- `005_add_context_fields.sql` - Context awareness fields (state_preference, daily_capacity_hours) for T016
+- `006_create_reflections.sql` - Reflections table for quick capture feature (T020+)
+- `007_enable_pgvector.sql` - Enable pgvector extension for vector embeddings (T020)
+- `008_create_task_embeddings.sql` - task_embeddings table with IVFFlat index (T020)
+- `009_create_search_function.sql` - search_similar_tasks() RPC function (T020)
 
-Apply migrations manually via Supabase Dashboard → SQL Editor
+Apply migrations manually via Supabase Dashboard → SQL Editor (run `npm run db:migrate` if configured)
 
 **⚠️ IMPORTANT:** After applying migration 003, restart the dev server for queue management to work correctly.
 
@@ -457,16 +742,14 @@ __tests__/
 
 ## Edge Cases & Error Handling
 
-| Case | Behavior |
-|------|----------|
-| Unsupported file format | Client: Instant toast rejection. Server: 400 with descriptive error |
-| File >10MB | Client: Instant toast rejection. Server: 413 "FILE_TOO_LARGE" |
-| Duplicate file (same hash) | Server: 409 "DUPLICATE_FILE" |
-| Multiple invalid files | Client: Staggered toasts (100ms delay between each) |
-| Unreadable PDF | OCR fallback (placeholder), mark for review |
-| Invalid AI JSON | Retry once with adjusted parameters |
-| Confidence <80% | Mark as "review_required" status |
-| Processing >8s | Continue processing but log warning |
+**See `.claude/standards.md` for complete error handling reference table.**
+
+**Key behaviors:**
+- **File validation:** Client-side instant rejection + server-side validation (defense in depth)
+- **Duplicates:** 409 "DUPLICATE_FILE" (content hash-based)
+- **Unreadable PDFs:** OCR fallback → `review_required` status
+- **Low confidence:** <80% → `review_required` status
+- **Processing timeout:** >8s logs warning but continues
 
 ## Success Metrics
 
@@ -513,130 +796,58 @@ Test Scenario: [9 verification steps for end-to-end journey]
 
 ## Common Development Patterns
 
-### Adding a New API Endpoint
-1. Create test file in `__tests__/contract/`
-2. Define Zod schema in `lib/schemas.ts`
-3. Implement handler in `app/api/[name]/route.ts`
-4. Add error handling with proper HTTP status codes
-5. Log operations to console and `processing_logs` table
+**See `.claude/standards.md` for complete development patterns including:**
+- Adding new API endpoints (with Zod validation and error handling)
+- Adding new components (ShadCN-first approach)
+- Adding new services (with logging and error handling)
+- Supabase relationship query normalization
+- React Hook Form state synchronization
+- Edge cases & error handling reference table
 
-### Adding a New Component
-1. Use shadcn if exists: `pnpm dlx shadcn@latest add <component>`
-2. Create in `app/components/` if custom needed
-3. Include TypeScript types for all props
-4. Support dark/light mode via `next-themes`
-5. Add test file in `app/components/__tests__/`
+**Quick Reference - Most Common Patterns:**
 
-### Adding a New Service
-1. Create in `lib/services/`
-2. Export clear interface/types
-3. Include comprehensive error handling
-4. Add structured logging for observability
-5. Test with both success and failure scenarios
-
-### Supabase Relationship Query Pattern
-When querying nested relationships with `.single()`, Supabase may return the relationship as:
-- A single object (most common)
-- A single-item array (sometimes)
-- `null` (when no related record exists)
-
-**Always normalize before accessing:**
+**Supabase Relationship Query:** Always normalize arrays/objects/null when using `.single()`:
 ```typescript
 const processedDoc = Array.isArray(fileData.processed_documents)
   ? fileData.processed_documents[0]
   : fileData.processed_documents;
-
-if (!processedDoc) {
-  // Handle missing data
-}
 ```
 
-**Examples:** See `/api/export/[fileId]/route.ts` (lines 164-179) or `/api/documents/route.ts` (lines 116-118)
-
-### React Hook Form State Synchronization Pattern
-When reading form values immediately after user interaction (e.g., on modal close), React Hook Form may not have synchronized field state yet.
-
-**Problem:** `form.getValues()` returns stale/empty values when called during the same event loop as field onChange.
-
-**Solution:** Use `setTimeout` to defer reading until after form state updates:
+**React Hook Form Sync:** Defer `getValues()` with `setTimeout` to avoid stale values:
 ```typescript
-const handleModalClose = (open: boolean) => {
-  if (!open) {
-    // Defer to next event loop to ensure form state is synchronized
-    setTimeout(() => {
-      const values = form.getValues();
-      saveDraft(values);
-    }, 0);
-  }
-  onOpenChange(open);
-};
+setTimeout(() => { const values = form.getValues(); }, 0);
 ```
 
-**When to use:** Any time you need to read form state immediately after user-triggered events (click, blur, close).
-
-**Example:** See `app/components/OutcomeBuilder.tsx:142-153` (draft save on modal close)
+**See examples in:**
+- `app/api/export/[fileId]/route.ts:164-179` (Supabase normalization)
+- `app/components/OutcomeBuilder.tsx:142-153` (Hook Form sync)
 
 ## Known Issues & Workarounds
 
-### pdf-parse Library Issue
-**Problem:** pdf-parse v1.1.1 executes test code at module import time, causing `ENOENT: ./test/data/05-versions-space.pdf` error.
+**See `.claude/standards.md` for complete issue documentation including:**
+- pdf-parse library issue (postinstall patch required)
+- FormData testing limitation (manual testing workaround)
+- Node.js version requirement (20+ for native File API)
+- AI Task Hallucination (RESOLVED - 3-layer defense implemented)
 
-**Solution:** Automatic patch applied via `postinstall` hook:
-- `scripts/patch-pdf-parse.js` disables debug mode (`isDebugMode = false`)
-- Dynamic import in `noteProcessor.ts` prevents immediate execution
-- Patch runs after `npm install` / `pnpm install`
+**Quick Reference:**
 
-**Verification:** After install, check that `node_modules/.pnpm/pdf-parse@1.1.1/node_modules/pdf-parse/index.js` contains `isDebugMode = false` (line 6)
+### pdf-parse Library
+- **Issue:** Debug mode causes test file errors
+- **Fix:** Automatic patch via `npm install` postinstall hook
+- **Verify:** Check `node_modules/.pnpm/pdf-parse@1.1.1/node_modules/pdf-parse/index.js` has `isDebugMode = false`
 
-### FormData Testing Limitation
-**Problem:** File properties (name, type, size) become undefined in Vitest when using Next.js Request.formData()
+### FormData Testing
+- **Issue:** File properties become undefined in Vitest
+- **Workaround:** Use manual testing guides (`T002_MANUAL_TEST.md`, etc.)
+- **Status:** 27/44 tests passing (61% pass rate)
 
-**Root Cause:**
-- undici's FormData + Next.js Request incompatibility in test environment
-- File objects serialize to strings during Request.formData() call
-- Constructor shows 'String' instead of 'File'
+### Node.js Version
+- **Required:** Node.js 20+ (check `.nvmrc`)
+- **Command:** `nvm use` before development
 
-**Workaround:**
-- Use manual testing for upload/processing validation (see `T002_MANUAL_TEST.md`)
-- Automated tests cover component logic, schemas, and database operations
-- API contract tests exist but require manual execution via browser/Postman
-
-**Future Fix Options:**
-- Use MSW (Mock Service Worker) to intercept before Next.js serialization
-- Run actual Next.js server for integration tests
-- Wait for Vitest/Next.js FormData support improvements
-
-### Node.js Version Requirement
-**Required:** Node.js 20+ (native File API support)
-
-**Issue:** Tests fail on Node.js 18 because native File API is unavailable
-
-**Solution:** Use `.nvmrc` file - run `nvm use` before development
-
-### AI Task Hallucination (RESOLVED - 2025-10-09)
-**Problem:** AI was generating fabricated LNO tasks like "Implement enhanced OCR processing" and "Develop strategy for prioritizing text-based PDFs" instead of extracting real tasks from document content.
-
-**Root Cause:** OCR placeholder text in `noteProcessor.ts` contained extractable system-level phrases. When scanned PDFs triggered OCR fallback, the AI correctly extracted tasks from the placeholder - but these were system development tasks, not user tasks from the document.
-
-**Solution (3-Layer Defense):**
-1. **OCR Placeholder Cleanup** (`noteProcessor.ts:245-264`)
-   - Replaced placeholder text with non-extractable system notice
-   - Removed phrases like "enhanced OCR processing", "prioritize text-based PDFs"
-   - New placeholder: "Document Processing Notice... Unable to extract text content"
-
-2. **Meta-Content Detection** (`aiSummarizer.ts:157-164`)
-   - Added AI prompt rule to detect system notices vs user documents
-   - Returns minimal valid content for placeholders (not empty arrays that break schema)
-   - Prevents fabrication of system-level tasks
-
-3. **Confidence Penalty** (`aiSummarizer.ts:217-229`)
-   - Detects OCR placeholder patterns in AI output
-   - Forces 30% confidence → triggers `review_required` status
-   - Ensures scanned documents flagged for manual review
-
-**Production Behavior:**
-- Text-based PDFs: Real tasks extracted from actual document content
-- Scanned PDFs: System notice processed, minimal content, `review_required` status
-- No more hallucinated "Implement OCR" or "Develop strategy" tasks
-
-**Verification:** See `.claude/logs/debug-ai-hallucination.md` for full analysis
+### AI Hallucination (RESOLVED)
+- **Fix Date:** 2025-10-09
+- **Solution:** OCR placeholder cleanup + meta-content detection + confidence penalty
+- **Result:** Scanned PDFs marked `review_required`, no fabricated tasks
+- **Details:** See `.claude/logs/debug-ai-hallucination.md`

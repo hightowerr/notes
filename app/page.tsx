@@ -4,11 +4,13 @@ import { useState, useRef, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Upload, FileText, AlertCircle, Loader2, CheckCircle2, Clock, Target } from 'lucide-react';
+import { Upload, FileText, AlertCircle, Loader2, CheckCircle2, Clock, Target, MessageSquare } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
 import SummaryPanel from '@/app/components/SummaryPanel';
 import { OutcomeDisplay } from '@/app/components/OutcomeDisplay';
 import { OutcomeBuilder } from '@/app/components/OutcomeBuilder';
+import { ReflectionPanel } from '@/app/components/ReflectionPanel';
+import { useReflectionShortcut } from '@/lib/hooks/useReflectionShortcut';
 import { toast, Toaster } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { DocumentOutput, StatusResponse, FileStatusType } from '@/lib/schemas';
@@ -68,8 +70,12 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
   const [outcomeModalOpen, setOutcomeModalOpen] = useState(false);
   const [editingOutcome, setEditingOutcome] = useState<any>(null);
+  const [reflectionPanelOpen, setReflectionPanelOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingIntervalsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+
+  // Reflection panel keyboard shortcut (Cmd+R / Ctrl+R)
+  useReflectionShortcut(() => setReflectionPanelOpen(prev => !prev));
 
   // Status polling effect
   useEffect(() => {
@@ -439,11 +445,21 @@ export default function Home() {
               <Button
                 variant="outline"
                 size="sm"
+                onClick={() => setReflectionPanelOpen(true)}
+                className="gap-2"
+                title="Reflections (Cmd+Shift+R / Ctrl+Shift+R)"
+              >
+                <MessageSquare className="h-4 w-4" />
+                <span className="hidden sm:inline">Reflections</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => setOutcomeModalOpen(true)}
                 className="gap-2"
               >
                 <Target className="h-4 w-4" />
-                Set Outcome
+                <span className="hidden sm:inline">Set Outcome</span>
               </Button>
               <Badge variant="secondary" className="px-4 py-2">
                 {files.length} {files.length === 1 ? 'Document' : 'Documents'}
@@ -624,6 +640,12 @@ export default function Home() {
           <p>AI Note Synthesiser - Powered by Next.js 15, React 19, and TypeScript</p>
         </div>
       </footer>
+
+      {/* Reflection Panel (keyboard shortcut: Cmd+Shift+R / Ctrl+Shift+R) */}
+      <ReflectionPanel
+        isOpen={reflectionPanelOpen}
+        onOpenChange={setReflectionPanelOpen}
+      />
     </div>
   );
 }

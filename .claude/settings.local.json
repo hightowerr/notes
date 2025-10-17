@@ -17,7 +17,14 @@
       "Bash(npm run dev)",
       "Bash(npm run build:*)",
       "Bash(.specify/scripts/bash/check-prerequisites.sh:*)",
-      "Bash(npm run lint:*)"
+      "Bash(npm run lint:*)",
+      "Bash(.specify/scripts/bash/create-new-feature.sh:*)",
+      "Bash(.specify/scripts/bash/setup-plan.sh:*)",
+      "Bash(npm install:*)",
+      "WebFetch(domain:mastra.ai)",
+      "WebFetch(domain:github.com)",
+      "Bash(bash .specify/scripts/bash/update-agent-context.sh:*)",
+      "Bash(mkdir:*)"
     ],
     "deny": [],
     "ask": []
