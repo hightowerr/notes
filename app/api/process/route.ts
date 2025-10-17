@@ -15,7 +15,7 @@
 import { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { convertToMarkdown } from '@/lib/services/noteProcessor';
-import { extractStructuredData, calculateLowConfidence, scoreActionsWithSemanticSimilarity } from '@/lib/services/aiSummarizer';
+import { extractStructuredData, calculateLowConfidence, scoreActionsWithSemanticSimilarity, generateAndStoreEmbeddings } from '@/lib/services/aiSummarizer';
 import type { LogOperationType, LogStatusType } from '@/lib/schemas';
 import { processingQueue } from '@/lib/services/processingQueue';
 import { filterActions, shouldApplyFiltering, logFilteringOperation } from '@/lib/services/filteringService';
@@ -280,6 +280,27 @@ export async function POST(request: NextRequest) {
       });
       throw new Error(`Failed to create processed_documents record: ${insertError.message}`);
     }
+
+    // 8.5. Generate and store embeddings for tasks (T023)
+    await logOperation(fileId, 'embed', 'started');
+    const embeddingStartTime = Date.now();
+
+    const embeddingResult = await generateAndStoreEmbeddings(
+      docId,
+      aiResult.output.actions
+    );
+
+    const embeddingDuration = Date.now() - embeddingStartTime;
+    await logOperation(fileId, 'embed', 'completed', embeddingDuration);
+
+    console.log('[PROCESS] Embedding generation:', {
+      documentId: docId,
+      duration: embeddingDuration,
+      success: embeddingResult.success,
+      failed: embeddingResult.failed,
+      pending: embeddingResult.pending,
+      embeddingsStatus: embeddingResult.embeddingsStatus,
+    });
 
     // 9. Update file status (FR-011: review_required if confidence < 0.8)
     const finalStatus = aiResult.confidence < 0.8 ? 'review_required' : 'completed';

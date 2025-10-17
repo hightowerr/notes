@@ -1,0 +1,276 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Vector Similarity Search API",
+    "version": "1.0.0",
+    "description": "API contract for semantic search across task embeddings using vector similarity"
+  },
+  "paths": {
+    "/api/embeddings/search": {
+      "post": {
+        "summary": "Search for tasks similar to query text",
+        "description": "Performs semantic similarity search across stored task embeddings. Returns top N most similar tasks ranked by cosine similarity score.",
+        "operationId": "searchSimilarTasks",
+        "tags": ["Embeddings"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              },
+              "examples": {
+                "simple": {
+                  "summary": "Simple search",
+                  "value": {
+                    "query": "increase monthly revenue"
+                  }
+                },
+                "with_options": {
+                  "summary": "Search with custom threshold and limit",
+                  "value": {
+                    "query": "optimize database performance",
+                    "limit": 10,
+                    "threshold": 0.8
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful search - returns ranked results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                },
+                "examples": {
+                  "with_results": {
+                    "summary": "Search with matching results",
+                    "value": {
+                      "tasks": [
+                        {
+                          "task_id": "abc123...",
+                          "task_text": "Implement revenue tracking dashboard",
+                          "document_id": "550e8400-e29b-41d4-a716-446655440000",
+                          "similarity": 0.89
+                        },
+                        {
+                          "task_id": "def456...",
+                          "task_text": "Analyze monthly subscription growth",
+                          "document_id": "550e8400-e29b-41d4-a716-446655440001",
+                          "similarity": 0.82
+                        }
+                      ],
+                      "query": "increase monthly revenue",
+                      "count": 2
+                    }
+                  },
+                  "no_results": {
+                    "summary": "Search with no matches above threshold",
+                    "value": {
+                      "tasks": [],
+                      "query": "quantum computing algorithms",
+                      "count": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request - validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "empty_query": {
+                    "summary": "Empty query string",
+                    "value": {
+                      "error": "Invalid request",
+                      "message": "Query string cannot be empty",
+                      "code": "INVALID_QUERY"
+                    }
+                  },
+                  "invalid_threshold": {
+                    "summary": "Threshold out of range",
+                    "value": {
+                      "error": "Invalid request",
+                      "message": "Threshold must be between 0 and 1",
+                      "code": "INVALID_THRESHOLD"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "embedding_generation_failed": {
+                    "summary": "Failed to generate query embedding",
+                    "value": {
+                      "error": "Internal server error",
+                      "message": "Failed to generate embedding for query",
+                      "code": "EMBEDDING_GENERATION_FAILED"
+                    }
+                  },
+                  "database_error": {
+                    "summary": "Database query failed",
+                    "value": {
+                      "error": "Internal server error",
+                      "message": "Vector search query failed",
+                      "code": "DATABASE_ERROR"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service temporarily unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "embedding_api_unavailable": {
+                    "summary": "OpenAI API unavailable",
+                    "value": {
+                      "error": "Service unavailable",
+                      "message": "Embedding service temporarily unavailable",
+                      "code": "EMBEDDING_SERVICE_UNAVAILABLE"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "SearchRequest": {
+        "type": "object",
+        "required": ["query"],
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "Natural language search query (will be embedded for similarity comparison)",
+            "example": "increase monthly revenue"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 20,
+            "description": "Maximum number of results to return",
+            "example": 20
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.7,
+            "description": "Minimum similarity score (0.0 = completely different, 1.0 = identical)",
+            "example": 0.7
+          }
+        }
+      },
+      "SearchResponse": {
+        "type": "object",
+        "required": ["tasks", "query", "count"],
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SimilarityResult"
+            },
+            "description": "Array of matching tasks ranked by similarity (highest first)"
+          },
+          "query": {
+            "type": "string",
+            "description": "Original search query (echoed back for context)"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Number of tasks returned (may be less than limit if few matches)"
+          }
+        }
+      },
+      "SimilarityResult": {
+        "type": "object",
+        "required": ["task_id", "task_text", "document_id", "similarity"],
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Unique identifier for the task (hash of task_text + document_id)",
+            "example": "abc123def456..."
+          },
+          "task_text": {
+            "type": "string",
+            "description": "Original task description text",
+            "example": "Implement revenue tracking dashboard"
+          },
+          "document_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "UUID of the source document containing this task",
+            "example": "550e8400-e29b-41d4-a716-446655440000"
+          },
+          "similarity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Cosine similarity score (1.0 = identical, 0.0 = completely different)",
+            "example": 0.89
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["error", "message", "code"],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Human-readable error category",
+            "example": "Invalid request"
+          },
+          "message": {
+            "type": "string",
+            "description": "Detailed error message",
+            "example": "Query string cannot be empty"
+          },
+          "code": {
+            "type": "string",
+            "description": "Machine-readable error code for programmatic handling",
+            "enum": [
+              "INVALID_QUERY",
+              "INVALID_THRESHOLD",
+              "INVALID_LIMIT",
+              "EMBEDDING_GENERATION_FAILED",
+              "DATABASE_ERROR",
+              "EMBEDDING_SERVICE_UNAVAILABLE"
+            ],
+            "example": "INVALID_QUERY"
+          }
+        }
+      }
+    }
+  }
+}

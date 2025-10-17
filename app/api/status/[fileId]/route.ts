@@ -64,6 +64,45 @@ export async function GET(
       }
 
       if (processed) {
+        // T025: Query task_embeddings to determine embeddings_status
+        const { data: embeddings, error: embeddingsError } = await supabase
+          .from('task_embeddings')
+          .select('status')
+          .eq('document_id', fileId);
+
+        let embeddingsStatus: 'completed' | 'pending' | 'failed' = 'completed';
+
+        if (embeddingsError) {
+          console.error('[STATUS] Failed to query embeddings:', {
+            fileId,
+            error: embeddingsError,
+          });
+          embeddingsStatus = 'pending'; // Default to pending if query fails
+        } else if (embeddings && embeddings.length > 0) {
+          const completedCount = embeddings.filter(e => e.status === 'completed').length;
+          const pendingCount = embeddings.filter(e => e.status === 'pending').length;
+          const failedCount = embeddings.filter(e => e.status === 'failed').length;
+
+          // Determine overall status
+          if (completedCount === embeddings.length) {
+            embeddingsStatus = 'completed';
+          } else if (pendingCount > 0 || failedCount > 0) {
+            embeddingsStatus = 'pending';
+          }
+
+          console.log('[STATUS] Embeddings status calculated:', {
+            fileId,
+            total: embeddings.length,
+            completed: completedCount,
+            pending: pendingCount,
+            failed: failedCount,
+            embeddingsStatus,
+          });
+        } else {
+          // No embeddings found - document may have no tasks
+          embeddingsStatus = 'completed';
+        }
+
         const filteringApplied = !!processed.filtering_decisions;
 
         // T019: Construct response with both filtered and unfiltered action lists
@@ -90,11 +129,13 @@ export async function GET(
           filteringApplied,
           filteredActions: processed.structured_output.actions.length,
           totalActions: allActions.length,
+          embeddingsStatus, // T025
         });
 
         return Response.json({
           fileId,
           status: file.status,
+          embeddingsStatus, // T025: Include embedding generation status
           summary: processed.structured_output,
           confidence: processed.confidence,
           processingDuration: processed.processing_duration,

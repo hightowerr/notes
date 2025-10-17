@@ -1,0 +1,232 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Reflections API - POST",
+    "version": "1.0.0",
+    "description": "Create a new user reflection and trigger priority recomputation"
+  },
+  "paths": {
+    "/api/reflections": {
+      "post": {
+        "summary": "Add new reflection",
+        "description": "Creates a new reflection for the authenticated user and triggers background priority recomputation with debouncing (2s) and rate limiting (max 1 per 10s per user).",
+        "operationId": "postReflection",
+        "tags": ["Reflections"],
+        "security": [
+          {
+            "supabaseAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReflectionInput"
+              },
+              "example": {
+                "text": "Feeling energized after client win, ready to tackle hard problems"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Reflection created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reflection"
+                },
+                "example": {
+                  "id": "d4e5f6a7-b8c9-0123-def4-567890abcdef",
+                  "user_id": "user-uuid-here",
+                  "text": "Feeling energized after client win, ready to tackle hard problems",
+                  "created_at": "2025-10-16T15:45:00Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request - invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError"
+                },
+                "examples": {
+                  "tooShort": {
+                    "summary": "Text too short",
+                    "value": {
+                      "error": "Validation Error",
+                      "message": "Reflection must be at least 10 characters",
+                      "field": "text"
+                    }
+                  },
+                  "tooLong": {
+                    "summary": "Text too long",
+                    "value": {
+                      "error": "Validation Error",
+                      "message": "Reflection must be at most 500 characters",
+                      "field": "text"
+                    }
+                  },
+                  "missing": {
+                    "summary": "Missing required field",
+                    "value": {
+                      "error": "Validation Error",
+                      "message": "text is required",
+                      "field": "text"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - no valid session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Unauthorized",
+                  "message": "No active session found"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests - rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Rate Limit Exceeded",
+                  "message": "Maximum 1 reflection per 10 seconds. Please wait before adding another.",
+                  "retry_after": 7
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Internal Server Error",
+                  "message": "Failed to save reflection"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "supabaseAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Supabase JWT access token"
+      }
+    },
+    "schemas": {
+      "ReflectionInput": {
+        "type": "object",
+        "description": "Input schema for creating a new reflection",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 500,
+            "description": "Reflection content (plain text, 10-500 characters)",
+            "examples": [
+              "Feeling burnt out, need lighter tasks today",
+              "Client call went well, momentum building",
+              "Back-to-back meetings, only have 30min blocks"
+            ]
+          }
+        },
+        "required": ["text"]
+      },
+      "Reflection": {
+        "type": "object",
+        "description": "Reflection entity (database record)",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique reflection identifier"
+          },
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "User who created the reflection"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 500,
+            "description": "Reflection content (plain text)"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp of creation"
+          }
+        },
+        "required": ["id", "user_id", "text", "created_at"]
+      },
+      "ValidationError": {
+        "type": "object",
+        "description": "Input validation error response",
+        "properties": {
+          "error": {
+            "type": "string",
+            "enum": ["Validation Error"],
+            "description": "Error type"
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable validation error message"
+          },
+          "field": {
+            "type": "string",
+            "description": "Field name that failed validation",
+            "examples": ["text"]
+          }
+        },
+        "required": ["error", "message", "field"]
+      },
+      "Error": {
+        "type": "object",
+        "description": "Generic error response",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error type"
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable error message"
+          },
+          "retry_after": {
+            "type": "integer",
+            "description": "Seconds to wait before retrying (429 errors only)",
+            "minimum": 0
+          }
+        },
+        "required": ["error", "message"]
+      }
+    }
+  }
+}

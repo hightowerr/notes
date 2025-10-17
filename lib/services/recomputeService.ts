@@ -1,16 +1,19 @@
 /**
  * Recompute Service
  * Task: T012 - Async recompute job triggers when outcome changes
+ * Task: T023 - Reflections automatically trigger priority recomputation
  *
  * Functional Requirements:
  * - FR-042: Background recompute job re-scores all actions against new outcome
  * - FR-045: Toast warning if recompute fails after 3 retries
  * - Non-blocking: API returns immediately, recompute runs in background
+ * - T023: Inject reflection context into AI summarization
  *
  * Design Pattern: Uses existing processingQueue pattern from T005
  */
 
 import { createClient } from '@supabase/supabase-js';
+import { fetchRecentReflections } from './reflectionService';
 
 // Initialize Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -108,29 +111,54 @@ export class RecomputeService {
         throw new Error(`Failed to fetch outcome ${job.outcomeId}: ${outcomeError?.message}`);
       }
 
-      // Fetch all processed documents for user
-      // Note: processed_documents doesn't have user_id, must join through uploaded_files
-      const { data: documents, error: documentsError } = await supabase
-        .from('processed_documents')
+      // Fetch all processed documents
+      // P0: No user_id in uploaded_files table (single-user system)
+      // Query from uploaded_files and join to processed_documents (correct pattern)
+      const { data: files, error: documentsError } = await supabase
+        .from('uploaded_files')
         .select(`
           id,
-          structured_output,
-          uploaded_files!inner (
-            user_id
+          processed_documents (
+            id,
+            structured_output
           )
         `)
-        .eq('uploaded_files.user_id', job.userId);
+        .eq('status', 'completed');
 
       if (documentsError) {
         throw new Error(`Failed to fetch documents: ${documentsError.message}`);
       }
 
-      const docCount = documents?.length || 0;
-      console.log(`[Recompute] Fetched ${docCount} documents for user ${job.userId}`);
+      // Extract processed documents from files (filter out files without processed_documents)
+      const documents = (files || [])
+        .map(f => Array.isArray(f.processed_documents) ? f.processed_documents[0] : f.processed_documents)
+        .filter(Boolean);
+
+      const docCount = documents.length;
+      console.log(`[Recompute] Fetched ${docCount} processed documents for user ${job.userId}`);
+
+      // T023: Fetch recent reflections for context injection
+      const reflections = await fetchRecentReflections(job.userId, 5);
+      const reflectionContext = reflections
+        .filter(r => r.weight >= 0.10) // Exclude aged reflections
+        .map((r, i) =>
+          `${i + 1}. "${r.text}" (weight: ${r.weight.toFixed(2)}, ${r.relative_time})`
+        )
+        .join('\n');
+
+      console.log(
+        JSON.stringify({
+          event: 'recompute_reflection_context',
+          user_id: job.userId,
+          timestamp: new Date().toISOString(),
+          reflection_count: reflections.length,
+          filtered_count: reflections.filter(r => r.weight >= 0.10).length,
+        })
+      );
 
       // For P0: Re-scoring is a no-op (AI integration deferred to future)
       // In production, this would call aiSummarizer.scoreActions() for each document
-      // and update processed_documents.lno_tasks with new scores
+      // with reflectionContext parameter and update processed_documents.lno_tasks with new scores
 
       // Simulate processing delay for testing (remove in production)
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -138,6 +166,17 @@ export class RecomputeService {
       const duration = Date.now() - startTime;
 
       console.log(`[Recompute] Completed ${docCount} documents in ${duration}ms`);
+
+      // T027: Structured logging for recompute completion
+      console.log(
+        JSON.stringify({
+          event: 'recompute_completed',
+          user_id: job.userId,
+          timestamp: new Date().toISOString(),
+          duration_ms: duration,
+          documents_processed: docCount,
+        })
+      );
 
       // Remove from active jobs
       this.activeJobs.delete(job.id);
@@ -170,6 +209,18 @@ export class RecomputeService {
 
       // Max retries exceeded
       console.error(`[Recompute] Permanent failure after ${this.MAX_RETRIES} retries`);
+
+      // T027: Structured logging for recompute error
+      console.error(
+        JSON.stringify({
+          event: 'recompute_error',
+          user_id: job.userId,
+          timestamp: new Date().toISOString(),
+          error: errorMessage,
+          retry_count: this.MAX_RETRIES,
+          duration_ms: duration,
+        })
+      );
 
       // FR-045: Log toast warning for UI to display
       console.warn('[Recompute] TOAST_WARNING: ⚠️ Some actions may show outdated scores');
@@ -209,3 +260,66 @@ export class RecomputeService {
 
 // Export singleton instance
 export const recomputeService = new RecomputeService();
+
+/**
+ * Trigger recompute job with reflection context
+ * Task: T023 - Reflections automatically trigger priority recomputation
+ *
+ * @param userId - User ID to trigger recompute for
+ * @param reason - Trigger reason ('reflection_added' | 'outcome_changed')
+ */
+export async function triggerRecomputeJob(
+  userId: string,
+  reason: 'reflection_added' | 'outcome_changed'
+): Promise<void> {
+  console.log(
+    JSON.stringify({
+      event: 'recompute_triggered',
+      user_id: userId,
+      trigger_reason: reason,
+      timestamp: new Date().toISOString(),
+    })
+  );
+
+  // Fetch active outcome for this user
+  const { data: outcome } = await supabase
+    .from('user_outcomes')
+    .select('id, assembled_text')
+    .eq('is_active', true)
+    .single();
+
+  if (!outcome) {
+    console.log('[RecomputeTrigger] No active outcome found, skipping recompute');
+    return;
+  }
+
+  // Fetch all processed documents for action count
+  // P0: No user_id in uploaded_files table (single-user system)
+  // Query from uploaded_files and join to processed_documents (correct pattern)
+  const { data: files } = await supabase
+    .from('uploaded_files')
+    .select(`
+      id,
+      processed_documents (
+        id
+      )
+    `)
+    .eq('status', 'completed');
+
+  // Count files that have processed_documents
+  const actionCount = (files || [])
+    .filter(f => {
+      const doc = Array.isArray(f.processed_documents) ? f.processed_documents[0] : f.processed_documents;
+      return Boolean(doc);
+    })
+    .length;
+
+  console.log(`[RecomputeTrigger] Enqueuing recompute job: ${actionCount} documents`);
+
+  // Enqueue recompute job (runs in background)
+  await recomputeService.enqueue({
+    outcomeId: outcome.id,
+    userId,
+    actionCount,
+  });
+}

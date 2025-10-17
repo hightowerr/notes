@@ -106,6 +106,7 @@ export const LogOperation = z.enum([
   'retry',
   'error',
   'cleanup',
+  'embed', // T023: Embedding generation operation
 ]);
 
 export type LogOperationType = z.infer<typeof LogOperation>;
