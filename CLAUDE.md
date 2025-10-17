@@ -6,6 +6,15 @@ default_agent: slice-orchestrator
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**See `.claude/standards.md` for universal standards that apply to all agents:**
+- TypeScript & code quality rules
+- TDD workflow (Red-Green-Refactor)
+- Design system & ShadCN conventions
+- Common development patterns
+- Error handling standards
+- Testing requirements
+- Known issues & workarounds
+
 ## Project Overview
 
 **AI Note Synthesiser** — An autonomous agent that detects uploaded note files, converts them to Markdown, summarizes content, and extracts structured data without manual intervention.
@@ -446,6 +455,25 @@ $$;
 
 ### Design System
 
+**See `.claude/standards.md` for complete design system documentation including:**
+- Depth-Based Color Layering (4-layer system with `--bg-layer-1` through `--bg-layer-4`)
+- Two-Layer Shadow System (`.shadow-2layer-sm/md/lg`)
+- Gradient utilities and hover effects
+- ShadCN UI conventions and component selection
+- Accessibility requirements (WCAG 2.1 AA)
+
+**Key Design Variables** (defined in `app/globals.css`):
+- **Background Layers**: `--bg-layer-1` (page) → `--bg-layer-4` (elevated states)
+- **Primary Brand**: `--primary-2` (base), `--primary-3` (hover), `--primary-4` (accent)
+- **Semantic Colors**: Each has `*-bg`, `*-hover`, `*-text` variants (success, warning, info, destructive)
+- **Text Colors**: `--text-heading`, `--text-body`, `--text-muted`, `--text-on-primary`
+
+**Design Rules:**
+- ❌ Never use borders - rely on color contrast and shadows
+- ✅ Use depth layers for all backgrounds
+- ✅ Apply semantic colors for status indicators
+- ✅ Ensure WCAG AA contrast (4.5:1 minimum)
+
 ### Mobile Responsiveness Status
 **Last Reviewed:** 2025-10-16
 
@@ -460,62 +488,6 @@ The application is **functional but requires optimization** for mobile devices. 
 **Implementation Status:** Phase 1 fixes (critical issues) planned for Week 1. Full mobile optimization requires 2-3 weeks.
 
 **Testing:** Manual testing required at 320px, 375px, 414px, 768px breakpoints until automated Playwright tests implemented.
-
-### Depth-Based Color Layering (4-Layer System)
-
-The application uses a depth-based color system in `app/globals.css` that creates visual hierarchy through color contrast instead of borders:
-
-- `--bg-layer-1`: Page background (darkest in light mode, darkest in dark mode)
-- `--bg-layer-2`: Container/Card backgrounds
-- `--bg-layer-3`: Interactive elements (buttons, tabs, inputs)
-- `--bg-layer-4`: Elevated states (hover, selected, active)
-
-**Primary Brand Shades:**
-- `--primary-2`: Base brand color (oklch 0.55 0.22 264.53 - purple/blue)
-- `--primary-3`: Hover/Active states
-- `--primary-4`: Lightest accents
-
-**Semantic Colors:**
-Each semantic color has three variants:
-- `*-bg`: Background color for layer 3
-- `*-hover`: Hover state for layer 4
-- `*-text`: Text color with proper contrast
-
-Available: `success`, `warning`, `info`, `destructive`
-
-**Text Colors:**
-- `--text-heading`: High contrast for headings (oklch 0.10 in light, 0.98 in dark)
-- `--text-body`: Standard body text (oklch 0.25 in light, 0.85 in dark)
-- `--text-muted`: Secondary text (oklch 0.45 in light, 0.60 in dark)
-- `--text-on-primary`: White text on colored backgrounds
-
-**Two-Layer Shadow System:**
-Creates depth through inner highlight + outer shadow:
-
-- `.shadow-2layer-sm`: Subtle depth (badges, nav items, tabs)
-  - Combines: `inset 0 1px 0 rgba(255,255,255,0.1)` + `0 1px 2px rgba(0,0,0,0.1)`
-- `.shadow-2layer-md`: Standard depth (cards, dropdowns, modals)
-  - Combines: `inset 0 1px 0 rgba(255,255,255,0.15)` + `0 3px 6px rgba(0,0,0,0.15)`
-- `.shadow-2layer-lg`: Prominent depth (hover states, focused elements)
-  - Combines: `inset 0 2px 0 rgba(255,255,255,0.2)` + `0 6px 12px rgba(0,0,0,0.2)`
-
-**Gradient Utilities:**
-- `.gradient-shiny`: Premium "light from top" effect with built-in inner shadow
-- `.gradient-shiny-subtle`: Subtle gradient for interactive elements
-- `.hover-shadow-lift`: Smooth transform (-2px) + shadow transition on hover
-
-**Component Shadow Usage:**
-- Buttons: `shadow-2layer-sm` → `shadow-2layer-md` on hover
-- Cards: `shadow-2layer-md` → `shadow-2layer-lg` on hover
-- Badges: `shadow-2layer-sm` (static)
-- Headers/Footers: `shadow-2layer-md`
-
-**Important Rules:**
-- ❌ Never use borders (border-0) - rely on color contrast and shadows
-- ✅ Always use depth layers for backgrounds
-- ✅ Use semantic colors (`*-bg`, `*-text`) for status indicators
-- ✅ Apply `.hover-shadow-lift` for interactive elements
-- ✅ Ensure WCAG AA contrast (4.5:1 for text)
 
 ## Configuration
 
@@ -770,16 +742,14 @@ __tests__/
 
 ## Edge Cases & Error Handling
 
-| Case | Behavior |
-|------|----------|
-| Unsupported file format | Client: Instant toast rejection. Server: 400 with descriptive error |
-| File >10MB | Client: Instant toast rejection. Server: 413 "FILE_TOO_LARGE" |
-| Duplicate file (same hash) | Server: 409 "DUPLICATE_FILE" |
-| Multiple invalid files | Client: Staggered toasts (100ms delay between each) |
-| Unreadable PDF | OCR fallback (placeholder), mark for review |
-| Invalid AI JSON | Retry once with adjusted parameters |
-| Confidence <80% | Mark as "review_required" status |
-| Processing >8s | Continue processing but log warning |
+**See `.claude/standards.md` for complete error handling reference table.**
+
+**Key behaviors:**
+- **File validation:** Client-side instant rejection + server-side validation (defense in depth)
+- **Duplicates:** 409 "DUPLICATE_FILE" (content hash-based)
+- **Unreadable PDFs:** OCR fallback → `review_required` status
+- **Low confidence:** <80% → `review_required` status
+- **Processing timeout:** >8s logs warning but continues
 
 ## Success Metrics
 
@@ -826,130 +796,58 @@ Test Scenario: [9 verification steps for end-to-end journey]
 
 ## Common Development Patterns
 
-### Adding a New API Endpoint
-1. Create test file in `__tests__/contract/`
-2. Define Zod schema in `lib/schemas.ts`
-3. Implement handler in `app/api/[name]/route.ts`
-4. Add error handling with proper HTTP status codes
-5. Log operations to console and `processing_logs` table
+**See `.claude/standards.md` for complete development patterns including:**
+- Adding new API endpoints (with Zod validation and error handling)
+- Adding new components (ShadCN-first approach)
+- Adding new services (with logging and error handling)
+- Supabase relationship query normalization
+- React Hook Form state synchronization
+- Edge cases & error handling reference table
 
-### Adding a New Component
-1. Use shadcn if exists: `pnpm dlx shadcn@latest add <component>`
-2. Create in `app/components/` if custom needed
-3. Include TypeScript types for all props
-4. Support dark/light mode via `next-themes`
-5. Add test file in `app/components/__tests__/`
+**Quick Reference - Most Common Patterns:**
 
-### Adding a New Service
-1. Create in `lib/services/`
-2. Export clear interface/types
-3. Include comprehensive error handling
-4. Add structured logging for observability
-5. Test with both success and failure scenarios
-
-### Supabase Relationship Query Pattern
-When querying nested relationships with `.single()`, Supabase may return the relationship as:
-- A single object (most common)
-- A single-item array (sometimes)
-- `null` (when no related record exists)
-
-**Always normalize before accessing:**
+**Supabase Relationship Query:** Always normalize arrays/objects/null when using `.single()`:
 ```typescript
 const processedDoc = Array.isArray(fileData.processed_documents)
   ? fileData.processed_documents[0]
   : fileData.processed_documents;
-
-if (!processedDoc) {
-  // Handle missing data
-}
 ```
 
-**Examples:** See `/api/export/[fileId]/route.ts` (lines 164-179) or `/api/documents/route.ts` (lines 116-118)
-
-### React Hook Form State Synchronization Pattern
-When reading form values immediately after user interaction (e.g., on modal close), React Hook Form may not have synchronized field state yet.
-
-**Problem:** `form.getValues()` returns stale/empty values when called during the same event loop as field onChange.
-
-**Solution:** Use `setTimeout` to defer reading until after form state updates:
+**React Hook Form Sync:** Defer `getValues()` with `setTimeout` to avoid stale values:
 ```typescript
-const handleModalClose = (open: boolean) => {
-  if (!open) {
-    // Defer to next event loop to ensure form state is synchronized
-    setTimeout(() => {
-      const values = form.getValues();
-      saveDraft(values);
-    }, 0);
-  }
-  onOpenChange(open);
-};
+setTimeout(() => { const values = form.getValues(); }, 0);
 ```
 
-**When to use:** Any time you need to read form state immediately after user-triggered events (click, blur, close).
-
-**Example:** See `app/components/OutcomeBuilder.tsx:142-153` (draft save on modal close)
+**See examples in:**
+- `app/api/export/[fileId]/route.ts:164-179` (Supabase normalization)
+- `app/components/OutcomeBuilder.tsx:142-153` (Hook Form sync)
 
 ## Known Issues & Workarounds
 
-### pdf-parse Library Issue
-**Problem:** pdf-parse v1.1.1 executes test code at module import time, causing `ENOENT: ./test/data/05-versions-space.pdf` error.
+**See `.claude/standards.md` for complete issue documentation including:**
+- pdf-parse library issue (postinstall patch required)
+- FormData testing limitation (manual testing workaround)
+- Node.js version requirement (20+ for native File API)
+- AI Task Hallucination (RESOLVED - 3-layer defense implemented)
 
-**Solution:** Automatic patch applied via `postinstall` hook:
-- `scripts/patch-pdf-parse.js` disables debug mode (`isDebugMode = false`)
-- Dynamic import in `noteProcessor.ts` prevents immediate execution
-- Patch runs after `npm install` / `pnpm install`
+**Quick Reference:**
 
-**Verification:** After install, check that `node_modules/.pnpm/pdf-parse@1.1.1/node_modules/pdf-parse/index.js` contains `isDebugMode = false` (line 6)
+### pdf-parse Library
+- **Issue:** Debug mode causes test file errors
+- **Fix:** Automatic patch via `npm install` postinstall hook
+- **Verify:** Check `node_modules/.pnpm/pdf-parse@1.1.1/node_modules/pdf-parse/index.js` has `isDebugMode = false`
 
-### FormData Testing Limitation
-**Problem:** File properties (name, type, size) become undefined in Vitest when using Next.js Request.formData()
+### FormData Testing
+- **Issue:** File properties become undefined in Vitest
+- **Workaround:** Use manual testing guides (`T002_MANUAL_TEST.md`, etc.)
+- **Status:** 27/44 tests passing (61% pass rate)
 
-**Root Cause:**
-- undici's FormData + Next.js Request incompatibility in test environment
-- File objects serialize to strings during Request.formData() call
-- Constructor shows 'String' instead of 'File'
+### Node.js Version
+- **Required:** Node.js 20+ (check `.nvmrc`)
+- **Command:** `nvm use` before development
 
-**Workaround:**
-- Use manual testing for upload/processing validation (see `T002_MANUAL_TEST.md`)
-- Automated tests cover component logic, schemas, and database operations
-- API contract tests exist but require manual execution via browser/Postman
-
-**Future Fix Options:**
-- Use MSW (Mock Service Worker) to intercept before Next.js serialization
-- Run actual Next.js server for integration tests
-- Wait for Vitest/Next.js FormData support improvements
-
-### Node.js Version Requirement
-**Required:** Node.js 20+ (native File API support)
-
-**Issue:** Tests fail on Node.js 18 because native File API is unavailable
-
-**Solution:** Use `.nvmrc` file - run `nvm use` before development
-
-### AI Task Hallucination (RESOLVED - 2025-10-09)
-**Problem:** AI was generating fabricated LNO tasks like "Implement enhanced OCR processing" and "Develop strategy for prioritizing text-based PDFs" instead of extracting real tasks from document content.
-
-**Root Cause:** OCR placeholder text in `noteProcessor.ts` contained extractable system-level phrases. When scanned PDFs triggered OCR fallback, the AI correctly extracted tasks from the placeholder - but these were system development tasks, not user tasks from the document.
-
-**Solution (3-Layer Defense):**
-1. **OCR Placeholder Cleanup** (`noteProcessor.ts:245-264`)
-   - Replaced placeholder text with non-extractable system notice
-   - Removed phrases like "enhanced OCR processing", "prioritize text-based PDFs"
-   - New placeholder: "Document Processing Notice... Unable to extract text content"
-
-2. **Meta-Content Detection** (`aiSummarizer.ts:157-164`)
-   - Added AI prompt rule to detect system notices vs user documents
-   - Returns minimal valid content for placeholders (not empty arrays that break schema)
-   - Prevents fabrication of system-level tasks
-
-3. **Confidence Penalty** (`aiSummarizer.ts:217-229`)
-   - Detects OCR placeholder patterns in AI output
-   - Forces 30% confidence → triggers `review_required` status
-   - Ensures scanned documents flagged for manual review
-
-**Production Behavior:**
-- Text-based PDFs: Real tasks extracted from actual document content
-- Scanned PDFs: System notice processed, minimal content, `review_required` status
-- No more hallucinated "Implement OCR" or "Develop strategy" tasks
-
-**Verification:** See `.claude/logs/debug-ai-hallucination.md` for full analysis
+### AI Hallucination (RESOLVED)
+- **Fix Date:** 2025-10-09
+- **Solution:** OCR placeholder cleanup + meta-content detection + confidence penalty
+- **Result:** Scanned PDFs marked `review_required`, no fabricated tasks
+- **Details:** See `.claude/logs/debug-ai-hallucination.md`
