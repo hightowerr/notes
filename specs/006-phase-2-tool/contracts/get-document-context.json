@@ -1,0 +1,184 @@
+{
+  "tool_id": "get-document-context",
+  "description": "Retrieve full markdown content and all tasks from documents containing specified task IDs. Automatically paginates large documents exceeding context window limits. Use this tool when you need to understand the broader context around specific tasks or analyze all tasks within a document.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "task_ids": {
+        "type": "array",
+        "description": "Array of task IDs to retrieve parent documents for",
+        "items": {
+          "type": "string",
+          "description": "SHA-256 task identifier"
+        },
+        "minItems": 1,
+        "maxItems": 50
+      },
+      "chunk_number": {
+        "type": "number",
+        "description": "For paginated documents, request a specific chunk (1-indexed). Omit to retrieve first chunk.",
+        "minimum": 1
+      }
+    },
+    "required": ["task_ids"],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "documents": {
+        "type": "array",
+        "description": "Array of documents containing the requested task IDs",
+        "items": {
+          "type": "object",
+          "properties": {
+            "document_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Unique document identifier"
+            },
+            "filename": {
+              "type": "string",
+              "description": "Original uploaded filename"
+            },
+            "markdown": {
+              "type": "string",
+              "description": "Full markdown content (or paginated chunk if document exceeds context limit)"
+            },
+            "tasks_in_document": {
+              "type": "array",
+              "description": "All tasks extracted from this document (not just requested task IDs)",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "task_id": {
+                    "type": "string",
+                    "description": "SHA-256 task identifier"
+                  },
+                  "task_text": {
+                    "type": "string",
+                    "description": "Full task description"
+                  }
+                },
+                "required": ["task_id", "task_text"]
+              }
+            },
+            "pagination_metadata": {
+              "type": "object",
+              "nullable": true,
+              "description": "Pagination details if document was split into chunks (null for single-chunk documents)",
+              "properties": {
+                "current_chunk": {
+                  "type": "number",
+                  "description": "Current chunk number (1-indexed)"
+                },
+                "total_chunks": {
+                  "type": "number",
+                  "description": "Total number of chunks for this document"
+                },
+                "chunk_size": {
+                  "type": "number",
+                  "description": "Approximate size of each chunk in characters"
+                },
+                "overlap_size": {
+                  "type": "number",
+                  "description": "Character overlap between adjacent chunks for context continuity",
+                  "default": 200
+                }
+              },
+              "required": ["current_chunk", "total_chunks", "chunk_size"]
+            }
+          },
+          "required": ["document_id", "filename", "markdown", "tasks_in_document", "pagination_metadata"]
+        }
+      }
+    },
+    "required": ["documents"]
+  },
+  "error_codes": [
+    {
+      "code": "TASK_NOT_FOUND",
+      "description": "One or more task IDs do not exist in the database",
+      "http_status": 404
+    },
+    {
+      "code": "DOCUMENT_DELETED",
+      "description": "Document was deleted during execution (race condition)",
+      "http_status": 410,
+      "retryable": false
+    },
+    {
+      "code": "INVALID_CHUNK_NUMBER",
+      "description": "Requested chunk number exceeds total chunks for document",
+      "http_status": 400
+    },
+    {
+      "code": "DATABASE_ERROR",
+      "description": "Database query failed during document retrieval",
+      "http_status": 500,
+      "retryable": true
+    }
+  ],
+  "example_input": {
+    "task_ids": [
+      "a3c5f891b2d4e6f8c9d1e2f3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0r1s2t3",
+      "b4d6g0h2c3e5f7g9h1i3j5k7l9m1n3o5p7q9r1s3t5u7v9w1x3y5z7a9b1c3d5e7"
+    ]
+  },
+  "example_output": {
+    "documents": [
+      {
+        "document_id": "550e8400-e29b-41d4-a716-446655440000",
+        "filename": "q3-revenue-strategy.pdf",
+        "markdown": "# Q3 Revenue Strategy\n\n## Executive Summary\nThis document outlines our approach to increasing monthly recurring revenue by 25% through enterprise customer acquisition.\n\n## Key Initiatives\n\n### 1. Revenue Tracking Infrastructure\n- Implement revenue tracking dashboard with real-time metrics\n- Deploy automated reporting system for executive team\n- Integrate with Salesforce for pipeline visibility\n\n### 2. Pricing Optimization\n- Optimize pricing strategy to increase average revenue per user (ARPU)\n- Conduct competitor analysis for market positioning\n- Test tiered pricing model with beta customers\n\n## Next Steps\n- Assign ownership for each initiative\n- Define success metrics and KPIs\n- Schedule weekly progress reviews",
+        "tasks_in_document": [
+          {
+            "task_id": "a3c5f891b2d4e6f8c9d1e2f3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0r1s2t3",
+            "task_text": "Implement revenue tracking dashboard with real-time metrics"
+          },
+          {
+            "task_id": "b4d6g0h2c3e5f7g9h1i3j5k7l9m1n3o5p7q9r1s3t5u7v9w1x3y5z7a9b1c3d5e7",
+            "task_text": "Optimize pricing strategy to increase average revenue per user (ARPU)"
+          },
+          {
+            "task_id": "z9x8c7v6b5n4m3l2k1j0i9h8g7f6e5d4c3b2a1z0y9x8w7v6u5t4s3r2q1p0o9n8",
+            "task_text": "Deploy automated reporting system for executive team"
+          }
+        ],
+        "pagination_metadata": null
+      }
+    ]
+  },
+  "example_output_paginated": {
+    "documents": [
+      {
+        "document_id": "770g0622-g40d-63f6-c938-668877662222",
+        "filename": "enterprise-sales-playbook.pdf",
+        "markdown": "# Enterprise Sales Playbook\n\n[First 50,000 characters of document content...]\n\n## Chapter 1: Market Analysis\n[Content continues with 200-character overlap at chunk boundary...]",
+        "tasks_in_document": [
+          {
+            "task_id": "c5e7h1i3d4f6g8h0i2j4k6l8m0n2o4p6q8r0s2t4u6v8w0x2y4z6a8b0c2d4e6f8",
+            "task_text": "Launch enterprise sales program targeting Fortune 500 companies"
+          }
+        ],
+        "pagination_metadata": {
+          "current_chunk": 1,
+          "total_chunks": 3,
+          "chunk_size": 50000,
+          "overlap_size": 200
+        }
+      }
+    ]
+  },
+  "pagination_config": {
+    "max_chunk_size_chars": 50000,
+    "overlap_chars": 200,
+    "description": "Documents exceeding 50,000 characters are automatically split. Each chunk overlaps by 200 characters with adjacent chunks to preserve context continuity."
+  },
+  "performance_target": {
+    "p95_latency_ms": 5000,
+    "typical_latency_ms": 1000,
+    "max_retries": 2,
+    "retry_delay_ms": 2000
+  }
+}

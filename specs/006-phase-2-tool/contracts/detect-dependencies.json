@@ -1,0 +1,150 @@
+{
+  "tool_id": "detect-dependencies",
+  "description": "Analyze a set of tasks using AI to detect prerequisite, blocking, and related relationships. Optionally includes full document context to improve detection accuracy. Returns structured dependency data with confidence scores. Use this tool when you need to discover task relationships that aren't explicitly stored in the database.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "task_ids": {
+        "type": "array",
+        "description": "Array of task IDs to analyze for dependencies",
+        "items": {
+          "type": "string",
+          "description": "SHA-256 task identifier"
+        },
+        "minItems": 2,
+        "maxItems": 50
+      },
+      "use_document_context": {
+        "type": "boolean",
+        "description": "Include full document markdown context in AI analysis for improved accuracy (default true). Disabling reduces cost but may miss context-dependent relationships.",
+        "default": true
+      }
+    },
+    "required": ["task_ids"],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "dependencies": {
+        "type": "array",
+        "description": "Array of detected relationships between tasks, sorted by confidence score (descending)",
+        "items": {
+          "type": "object",
+          "properties": {
+            "source_task_id": {
+              "type": "string",
+              "description": "Task ID that initiates the relationship"
+            },
+            "target_task_id": {
+              "type": "string",
+              "description": "Task ID that is affected by the relationship"
+            },
+            "relationship_type": {
+              "type": "string",
+              "enum": ["prerequisite", "blocks", "related"],
+              "description": "Type of dependency: prerequisite (source must complete before target), blocks (source prevents target), related (tasks share context/goals)"
+            },
+            "confidence_score": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0,
+              "description": "AI confidence in detected relationship (0.0-1.0). Higher values = more certain."
+            },
+            "detection_method": {
+              "type": "string",
+              "enum": ["ai"],
+              "description": "Always 'ai' for this tool (manual relationships stored in database separately)"
+            },
+            "reasoning": {
+              "type": "string",
+              "description": "AI explanation for why this relationship was detected (optional, for debugging)"
+            }
+          },
+          "required": ["source_task_id", "target_task_id", "relationship_type", "confidence_score", "detection_method"]
+        }
+      },
+      "analyzed_count": {
+        "type": "number",
+        "description": "Total number of tasks analyzed (should match input task_ids length)"
+      },
+      "context_included": {
+        "type": "boolean",
+        "description": "Whether document context was included in AI analysis"
+      }
+    },
+    "required": ["dependencies", "analyzed_count", "context_included"]
+  },
+  "error_codes": [
+    {
+      "code": "INVALID_TASK_IDS",
+      "description": "One or more task IDs do not exist in the database",
+      "http_status": 404
+    },
+    {
+      "code": "INSUFFICIENT_TASKS",
+      "description": "At least 2 task IDs required for dependency analysis",
+      "http_status": 400
+    },
+    {
+      "code": "AI_SERVICE_UNAVAILABLE",
+      "description": "OpenAI API temporarily unavailable for dependency detection",
+      "http_status": 503,
+      "retryable": true
+    },
+    {
+      "code": "AI_EXTRACTION_FAILED",
+      "description": "AI failed to extract structured dependency data (invalid output format)",
+      "http_status": 500,
+      "retryable": true
+    },
+    {
+      "code": "DATABASE_ERROR",
+      "description": "Database query failed during task retrieval",
+      "http_status": 500,
+      "retryable": true
+    }
+  ],
+  "example_input": {
+    "task_ids": [
+      "a3c5f891b2d4e6f8c9d1e2f3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0r1s2t3",
+      "b4d6g0h2c3e5f7g9h1i3j5k7l9m1n3o5p7q9r1s3t5u7v9w1x3y5z7a9b1c3d5e7",
+      "c5e7h1i3d4f6g8h0i2j4k6l8m0n2o4p6q8r0s2t4u6v8w0x2y4z6a8b0c2d4e6f8"
+    ],
+    "use_document_context": true
+  },
+  "example_output": {
+    "dependencies": [
+      {
+        "source_task_id": "a3c5f891b2d4e6f8c9d1e2f3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0r1s2t3",
+        "target_task_id": "b4d6g0h2c3e5f7g9h1i3j5k7l9m1n3o5p7q9r1s3t5u7v9w1x3y5z7a9b1c3d5e7",
+        "relationship_type": "prerequisite",
+        "confidence_score": 0.92,
+        "detection_method": "ai",
+        "reasoning": "Revenue tracking dashboard must be implemented before pricing optimization can be data-driven. Document context indicates metrics dependency."
+      },
+      {
+        "source_task_id": "a3c5f891b2d4e6f8c9d1e2f3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0r1s2t3",
+        "target_task_id": "c5e7h1i3d4f6g8h0i2j4k6l8m0n2o4p6q8r0s2t4u6v8w0x2y4z6a8b0c2d4e6f8",
+        "relationship_type": "related",
+        "confidence_score": 0.78,
+        "detection_method": "ai",
+        "reasoning": "Both tasks contribute to revenue growth initiative mentioned in Q3 strategy document."
+      }
+    ],
+    "analyzed_count": 3,
+    "context_included": true
+  },
+  "ai_model_config": {
+    "model": "gpt-4o",
+    "temperature": 0.1,
+    "description": "Low temperature (0.1) ensures consistent dependency detection. Structured output via Zod schema validation."
+  },
+  "performance_target": {
+    "p95_latency_ms": 5000,
+    "typical_latency_ms": 2000,
+    "max_retries": 2,
+    "retry_delay_ms": 2000,
+    "notes": "Latency depends on number of tasks and whether document context is included. Context increases accuracy but adds ~1-2s to execution."
+  }
+}

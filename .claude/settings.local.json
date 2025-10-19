@@ -24,7 +24,13 @@
       "WebFetch(domain:mastra.ai)",
       "WebFetch(domain:github.com)",
       "Bash(bash .specify/scripts/bash/update-agent-context.sh:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "mcp__context7__get-library-docs",
+      "WebSearch",
+      "Bash(awk:*)",
+      "Bash(node:*)",
+      "Bash(for file in specs/006-phase-2-tool/contracts/*.json)",
+      "Bash(done)"
     ],
     "deny": [],
     "ask": []

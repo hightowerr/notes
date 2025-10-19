@@ -1,0 +1,139 @@
+{
+  "tool_id": "semantic-search",
+  "description": "Search for tasks semantically similar to a natural language query using vector embeddings. Returns tasks ranked by cosine similarity above a configurable threshold. Use this tool when you need to find tasks related to specific topics, goals, or concepts without exact keyword matching.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Natural language query describing the tasks to find (e.g., 'increase monthly revenue', 'improve customer retention')",
+        "minLength": 1,
+        "maxLength": 500
+      },
+      "limit": {
+        "type": "number",
+        "description": "Maximum number of results to return",
+        "minimum": 1,
+        "maximum": 100,
+        "default": 20
+      },
+      "threshold": {
+        "type": "number",
+        "description": "Minimum similarity score (0.0-1.0) for results. Higher values = more similar tasks required",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.7
+      }
+    },
+    "required": ["query"],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "tasks": {
+        "type": "array",
+        "description": "Array of tasks matching the query, sorted by similarity (descending)",
+        "items": {
+          "type": "object",
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "description": "Unique task identifier (SHA-256 hash)"
+            },
+            "task_text": {
+              "type": "string",
+              "description": "Full task description"
+            },
+            "document_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Parent document UUID"
+            },
+            "similarity": {
+              "type": "number",
+              "description": "Cosine similarity score (0.0-1.0) between query and task",
+              "minimum": 0.0,
+              "maximum": 1.0
+            }
+          },
+          "required": ["task_id", "task_text", "document_id", "similarity"]
+        }
+      },
+      "count": {
+        "type": "number",
+        "description": "Total number of tasks returned"
+      },
+      "query": {
+        "type": "string",
+        "description": "Original query string (echoed back for reference)"
+      }
+    },
+    "required": ["tasks", "count", "query"]
+  },
+  "error_codes": [
+    {
+      "code": "INVALID_THRESHOLD",
+      "description": "Threshold parameter outside valid range (0.0-1.0)",
+      "http_status": 400
+    },
+    {
+      "code": "INVALID_LIMIT",
+      "description": "Limit parameter outside valid range (1-100)",
+      "http_status": 400
+    },
+    {
+      "code": "EMBEDDING_GENERATION_FAILED",
+      "description": "Failed to generate embedding for query text (OpenAI API error)",
+      "http_status": 500,
+      "retryable": true
+    },
+    {
+      "code": "EMBEDDING_SERVICE_UNAVAILABLE",
+      "description": "OpenAI embedding service temporarily unavailable",
+      "http_status": 503,
+      "retryable": true
+    },
+    {
+      "code": "DATABASE_ERROR",
+      "description": "Database query failed during vector search",
+      "http_status": 500,
+      "retryable": true
+    }
+  ],
+  "example_input": {
+    "query": "increase monthly revenue",
+    "limit": 10,
+    "threshold": 0.75
+  },
+  "example_output": {
+    "tasks": [
+      {
+        "task_id": "a3c5f891b2d4e6f8c9d1e2f3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0r1s2t3",
+        "task_text": "Implement revenue tracking dashboard with real-time metrics",
+        "document_id": "550e8400-e29b-41d4-a716-446655440000",
+        "similarity": 0.89
+      },
+      {
+        "task_id": "b4d6g0h2c3e5f7g9h1i3j5k7l9m1n3o5p7q9r1s3t5u7v9w1x3y5z7a9b1c3d5e7",
+        "task_text": "Optimize pricing strategy to increase average revenue per user (ARPU)",
+        "document_id": "660f9511-f39c-52e5-b827-557766551111",
+        "similarity": 0.87
+      },
+      {
+        "task_id": "c5e7h1i3d4f6g8h0i2j4k6l8m0n2o4p6q8r0s2t4u6v8w0x2y4z6a8b0c2d4e6f8",
+        "task_text": "Launch enterprise sales program targeting Fortune 500 companies",
+        "document_id": "770g0622-g40d-63f6-c938-668877662222",
+        "similarity": 0.82
+      }
+    ],
+    "count": 3,
+    "query": "increase monthly revenue"
+  },
+  "performance_target": {
+    "p95_latency_ms": 5000,
+    "typical_latency_ms": 500,
+    "max_retries": 2,
+    "retry_delay_ms": 2000
+  }
+}
