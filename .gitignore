@@ -24,6 +24,15 @@
 .DS_Store
 *.pem
 
+# claude
+.claude/
+
+# gemini
+.gemini/
+
+# codex
+.codex/
+
 # debug
 npm-debug.log*
 yarn-debug.log*

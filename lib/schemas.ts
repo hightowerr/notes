@@ -199,8 +199,10 @@ export type CleanupResponse = z.infer<typeof CleanupResponseSchema>;
 
 // File validation helper
 export function validateFileUpload(file: File): { valid: boolean; error?: string; code?: ErrorCodeType } {
+  console.log('[VALIDATE_FILE]', { name: file.name, type: file.type, size: file.size });
   // Check file size
   if (file.size > MAX_FILE_SIZE) {
+    console.log('[VALIDATE_FILE] File too large');
     return {
       valid: false,
       error: `File size exceeds 10MB limit. Size: ${(file.size / (1024 * 1024)).toFixed(2)}MB`,
@@ -210,6 +212,7 @@ export function validateFileUpload(file: File): { valid: boolean; error?: string
 
   // Check file size is not zero
   if (file.size === 0) {
+    console.log('[VALIDATE_FILE] File is empty');
     return {
       valid: false,
       error: 'File is empty',
@@ -223,6 +226,7 @@ export function validateFileUpload(file: File): { valid: boolean; error?: string
   };
 
   if (!isAllowedMimeType(file.type)) {
+    console.log('[VALIDATE_FILE] Invalid MIME type');
     return {
       valid: false,
       error: `Unsupported file format: ${file.type}. Supported formats: PDF, DOCX, TXT, MD`,
@@ -237,6 +241,7 @@ export function validateFileUpload(file: File): { valid: boolean; error?: string
   };
 
   if (!isAllowedExtension(extension)) {
+    console.log('[VALIDATE_FILE] Invalid extension');
     return {
       valid: false,
       error: `Unsupported file extension: ${extension}. Supported extensions: ${ALLOWED_FILE_EXTENSIONS.join(', ')}`,
@@ -244,6 +249,7 @@ export function validateFileUpload(file: File): { valid: boolean; error?: string
     };
   }
 
+  console.log('[VALIDATE_FILE] File is valid');
   return { valid: true };
 }
 

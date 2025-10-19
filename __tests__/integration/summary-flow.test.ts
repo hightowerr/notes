@@ -5,12 +5,43 @@
  * THESE TESTS SHOULD FAIL INITIALLY (TDD Red Phase)
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { POST as processPOST } from '@/app/api/process/route';
 import { GET as statusGET } from '@/app/api/status/[fileId]/route';
 import { uploadTestFixture, cleanupTestFixture, cleanupAllTestFixtures } from '../fixtures/test-helpers';
+
+vi.mock('@/lib/services/noteProcessor', () => ({
+  convertToMarkdown: vi.fn(() => ({
+    markdown: 'mock markdown',
+    contentHash: 'mock hash',
+  })),
+}));
+
+vi.mock('@/lib/services/aiSummarizer', () => ({
+  extractStructuredData: vi.fn(() => ({
+    output: {
+      topics: ['Test Topic'],
+      decisions: ['Test Decision'],
+      actions: ['Test Action'],
+      lno_tasks: {
+        leverage: ['High Impact Task'],
+        neutral: ['Standard Task'],
+        overhead: ['Admin Task'],
+      },
+    },
+    confidence: 0.95,
+  })),
+  calculateLowConfidence: vi.fn(() => 0.5),
+  scoreActionsWithSemanticSimilarity: vi.fn((actions) => actions),
+  generateAndStoreEmbeddings: vi.fn(() => ({
+    success: 1,
+    failed: 0,
+    pending: 0,
+    embeddingsStatus: 'completed',
+  })),
+}));
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;

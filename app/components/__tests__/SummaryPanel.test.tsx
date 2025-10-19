@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import SummaryPanel from '../SummaryPanel';
 import type { DocumentOutput } from '@/lib/schemas';
 
@@ -238,9 +238,13 @@ describe('SummaryPanel', () => {
       />
     );
 
-    // Each column should show empty state
-    const emptyMessages = screen.getAllByText(/No tasks identified/i);
-    expect(emptyMessages).toHaveLength(3); // One for each column
+    const leverageColumn = screen.getByText(/Leverage/i).closest('div.rounded-lg');
+    const neutralColumn = screen.getByText(/Neutral/i).closest('div.rounded-lg');
+    const overheadColumn = screen.getByText(/Overhead/i).closest('div.rounded-lg');
+
+    expect(within(leverageColumn).getByText(/No tasks identified/i)).toBeInTheDocument();
+    expect(within(neutralColumn).getByText(/No tasks identified/i)).toBeInTheDocument();
+    expect(within(overheadColumn).getByText(/No tasks identified/i)).toBeInTheDocument();
   });
 
   it('has proper heading hierarchy for accessibility', () => {

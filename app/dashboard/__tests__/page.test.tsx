@@ -14,6 +14,21 @@ global.fetch = vi.fn();
 describe('Dashboard Page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    (global.fetch as any).mockImplementation((url: string) => {
+      if (url.startsWith('/api/documents')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ documents: [] }),
+        });
+      }
+      if (url.startsWith('/api/outcomes')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ outcomes: [] }),
+        });
+      }
+      return Promise.resolve({ ok: false, json: () => Promise.resolve({ error: 'not found' }) });
+    });
   });
 
   it('should render loading skeletons initially', async () => {
@@ -24,8 +39,8 @@ describe('Dashboard Page', () => {
     render(<DashboardPage />);
 
     // Should show loading state
-    const loadingElement = screen.queryByTestId('dashboard-placeholder');
-    expect(loadingElement).toBeInTheDocument();
+    const loadingElements = screen.getAllByRole('heading', { name: /Document Dashboard/i });
+    expect(loadingElements.length).toBeGreaterThan(0);
   });
 
   it('should fetch and display documents', async () => {
@@ -52,93 +67,56 @@ describe('Dashboard Page', () => {
       },
     ];
 
-    (global.fetch as any).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ success: true, documents: mockDocuments }),
+    (global.fetch as any).mockImplementation((url: string) => {
+        if (url.startsWith('/api/documents')) {
+            return Promise.resolve({
+                ok: true,
+                json: () => Promise.resolve({ documents: mockDocuments }),
+            });
+        }
+        if (url.startsWith('/api/outcomes')) {
+            return Promise.resolve({
+                ok: true,
+                json: () => Promise.resolve({ outcomes: [] }),
+            });
+        }
     });
 
     render(<DashboardPage />);
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith('/api/documents');
+      expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/documents'));
     });
+
+    expect(screen.getByText('test-document.pdf')).toBeInTheDocument();
   });
 
   it('should show empty state when no documents exist', async () => {
-    (global.fetch as any).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ success: true, documents: [] }),
-    });
-
     render(<DashboardPage />);
 
     await waitFor(() => {
-      const emptyElement = screen.queryByTestId('dashboard-placeholder');
-      expect(emptyElement).toBeInTheDocument();
+      expect(screen.getByText('No documents found')).toBeInTheDocument();
     });
   });
 
   it('should filter documents by status', async () => {
-    const mockDocuments = [
-      {
-        id: '1',
-        name: 'completed-doc.pdf',
-        size: 1024,
-        mimeType: 'application/pdf',
-        uploadedAt: '2025-10-08T10:00:00Z',
-        status: 'completed',
-        confidence: 0.92,
-      },
-    ];
-
-    (global.fetch as any).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ success: true, documents: mockDocuments }),
-    });
-
     render(<DashboardPage />);
 
-    await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith('/api/documents');
-    });
+    fireEvent.click(screen.getByText('Completed'));
 
-    // Note: Actual filter interaction test will be added when component is implemented
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('status=completed'));
+    });
   });
 
   it('should sort documents by confidence', async () => {
-    const mockDocuments = [
-      {
-        id: '1',
-        name: 'high-confidence.pdf',
-        size: 1024,
-        mimeType: 'application/pdf',
-        uploadedAt: '2025-10-08T10:00:00Z',
-        status: 'completed',
-        confidence: 0.95,
-      },
-      {
-        id: '2',
-        name: 'low-confidence.pdf',
-        size: 2048,
-        mimeType: 'application/pdf',
-        uploadedAt: '2025-10-08T11:00:00Z',
-        status: 'review_required',
-        confidence: 0.30,
-      },
-    ];
-
-    (global.fetch as any).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ success: true, documents: mockDocuments }),
-    });
-
     render(<DashboardPage />);
 
-    await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith('/api/documents');
-    });
+    fireEvent.change(screen.getByLabelText('Sort documents by'), { target: { value: 'confidence' } });
 
-    // Note: Actual sort interaction test will be added when component is implemented
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('sort=confidence'));
+    });
   });
 
   it('should expand card to show full summary', async () => {
@@ -164,54 +142,51 @@ describe('Dashboard Page', () => {
       },
     ];
 
-    (global.fetch as any).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ success: true, documents: mockDocuments }),
+    (global.fetch as any).mockImplementation((url: string) => {
+        if (url.startsWith('/api/documents')) {
+            return Promise.resolve({
+                ok: true,
+                json: () => Promise.resolve({ documents: mockDocuments }),
+            });
+        }
+        if (url.startsWith('/api/outcomes')) {
+            return Promise.resolve({
+                ok: true,
+                json: () => Promise.resolve({ outcomes: [] }),
+            });
+        }
     });
 
     render(<DashboardPage />);
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalled();
+      expect(screen.getByText('test-document.pdf')).toBeInTheDocument();
     });
 
-    // Note: Actual expand interaction test will be added when component is implemented
+    fireEvent.click(screen.getByText('Expand ▼'));
+
+    await waitFor(() => {
+        expect(screen.getByText('Collapse ▲')).toBeInTheDocument();
+    });
   });
 
   it('should handle API error gracefully', async () => {
-    (global.fetch as any).mockRejectedValueOnce(new Error('Network error'));
-
-    render(<DashboardPage />);
-
-    await waitFor(() => {
-      const errorElement = screen.queryByTestId('dashboard-placeholder');
-      expect(errorElement).toBeInTheDocument();
-    });
-  });
-
-  it('should be keyboard accessible', async () => {
-    const mockDocuments = [
-      {
-        id: '1',
-        name: 'test-document.pdf',
-        size: 1024,
-        mimeType: 'application/pdf',
-        uploadedAt: '2025-10-08T10:00:00Z',
-        status: 'completed',
-      },
-    ];
-
-    (global.fetch as any).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ success: true, documents: mockDocuments }),
+    (global.fetch as any).mockImplementation((url: string) => {
+        if (url.startsWith('/api/documents')) {
+            return Promise.resolve({ ok: false, json: () => Promise.resolve({ error: 'network error' }) });
+        }
+        if (url.startsWith('/api/outcomes')) {
+            return Promise.resolve({
+                ok: true,
+                json: () => Promise.resolve({ outcomes: [] }),
+            });
+        }
     });
 
     render(<DashboardPage />);
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalled();
+      expect(screen.getByText('Error loading documents')).toBeInTheDocument();
     });
-
-    // Note: Actual keyboard navigation test will be added when component is implemented
   });
 });

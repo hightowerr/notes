@@ -30,7 +30,10 @@
       "Bash(awk:*)",
       "Bash(node:*)",
       "Bash(for file in specs/006-phase-2-tool/contracts/*.json)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(npx tsx:*)",
+      "Bash(npm run test:contract:*)",
+      "Bash(npx vitest run:*)"
     ],
     "deny": [],
     "ask": []

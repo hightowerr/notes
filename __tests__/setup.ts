@@ -9,6 +9,7 @@ beforeAll(() => {
   // Set up test environment variables
   process.env.NEXT_PUBLIC_SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://test.supabase.co';
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'test-key';
+  process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || 'test-key';
 
   // Polyfill Web Crypto API for Node.js environment
   // Use Object.defineProperty to ensure crypto is available in all test contexts
@@ -34,6 +35,37 @@ beforeAll(() => {
     throw new Error('File API incomplete - name/type/size properties missing');
   }
   console.log('[SETUP] ✓ File API verified (undici)');
+
+  if (!globalThis.crypto.randomUUID) {
+    globalThis.crypto.randomUUID = function() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    };
+  }
+
+  if (!globalThis.URL.createObjectURL) {
+    globalThis.URL.createObjectURL = () => 'blob:http://localhost/mock-url';
+  }
+
+  if (!globalThis.URL.revokeObjectURL) {
+    globalThis.URL.revokeObjectURL = () => {};
+  }
+
+  if (!globalThis.ResizeObserver) {
+    globalThis.ResizeObserver = class ResizeObserver {
+      observe() {
+        // do nothing
+      }
+      unobserve() {
+        // do nothing
+      }
+      disconnect() {
+        // do nothing
+      }
+    };
+  }
 });
 
 afterEach(() => {

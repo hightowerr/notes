@@ -6,6 +6,8 @@ default_agent: slice-orchestrator
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**See `AGENTS.md` for repository-wide contributor workflow (structure, commands, commit expectations).**
+
 **See `.claude/standards.md` for universal standards that apply to all agents:**
 - TypeScript & code quality rules
 - TDD workflow (Red-Green-Refactor)

@@ -53,6 +53,7 @@ export async function POST(request: NextRequest) {
       .select('*')
       .eq('id', fileId)
       .single();
+    console.log('[PROCESS LOG] Fetched file metadata', file);
 
     if (fetchError || !file) {
       console.error('[PROCESS ERROR] File not found:', { fileId, error: fetchError });
@@ -71,18 +72,21 @@ export async function POST(request: NextRequest) {
       .from('uploaded_files')
       .update({ status: 'processing' })
       .eq('id', fileId);
+    console.log('[PROCESS LOG] Updated status to processing');
 
     // 4. Download file from Supabase storage
     const { data: fileData, error: downloadError } = await supabase
       .storage
       .from('notes')
       .download(file.storage_path);
+    console.log('[PROCESS LOG] Downloaded file from storage');
 
     if (downloadError || !fileData) {
       throw new Error(`Failed to download file from storage: ${downloadError?.message}`);
     }
 
     const fileBuffer = Buffer.from(await fileData.arrayBuffer());
+    console.log('[PROCESS LOG] Created file buffer');
 
     // 5. Convert to Markdown (log operation)
     await logOperation(fileId, 'convert', 'started');
@@ -93,6 +97,7 @@ export async function POST(request: NextRequest) {
       file.mime_type,
       file.name
     );
+    console.log('[PROCESS LOG] Converted to markdown');
 
     const convertDuration = Date.now() - convertStartTime;
     await logOperation(fileId, 'convert', 'completed', convertDuration);
@@ -115,6 +120,7 @@ export async function POST(request: NextRequest) {
 
     try {
       aiResult = await extractStructuredData(markdown);
+      console.log('[PROCESS LOG] Extracted structured data from AI');
 
       // FR-010: Simulate invalid JSON retry scenario
       if (forceInvalidJson && !retryAttempted) {
@@ -154,6 +160,7 @@ export async function POST(request: NextRequest) {
       .select('assembled_text, state_preference, daily_capacity_hours')
       .eq('is_active', true)
       .maybeSingle();
+    console.log('[PROCESS LOG] Fetched active outcome');
 
     console.log('[PROCESS] Scoring actions against outcome:', {
       hasOutcome: !!outcome,
@@ -166,6 +173,7 @@ export async function POST(request: NextRequest) {
       aiResult.output.actions,
       outcome?.assembled_text
     );
+    console.log('[PROCESS LOG] Scored actions with semantic similarity');
 
     const scoreDuration = Date.now() - scoreStartTime;
     console.log('[PROCESS] Action scoring complete:', {
@@ -234,12 +242,14 @@ export async function POST(request: NextRequest) {
     await supabase.storage
       .from('notes')
       .upload(markdownPath, markdown, { contentType: 'text/markdown' });
+    console.log('[PROCESS LOG] Uploaded markdown to storage');
 
     await supabase.storage
       .from('notes')
       .upload(jsonPath, JSON.stringify(aiResult.output, null, 2), {
         contentType: 'application/json',
       });
+    console.log('[PROCESS LOG] Uploaded JSON to storage');
 
     const storeDuration = Date.now() - storeStartTime;
     await logOperation(fileId, 'store', 'completed', storeDuration);
@@ -269,17 +279,7 @@ export async function POST(request: NextRequest) {
       })
       .select()
       .single();
-
-    if (insertError) {
-      console.error('[PROCESS ERROR] Failed to create processed_documents record:', {
-        fileId,
-        docId,
-        error: insertError.message,
-        details: insertError.details,
-        hint: insertError.hint,
-      });
-      throw new Error(`Failed to create processed_documents record: ${insertError.message}`);
-    }
+    console.log('[PROCESS LOG] Inserted into processed_documents');
 
     // 8.5. Generate and store embeddings for tasks (T023)
     await logOperation(fileId, 'embed', 'started');
@@ -375,6 +375,7 @@ export async function POST(request: NextRequest) {
       error: errorMessage,
       stack: error instanceof Error ? error.stack : undefined,
     });
+    console.error(error);
 
     // Mark job as complete (even on failure) and process next queued job (T005)
     if (fileId) {

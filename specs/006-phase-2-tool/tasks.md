@@ -20,7 +20,7 @@ Vertical slice architecture adapted for agent capabilities:
 
 ## Phase 1: Foundation (Database + Configuration)
 
-### T001 [SETUP] Apply database migration for task_relationships table
+- [x] T001 [SETUP] Apply database migration for task_relationships table
 
 **Why Needed**: Blocks T006 (detect-dependencies tool) and T007 (query-task-graph tool) which require task_relationships table for storing/querying dependencies.
 
@@ -61,7 +61,7 @@ VALUES ('test_id', 'test_id', 'prerequisite', 0.9, 'ai');
 
 ---
 
-### T002 [P] [SETUP] Configure Mastra with telemetry and tool registry
+- [x] T002 [P] [SETUP] Configure Mastra with telemetry and tool registry
 
 **Why Needed**: Blocks all tool tasks (T003-T012). Establishes Mastra configuration, rate limiting, retry logic, and telemetry before tools can be defined.
 
@@ -102,7 +102,7 @@ npx tsx scripts/test-mastra.ts
 
 ## Phase 2: Service Layer (Backend Logic)
 
-### T003 [P] Create documentService for context retrieval with pagination
+### T003 [x] [P] Create documentService for context retrieval with pagination
 
 **Agent Capability**: Enables agents to retrieve full markdown content and all tasks from documents, with automatic pagination for large documents (>50K chars).
 
@@ -151,7 +151,7 @@ npm run test:unit -- documentService.test.ts
 
 ---
 
-### T004 [P] Create dependencyService for AI-powered relationship detection
+### T004 [x] [P] Create dependencyService for AI-powered relationship detection
 
 **Agent Capability**: Enables agents to analyze tasks and detect prerequisite, blocking, or related relationships using AI, with confidence scoring.
 
@@ -211,7 +211,7 @@ npm run test:unit -- dependencyService.test.ts
 
 ---
 
-### T005 [P] Create clusteringService for similarity-based task grouping
+### T005 [x] [P] Create clusteringService for similarity-based task grouping
 
 **Agent Capability**: Enables agents to group tasks into semantic clusters using hierarchical clustering algorithm (ml-hclust library).
 
@@ -270,7 +270,7 @@ npm run test:unit -- clusteringService.test.ts
 
 ## Phase 3: Tool Definitions (Mastra Integration)
 
-### T006 [SLICE] Create semantic-search tool for vector similarity queries
+- [x] T006 [SLICE] Create semantic-search tool for vector similarity queries
 
 **Agent Capability**: As an agent, I can search for tasks semantically similar to a natural language query and receive ranked results above a confidence threshold.
 
@@ -312,7 +312,7 @@ npm run test:unit -- clusteringService.test.ts
 
 ---
 
-### T007 [SLICE] Create get-document-context tool for markdown retrieval
+### T007 [x] [SLICE] Create get-document-context tool for markdown retrieval
 
 **Agent Capability**: As an agent, I can retrieve full markdown content and all tasks for documents containing specific task IDs, with automatic pagination for large documents.
 
@@ -351,7 +351,7 @@ npm run test:unit -- clusteringService.test.ts
 
 ---
 
-### T008 [SLICE] Create detect-dependencies tool for AI relationship analysis
+### T008 [x] [SLICE] Create detect-dependencies tool for AI relationship analysis
 
 **Agent Capability**: As an agent, I can analyze a set of tasks to detect prerequisite, blocking, or related relationships using AI, and have those relationships stored for future queries.
 
@@ -392,7 +392,7 @@ npm run test:unit -- clusteringService.test.ts
 
 ---
 
-### T009 [SLICE] Create query-task-graph tool for database relationship lookups
+### T009 [x] [SLICE] Create query-task-graph tool for database relationship lookups
 
 **Agent Capability**: As an agent, I can query existing task relationships from the database, filtered by relationship type (prerequisite/blocks/related/all).
 
@@ -436,7 +436,7 @@ npm run test:unit -- clusteringService.test.ts
 
 ---
 
-### T010 [SLICE] Create cluster-by-similarity tool for task grouping
+### T010 [x] [SLICE] Create cluster-by-similarity tool for task grouping
 
 **Agent Capability**: As an agent, I can group tasks into semantic clusters based on similarity threshold to identify conceptually related tasks without explicit links.
 
@@ -481,7 +481,7 @@ npm run test:unit -- clusteringService.test.ts
 
 ## Phase 4: Integration & Validation
 
-### T011 [SLICE] Register all tools with Mastra and verify telemetry
+### T011 [x] [SLICE] Register all tools with Mastra and verify telemetry
 
 **Agent Capability**: All 5 tools are registered with Mastra, automatically validated, and execution telemetry is logged.
 
