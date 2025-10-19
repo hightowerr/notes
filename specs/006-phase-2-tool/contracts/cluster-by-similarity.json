@@ -1,0 +1,160 @@
+{
+  "tool_id": "cluster-by-similarity",
+  "description": "Group tasks into hierarchical clusters based on semantic similarity of their embeddings. Uses agglomerative clustering with cosine distance. Returns cluster assignments and centroids. Use this tool when you need to identify task themes or group related tasks without pre-defined categories.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "task_ids": {
+        "type": "array",
+        "description": "Array of task IDs to cluster",
+        "items": {
+          "type": "string",
+          "description": "SHA-256 task identifier"
+        },
+        "minItems": 2,
+        "maxItems": 100
+      },
+      "similarity_threshold": {
+        "type": "number",
+        "description": "Minimum similarity (0.0-1.0) required to merge clusters. Higher values = more granular clusters.",
+        "minimum": 0.0,
+        "maximum": 1.0,
+        "default": 0.75
+      }
+    },
+    "required": ["task_ids"],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "clusters": {
+        "type": "array",
+        "description": "Array of detected clusters, sorted by cluster size (descending)",
+        "items": {
+          "type": "object",
+          "properties": {
+            "cluster_id": {
+              "type": "number",
+              "description": "Unique cluster identifier (0-indexed)"
+            },
+            "task_ids": {
+              "type": "array",
+              "description": "Array of task IDs belonging to this cluster",
+              "items": {
+                "type": "string"
+              }
+            },
+            "centroid": {
+              "type": "array",
+              "description": "Average embedding vector for cluster (1536 dimensions)",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 1536,
+              "maxItems": 1536
+            },
+            "average_similarity": {
+              "type": "number",
+              "description": "Average pairwise similarity between tasks in cluster (0.0-1.0)",
+              "minimum": 0.0,
+              "maximum": 1.0
+            }
+          },
+          "required": ["cluster_id", "task_ids", "centroid", "average_similarity"]
+        }
+      },
+      "task_count": {
+        "type": "number",
+        "description": "Total number of tasks analyzed (should match input task_ids length)"
+      },
+      "cluster_count": {
+        "type": "number",
+        "description": "Total number of clusters created"
+      },
+      "threshold_used": {
+        "type": "number",
+        "description": "Similarity threshold applied during clustering"
+      }
+    },
+    "required": ["clusters", "task_count", "cluster_count", "threshold_used"]
+  },
+  "error_codes": [
+    {
+      "code": "INSUFFICIENT_EMBEDDINGS",
+      "description": "One or more task IDs have no completed embeddings (status != 'completed')",
+      "http_status": 400
+    },
+    {
+      "code": "INVALID_THRESHOLD",
+      "description": "Similarity threshold outside valid range (0.0-1.0)",
+      "http_status": 400
+    },
+    {
+      "code": "TASK_NOT_FOUND",
+      "description": "One or more task IDs do not exist in the database",
+      "http_status": 404
+    },
+    {
+      "code": "CLUSTERING_FAILED",
+      "description": "Clustering algorithm failed (computational error or invalid embeddings)",
+      "http_status": 500,
+      "retryable": false
+    },
+    {
+      "code": "DATABASE_ERROR",
+      "description": "Database query failed during embedding retrieval",
+      "http_status": 500,
+      "retryable": true
+    }
+  ],
+  "example_input": {
+    "task_ids": [
+      "a3c5f891b2d4e6f8c9d1e2f3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0r1s2t3",
+      "b4d6g0h2c3e5f7g9h1i3j5k7l9m1n3o5p7q9r1s3t5u7v9w1x3y5z7a9b1c3d5e7",
+      "c5e7h1i3d4f6g8h0i2j4k6l8m0n2o4p6q8r0s2t4u6v8w0x2y4z6a8b0c2d4e6f8",
+      "d6f8i2j4e5g7h9i1j3k5l7m9n1o3p5q7r9s1t3u5v7w9x1y3z5a7b9c1d3e5f7g9",
+      "e7g9j3k5f6h8i0j2k4l6m8n0o2p4q6r8s0t2u4v6w8x0y2z4a6b8c0d2e4f6g8h0"
+    ],
+    "similarity_threshold": 0.8
+  },
+  "example_output": {
+    "clusters": [
+      {
+        "cluster_id": 0,
+        "task_ids": [
+          "a3c5f891b2d4e6f8c9d1e2f3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0r1s2t3",
+          "b4d6g0h2c3e5f7g9h1i3j5k7l9m1n3o5p7q9r1s3t5u7v9w1x3y5z7a9b1c3d5e7",
+          "c5e7h1i3d4f6g8h0i2j4k6l8m0n2o4p6q8r0s2t4u6v8w0x2y4z6a8b0c2d4e6f8"
+        ],
+        "centroid": [0.023, -0.015, 0.048, -0.002],
+        "average_similarity": 0.87
+      },
+      {
+        "cluster_id": 1,
+        "task_ids": [
+          "d6f8i2j4e5g7h9i1j3k5l7m9n1o3p5q7r9s1t3u5v7w9x1y3z5a7b9c1d3e5f7g9",
+          "e7g9j3k5f6h8i0j2k4l6m8n0o2p4q6r8s0t2u4v6w8x0y2z4a6b8c0d2e4f6g8h0"
+        ],
+        "centroid": [-0.012, 0.031, -0.006, 0.019],
+        "average_similarity": 0.82
+      }
+    ],
+    "task_count": 5,
+    "cluster_count": 2,
+    "threshold_used": 0.8
+  },
+  "clustering_algorithm": {
+    "method": "agglomerative_hierarchical",
+    "linkage": "average",
+    "distance_metric": "cosine",
+    "description": "Agglomerative clustering with average linkage. Starts with each task as its own cluster, then iteratively merges most similar clusters until similarity threshold is reached."
+  },
+  "performance_target": {
+    "p95_latency_ms": 5000,
+    "typical_latency_ms": 1500,
+    "max_retries": 2,
+    "retry_delay_ms": 2000,
+    "notes": "Computational complexity O(n^2 log n) for n tasks. Performance degrades with >100 tasks (max limit enforced)."
+  }
+}

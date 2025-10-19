@@ -1,0 +1,118 @@
+{
+  "tool_id": "query-task-graph",
+  "description": "Retrieve existing task relationships from the database for a specific task, optionally filtered by relationship type. Returns both manual and AI-detected relationships. Use this tool when you need to check if dependencies have already been identified, avoiding redundant AI analysis.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "description": "SHA-256 task identifier to query relationships for"
+      },
+      "relationship_type": {
+        "type": "string",
+        "enum": ["prerequisite", "blocks", "related", "all"],
+        "description": "Filter by relationship type (default 'all' returns all types)",
+        "default": "all"
+      }
+    },
+    "required": ["task_id"],
+    "additionalProperties": false
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "relationships": {
+        "type": "array",
+        "description": "Array of relationships where task_id is either source or target",
+        "items": {
+          "type": "object",
+          "properties": {
+            "source_task_id": {
+              "type": "string",
+              "description": "Task ID that initiates the relationship"
+            },
+            "target_task_id": {
+              "type": "string",
+              "description": "Task ID that is affected by the relationship"
+            },
+            "relationship_type": {
+              "type": "string",
+              "enum": ["prerequisite", "blocks", "related"],
+              "description": "Type of dependency"
+            },
+            "confidence_score": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0,
+              "description": "Confidence in relationship (1.0 for manual, 0.0-1.0 for AI-detected)"
+            },
+            "detection_method": {
+              "type": "string",
+              "enum": ["manual", "ai"],
+              "description": "How relationship was created (manual user input or AI detection)"
+            }
+          },
+          "required": ["source_task_id", "target_task_id", "relationship_type", "confidence_score", "detection_method"]
+        }
+      },
+      "task_id": {
+        "type": "string",
+        "description": "Original task ID queried (echoed back for reference)"
+      },
+      "filter_applied": {
+        "type": "string",
+        "description": "Relationship type filter used in query"
+      }
+    },
+    "required": ["relationships", "task_id", "filter_applied"]
+  },
+  "error_codes": [
+    {
+      "code": "TASK_NOT_FOUND",
+      "description": "Task ID does not exist in the database",
+      "http_status": 404
+    },
+    {
+      "code": "DATABASE_ERROR",
+      "description": "Database query failed during relationship retrieval",
+      "http_status": 500,
+      "retryable": true
+    }
+  ],
+  "example_input": {
+    "task_id": "a3c5f891b2d4e6f8c9d1e2f3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0r1s2t3",
+    "relationship_type": "prerequisite"
+  },
+  "example_output": {
+    "relationships": [
+      {
+        "source_task_id": "a3c5f891b2d4e6f8c9d1e2f3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0r1s2t3",
+        "target_task_id": "b4d6g0h2c3e5f7g9h1i3j5k7l9m1n3o5p7q9r1s3t5u7v9w1x3y5z7a9b1c3d5e7",
+        "relationship_type": "prerequisite",
+        "confidence_score": 0.92,
+        "detection_method": "ai"
+      },
+      {
+        "source_task_id": "z9x8c7v6b5n4m3l2k1j0i9h8g7f6e5d4c3b2a1z0y9x8w7v6u5t4s3r2q1p0o9n8",
+        "target_task_id": "a3c5f891b2d4e6f8c9d1e2f3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0r1s2t3",
+        "relationship_type": "prerequisite",
+        "confidence_score": 1.0,
+        "detection_method": "manual"
+      }
+    ],
+    "task_id": "a3c5f891b2d4e6f8c9d1e2f3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0r1s2t3",
+    "filter_applied": "prerequisite"
+  },
+  "example_output_no_results": {
+    "relationships": [],
+    "task_id": "new_task_id_with_no_relationships_yet",
+    "filter_applied": "all"
+  },
+  "performance_target": {
+    "p95_latency_ms": 2000,
+    "typical_latency_ms": 200,
+    "max_retries": 2,
+    "retry_delay_ms": 2000,
+    "notes": "Database query only (no AI), significantly faster than detect-dependencies tool"
+  }
+}
