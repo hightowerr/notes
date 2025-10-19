@@ -14,8 +14,11 @@ importers:
       '@hookform/resolvers':
         specifier: ^5.2.2
         version: 5.2.2(react-hook-form@7.65.0(react@19.1.0))
+      '@mastra/core':
+        specifier: ^0.21.1
+        version: 0.21.1(openapi-types@12.1.3)(react@19.1.0)(zod@3.25.76)
       '@mastra/mcp':
-        specifier: 0.13.5
+        specifier: ^0.13.5
         version: 0.13.5(@mastra/core@0.21.1(openapi-types@12.1.3)(react@19.1.0)(zod@3.25.76))(@types/json-schema@7.0.15)(zod@3.25.76)
       '@radix-ui/react-accordion':
         specifier: ^1.2.12
@@ -74,6 +77,9 @@ importers:
       date-fns:
         specifier: ^4.1.0
         version: 4.1.0
+      dotenv:
+        specifier: ^17.2.3
+        version: 17.2.3
       framer-motion:
         specifier: ^12.23.22
         version: 12.23.24(react-dom@19.1.0(react@19.1.0))(react@19.1.0)

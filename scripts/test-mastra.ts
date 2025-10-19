@@ -1,5 +1,8 @@
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local' });
+
 import { mastra } from '@/lib/mastra/config';
-import { agentTools } from '@/lib/mastra/tools';
+import { getRegisteredTools } from '@/lib/mastra/init';
 
 async function testMastraSetup() {
   console.log('Testing Mastra configuration...');
@@ -13,8 +16,8 @@ async function testMastraSetup() {
   // Test 2: Check telemetry config (verify it was passed to constructor)
   console.log('✓ Telemetry enabled: true');
 
-  // Test 3: Check tool registry (will be empty initially)
-  console.log('✓ Registered tools:', agentTools.length);
+  // Test 3: Check tool registry
+  console.log('✓ Registered tools:', getRegisteredTools().length);
 
   console.log('\n[Mastra Setup] All checks passed!');
 }

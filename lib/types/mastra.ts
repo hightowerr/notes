@@ -43,3 +43,36 @@ export type TaskCluster = {
   centroid: number[];
   average_similarity: number;
 };
+
+export type TaskRelationship = {
+  id: string;
+  source_task_id: string;
+  target_task_id: string;
+  relationship_type: 'prerequisite' | 'blocks' | 'related';
+  confidence_score: number;
+  detection_method: 'manual' | 'ai';
+  reasoning?: string | null;
+  created_at: Date;
+  updated_at: Date;
+};
+
+export type TaskRelationshipInsert = Omit<
+  TaskRelationship,
+  'id' | 'created_at' | 'updated_at'
+>;
+
+export type ToolExecutionStatus = 'success' | 'error' | 'timeout';
+
+export type ToolExecutionTrace = {
+  tool_name: string;
+  input_params: Record<string, unknown>;
+  output_data: unknown | null;
+  duration_ms: number;
+  status: ToolExecutionStatus;
+  timestamp: Date;
+  error_message?: string;
+  error_stack?: string;
+  performance_warning: boolean;
+  retry_count: number;
+  agent_session_id?: string;
+};
