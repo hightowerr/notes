@@ -1,0 +1,201 @@
+{
+  "endpoint": "GET /api/agent/sessions/[sessionId]/trace",
+  "description": "Retrieve detailed reasoning trace with step-by-step agent decisions",
+  "functional_requirements": ["FR-029", "FR-030", "FR-016", "FR-018"],
+  "request": {
+    "method": "GET",
+    "path_parameters": {
+      "sessionId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Agent session identifier"
+      }
+    }
+  },
+  "response": {
+    "success": {
+      "status": 200,
+      "body": {
+        "type": "object",
+        "properties": {
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReasoningStep"
+            },
+            "description": "Ordered array of reasoning steps (max 10 per FR-002)"
+          },
+          "total_duration_ms": {
+            "type": "integer",
+            "description": "Sum of all step durations"
+          }
+        },
+        "required": ["steps", "total_duration_ms"]
+      }
+    },
+    "errors": {
+      "404": {
+        "description": "Session or trace not found (session_id invalid or trace expired after 7 days per FR-020)"
+      },
+      "500": {
+        "description": "Database query failed"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ReasoningStep": {
+        "type": "object",
+        "description": "Individual step in agent reasoning loop (FR-030: shows thought, tool, input, output, duration)",
+        "properties": {
+          "step_number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "1-indexed position in reasoning loop"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp when step executed"
+          },
+          "thought": {
+            "type": "string",
+            "nullable": true,
+            "description": "Agent's rationale for this step (null if no explicit thought logged)"
+          },
+          "tool_name": {
+            "type": "string",
+            "nullable": true,
+            "enum": ["semantic-search", "get-document-context", "detect-dependencies", "query-task-graph", "cluster-by-similarity", null],
+            "description": "Name of tool called (null if thinking step with no tool)"
+          },
+          "tool_input": {
+            "type": "object",
+            "nullable": true,
+            "description": "Parameters passed to tool (Zod-validated, null if no tool called)"
+          },
+          "tool_output": {
+            "type": "object",
+            "nullable": true,
+            "description": "Structured response from tool (null if tool failed or not called)"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Step execution time in milliseconds"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["success", "failed", "skipped"],
+            "description": "Step outcome"
+          }
+        },
+        "required": ["step_number", "timestamp", "duration_ms", "status"]
+      }
+    }
+  },
+  "examples": {
+    "request": {
+      "path": "/api/agent/sessions/7c9e6679-7425-40de-944b-e07fc1f90ae7/trace"
+    },
+    "response": {
+      "steps": [
+        {
+          "step_number": 1,
+          "timestamp": "2025-10-19T14:30:00.500Z",
+          "thought": "I need to find revenue-related tasks to prioritize",
+          "tool_name": "semantic-search",
+          "tool_input": {
+            "query": "increase monthly recurring revenue",
+            "limit": 20,
+            "threshold": 0.7
+          },
+          "tool_output": {
+            "tasks": [
+              {
+                "task_id": "task-001",
+                "task_text": "Implement pricing page optimization",
+                "similarity": 0.89
+              },
+              {
+                "task_id": "task-002",
+                "task_text": "Build email nurture sequence",
+                "similarity": 0.85
+              }
+            ],
+            "count": 2
+          },
+          "duration_ms": 1250,
+          "status": "success"
+        },
+        {
+          "step_number": 2,
+          "timestamp": "2025-10-19T14:30:01.750Z",
+          "thought": "Now I'll check dependencies between these tasks",
+          "tool_name": "detect-dependencies",
+          "tool_input": {
+            "task_ids": ["task-001", "task-002"],
+            "include_document_context": true
+          },
+          "tool_output": {
+            "dependencies": [
+              {
+                "source_task_id": "task-002",
+                "target_task_id": "task-001",
+                "relationship_type": "prerequisite",
+                "confidence": 0.92
+              }
+            ]
+          },
+          "duration_ms": 3200,
+          "status": "success"
+        },
+        {
+          "step_number": 3,
+          "timestamp": "2025-10-19T14:30:04.950Z",
+          "thought": "Task-001 must come before task-002 based on dependency analysis",
+          "tool_name": null,
+          "tool_input": null,
+          "tool_output": null,
+          "duration_ms": 150,
+          "status": "success"
+        },
+        {
+          "step_number": 4,
+          "timestamp": "2025-10-19T14:30:05.100Z",
+          "thought": "Clustering similar tasks for batch execution recommendations",
+          "tool_name": "cluster-by-similarity",
+          "tool_input": {
+            "task_ids": ["task-001", "task-002"],
+            "similarity_threshold": 0.75
+          },
+          "tool_output": {
+            "clusters": [
+              {
+                "cluster_id": 1,
+                "task_ids": ["task-001", "task-002"],
+                "centroid_task_id": "task-001",
+                "average_similarity": 0.87
+              }
+            ],
+            "cluster_count": 1
+          },
+          "duration_ms": 2800,
+          "status": "success"
+        },
+        {
+          "step_number": 5,
+          "timestamp": "2025-10-19T14:30:07.900Z",
+          "thought": "I have enough information to generate the prioritized plan",
+          "tool_name": null,
+          "tool_input": null,
+          "tool_output": null,
+          "duration_ms": 100,
+          "status": "success"
+        }
+      ],
+      "total_duration_ms": 7500
+    }
+  }
+}

@@ -1,0 +1,225 @@
+{
+  "endpoint": "POST /api/agent/prioritize",
+  "description": "Trigger agent-based task prioritization for active user outcome",
+  "functional_requirements": ["FR-001", "FR-026", "FR-031", "FR-032"],
+  "request": {
+    "method": "POST",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "type": "object",
+      "properties": {
+        "outcome_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Active outcome statement ID for prioritization context"
+        },
+        "user_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "User triggering prioritization"
+        }
+      },
+      "required": ["outcome_id", "user_id"]
+    }
+  },
+  "response": {
+    "success": {
+      "status": 200,
+      "body": {
+        "type": "object",
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique agent session identifier for tracking"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["running", "completed", "failed"],
+            "description": "Current execution state (typically 'running' initially, poll for completion)"
+          },
+          "prioritized_plan": {
+            "type": "object",
+            "nullable": true,
+            "description": "Final prioritized output (null while status='running')",
+            "properties": {
+              "ordered_task_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Task IDs in execution order"
+              },
+              "execution_waves": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ExecutionWave"
+                },
+                "description": "Grouped tasks (parallel vs sequential execution)"
+              },
+              "dependencies": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TaskDependency"
+                },
+                "description": "Prerequisite/blocking/related relationships"
+              },
+              "confidence_scores": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "number",
+                  "minimum": 0.0,
+                  "maximum": 1.0
+                },
+                "description": "Map of task_id to confidence score (0.0-1.0)"
+              },
+              "synthesis_summary": {
+                "type": "string",
+                "description": "Agent's explanation of prioritization rationale"
+              }
+            },
+            "required": ["ordered_task_ids", "execution_waves", "dependencies", "confidence_scores", "synthesis_summary"]
+          },
+          "execution_metadata": {
+            "type": "object",
+            "description": "Performance and diagnostic data",
+            "properties": {
+              "steps_taken": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10,
+                "description": "Total reasoning steps (≤10 per FR-002)"
+              },
+              "tool_call_count": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "description": "Map of tool_name to call count"
+              },
+              "thinking_time_ms": {
+                "type": "integer",
+                "description": "Time spent in AI reasoning (milliseconds)"
+              },
+              "tool_execution_time_ms": {
+                "type": "integer",
+                "description": "Time spent executing tools (milliseconds)"
+              },
+              "total_time_ms": {
+                "type": "integer",
+                "description": "End-to-end session duration (milliseconds, target <30000)"
+              },
+              "error_count": {
+                "type": "integer",
+                "description": "Failed tool executions"
+              },
+              "success_rate": {
+                "type": "number",
+                "minimum": 0.0,
+                "maximum": 1.0,
+                "description": "Successful steps / total steps"
+              }
+            },
+            "required": ["steps_taken", "tool_call_count", "total_time_ms", "error_count", "success_rate"]
+          }
+        },
+        "required": ["session_id", "status", "execution_metadata"]
+      }
+    },
+    "errors": {
+      "400": {
+        "description": "Invalid request (missing outcome_id or user_id)"
+      },
+      "403": {
+        "description": "No active outcome exists (FR-031: prioritization disabled without outcome)"
+      },
+      "500": {
+        "description": "Agent execution failed (FR-023: actionable error message provided)"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ExecutionWave": {
+        "type": "object",
+        "properties": {
+          "wave_number": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "1-indexed execution order"
+          },
+          "task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Tasks in this wave"
+          },
+          "parallel_execution": {
+            "type": "boolean",
+            "description": "Can all tasks run simultaneously?"
+          },
+          "estimated_duration_hours": {
+            "type": "number",
+            "nullable": true,
+            "description": "Optional effort estimate"
+          }
+        },
+        "required": ["wave_number", "task_ids", "parallel_execution"]
+      },
+      "TaskDependency": {
+        "type": "object",
+        "properties": {
+          "source_task_id": {
+            "type": "string",
+            "description": "Task that depends on target"
+          },
+          "target_task_id": {
+            "type": "string",
+            "description": "Task that blocks source"
+          },
+          "relationship_type": {
+            "type": "string",
+            "enum": ["prerequisite", "blocks", "related"],
+            "description": "Type of dependency relationship"
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "AI inference confidence score"
+          },
+          "detection_method": {
+            "type": "string",
+            "enum": ["ai_inference", "stored_relationship"],
+            "description": "How dependency was discovered"
+          }
+        },
+        "required": ["source_task_id", "target_task_id", "relationship_type", "confidence", "detection_method"]
+      }
+    }
+  },
+  "examples": {
+    "request": {
+      "outcome_id": "550e8400-e29b-41d4-a716-446655440000",
+      "user_id": "123e4567-e89b-12d3-a456-426614174000"
+    },
+    "response": {
+      "session_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "status": "running",
+      "prioritized_plan": null,
+      "execution_metadata": {
+        "steps_taken": 0,
+        "tool_call_count": {},
+        "thinking_time_ms": 0,
+        "tool_execution_time_ms": 0,
+        "total_time_ms": 150,
+        "error_count": 0,
+        "success_rate": 0.0
+      }
+    }
+  }
+}
