@@ -1,37 +1,38 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `app/` contains the Next.js App Router, UI routes, API handlers such as `app/api/outcomes/route.ts`, and shared UI pieces under `app/components/`.
-- Shared logic sits in `lib/`, with services (`lib/services/outcomeService.ts`), hooks (`lib/hooks/useOutcomeDraft.ts`), and Zod schemas under `lib/schemas/`.
-- Tests live in `__tests__/contract/`, `__tests__/integration/`, and `app/components/__tests__/`.
-- Feature planning assets are stored in `.specify/` and `specs/002-outcome-management-shape/`; agent logs live in `.claude/`.
-- Database migrations are in `supabase/migrations/`; static assets belong in `public/`.
+- `app/` hosts the Next.js App Router, API routes (e.g., `app/api/outcomes/route.ts`), and shared UI under `app/components/`.
+- Core logic lives in `lib/`, including Supabase-facing services, hooks, schemas, and the Mastra integration (`lib/mastra/`).
+- Automated tests are grouped by intent: `__tests__/contract/`, `__tests__/integration/`, and `app/components/__tests__/`.
+- Feature specs, planning notes, and quickstart guides live in `specs/`; agent logs and prior run context reside in `.claude/`.
+- Database migrations are in `supabase/migrations/`, while static assets stay under `public/`.
 
 ## Build, Test, and Development Commands
-- `npm run dev` starts the local Next.js server with hot reload.
-- `npm run build` compiles the production bundle; follow with `npm run start` to serve it.
-- `npm run lint` runs ESLint + Prettier (append `-- --fix` before committing).
-- `npm run test` launches Vitest in watch mode; `npm run test:run` executes a single pass.
-- For integration specs that hit Tinypool, prefer `npm run test:run -- --pool=threads --poolOptions.threads.minThreads=1 --poolOptions.threads.maxThreads=1`.
+- `npm run dev` — start the Next.js dev server with HMR.
+- `npm run build` → `npm run start` — produce and serve the production bundle.
+- `npm run lint` (`-- --fix` to auto-correct) — run ESLint/Prettier.
+- `npm run test` — launch Vitest in watch mode; for single passes use `npm run test:run`.
+- Integration specs that stress Tinypool should use `npm run test:run -- --pool=threads --poolOptions.threads.minThreads=1 --poolOptions.threads.maxThreads=1`.
+- `npx tsx scripts/test-mastra.ts` — quick Mastra wiring check (telemetry + tool registry count).
 
 ## Coding Style & Naming Conventions
-- TypeScript everywhere, strict mode enabled, 2-space indentation, and trailing semicolons.
-- Components use PascalCase, hooks and utilities camelCase, constants SCREAMING_SNAKE_CASE.
-- Tailwind utility classes stay inline unless reused; shared UI lives in `components/ui/`.
-- Use the `@/*` alias for imports to avoid deep relative paths.
+- TypeScript everywhere, strict mode on, 2-space indentation, trailing semicolons.
+- Components use PascalCase, hooks/utilities camelCase, constants SCREAMING_SNAKE_CASE.
+- Keep Tailwind utilities inline unless a pattern repeats; reusable primitives belong in `components/ui/`.
+- Prefer the `@/*` path alias over deep relative imports.
 
 ## Testing Guidelines
-- Vitest + Testing Library cover unit, contract, and integration suites.
-- Name specs `*.test.ts` or `*.test.tsx` and place them in the directories noted above.
-- Target ≥80% coverage and add regression tests when fixing failures (e.g., recompute retries).
-- Supabase-dependent tests rely on `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
+- Vitest + Testing Library power unit, contract, and integration coverage; keep file names `*.test.ts(x)`.
+- Target ≥80 % coverage and add regression specs for any bug fix or retry logic change.
+- Supabase-dependent tests need `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`; stub external services where possible.
+- For Mastra tools, mirror contract tests in `__tests__/contract/mastra-tools.test.ts` and integration checks in `__tests__/integration/tool-execution.test.ts`.
 
 ## Commit & Pull Request Guidelines
-- Write imperative, present-tense subjects (e.g., `Add outcome recompute queue`); keep commits atomic.
-- Reference closed issues with `Fixes #id` when appropriate.
-- PRs need a concise summary, test evidence (`npm run test`, `npm run lint`), and screenshots or GIFs for UI changes.
-- Mention Supabase migrations and update environment docs when configuration changes.
+- Use imperative, present-tense commit subjects (`Add outcome recompute queue`); keep commits atomic and scoped.
+- Reference tracking issues with `Fixes #id` when relevant and note schema or migration impacts explicitly.
+- PRs should include a concise summary, verification evidence (`npm run lint`, `npm run test`), and UI screenshots/GIFs when front-end behavior changes.
 
-## Security & Agent Tips
-- Never run destructive commands (`git reset --hard`, `rm -rf`) without explicit approval.
-- Leverage agent logs in `.claude/` for triage; update AGENTS.md when workflows evolve.
+## Security & Configuration Tips
+- Never run destructive commands (`git reset --hard`, `rm -rf`) without approval; operate inside the sandboxed workspace.
+- Guard API keys in `.env.local`; never commit secrets. Supabase and OpenAI keys are required for end-to-end tests.
+- Leverage `.claude/` and `specs/` when triaging regressions, and update this guide if tooling or workflows change.

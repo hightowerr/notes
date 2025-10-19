@@ -55,12 +55,47 @@ This file provides guidance to Gemini when working with code in this repository.
 - Structured output via Zod schemas
 - Retry logic for invalid JSON
 
+**`lib/services/clusteringService.ts`** - Clustering service
+- Groups similar tasks together based on their vector embeddings
+
+**`lib/services/dependencyService.ts`** - Dependency service
+- Detects dependencies between tasks
+
+**`lib/services/documentService.ts`** - Document service
+- Manages document-related operations
+
+**`lib/services/embeddingQueue.ts`** - Embedding queue service
+- Manages the queue of documents to be embedded
+
+**`lib/services/embeddingService.ts`** - Embedding service
+- Generates vector embeddings for tasks
+
+**`lib/services/filteringService.ts`** - Filtering service
+- Filters documents based on user-defined criteria
+
+**`lib/services/noteProcessor.ts`** - File conversion service
+- Converts PDF (pdf-parse), DOCX (mammoth), TXT to Markdown
+- Generates SHA-256 content hashes for deduplication
+- OCR fallback placeholder for unreadable PDFs
+
+**`lib/services/outcomeService.ts`** - Outcome service
+- Manages user-defined outcomes
+
 **`lib/services/processingQueue.ts`** - Concurrent upload management
 - Enforces max 3 parallel processing jobs
 - FIFO queue for additional uploads
 
-**`lib/jobs/cleanupExpiredFiles.ts`** - Automatic file cleanup
-- Deletes expired documents (expires_at < NOW())
+**`lib/services/recomputeDebounce.ts`** - Recompute debounce service
+- Debounces recompute requests to avoid unnecessary recomputations
+
+**`lib/services/recomputeService.ts`** - Recompute service
+- Recomputes document summaries and embeddings when necessary
+
+**`lib/services/reflectionService.ts`** - Reflection service
+- Manages user reflections
+
+**`lib/services/vectorStorage.ts`** - Vector storage service
+- Stores and retrieves vector embeddings
 
 ## Building and Running
 
@@ -81,7 +116,7 @@ This file provides guidance to Gemini when working with code in this repository.
 
 2.  **Install dependencies:**
     ```bash
-    npm install
+    pnpm install
     ```
 
 3.  **Set up environment variables:**
@@ -156,9 +191,11 @@ The `slice-orchestrator` agent coordinates the delivery of complete vertical sli
 - `GET /api/documents`: Retrieve all documents with filtering and sorting.
 - `POST /api/cleanup`: Manual trigger for cleaning up expired documents.
 - `GET /api/export/[fileId]`: Export a document summary as JSON or Markdown.
-- `GET /api/outcomes`: Fetch the active outcome statement.
-- `POST /api/outcomes`: Create or update an outcome statement.
-- `POST /api/embeddings/search`: Perform semantic search across task embeddings.
+GET /api/outcomes: Fetch the active outcome statement.
+POST /api/outcomes: Create or update an outcome statement.
+POST /api/reflections: Create a reflection.
+GET /api/reflections: Get all reflections.
+POST /api/embeddings/search: Perform semantic search across task embeddings.
 
 ## Frontend Architecture
 

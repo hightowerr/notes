@@ -50,6 +50,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Note:** 27/44 automated tests passing (61% pass rate). Blockers: FormData serialization in test environment, test isolation timing. Use manual testing guides (`T002_MANUAL_TEST.md`, etc.) for upload/processing validation.
 
+### Utility Scripts
+- `npx tsx scripts/test-mastra.ts` - Validate Mastra tool registry and telemetry setup
+- `npx tsx scripts/run-semantic-search.ts` - Test semantic search functionality manually
+- `bash scripts/test-search-endpoint.sh` - Quick test of embedding search API endpoint
+- `node scripts/clear-database.sql` - Database cleanup script (use with caution)
+- `node scripts/patch-pdf-parse.js` - Fix pdf-parse debug mode (runs automatically via postinstall)
+
 ### Workflow Commands (.specify/)
 - `/plan` - Create implementation plan from feature spec
 - `/specify` - Create feature specification from description
@@ -400,6 +407,105 @@ $$;
 - Monitor embedding generation success rate (target >95%)
 - Track queue depth during peak upload periods
 
+### Mastra Tool Registry & Execution (Phase 2 - Spec 006)
+
+**Purpose**: Provide AI agents with specialized query tools to dynamically explore task relationships, dependencies, and semantic clusters beyond their initial context window. Enables multi-step reasoning workflows that require data queries and analysis.
+
+**Tech Stack**: @mastra/core for tool registry and execution telemetry, integrated with vector embeddings and Supabase
+
+**Architecture**: Tools are stateless functions with Zod validation. Mastra handles automatic discovery, parameter validation, retry logic, and execution tracing.
+
+#### Available Tools (5 Core Capabilities)
+
+**1. semantic-search** - Find tasks by semantic meaning
+```typescript
+// Search semantically similar tasks across all documents
+{ query: string, limit?: number, threshold?: number }
+// Returns: Array of {task_id, task_text, document_id, similarity}
+```
+
+**2. get-document-context** - Retrieve full document content
+```typescript
+// Get markdown and all tasks from parent documents
+{ task_ids: string[], chunk_number?: number }
+// Returns: Document markdown, tasks, pagination metadata
+```
+
+**3. detect-dependencies** - AI-powered relationship detection
+```typescript
+// Analyze task relationships using AI reasoning
+{ task_ids: string[], include_document_context?: boolean }
+// Returns: Prerequisite/blocking/related relationships with confidence
+```
+
+**4. query-task-graph** - Query existing relationships
+```typescript
+// Retrieve stored relationships from database
+{ task_id: string, relationship_type?: 'prerequisite'|'blocks'|'related'|'all' }
+// Returns: Array of task relationships filtered by type
+```
+
+**5. cluster-by-similarity** - Group similar tasks
+```typescript
+// Hierarchical clustering of semantically similar tasks
+{ task_ids: string[], similarity_threshold: number }
+// Returns: Cluster assignments, task distribution, cluster count
+```
+
+#### Mastra Configuration (`lib/mastra/config.ts`)
+
+**Performance:**
+- Global rate limit: Max 10 concurrent tool executions
+- Soft timeout: 10s (allows completion, logs warning if exceeded)
+- Retry policy: 2 retries with 2s delay for transient errors
+- Performance target: 5s (95th percentile), logged if exceeded
+
+**Observability:**
+- Telemetry enabled via console (P0 implementation)
+- Logs all executions with input/output/duration
+- Full stack traces for debugging errors
+
+**Tool Execution Workflow:**
+1. Agent selects tool → Mastra validates parameters (Zod)
+2. Queues if >10 concurrent executions (FIFO)
+3. Retries transient failures automatically (2 attempts)
+4. Returns structured results with performance metadata
+
+**Testing:**
+- Contract tests: `__tests__/contract/mastra-tools.test.ts`
+- Integration tests: `__tests__/integration/tool-execution.test.ts`
+- Quick validation: `npx tsx scripts/test-mastra.ts` (telemetry check)
+
+---
+
+### Reflections System (T020+)
+
+**Purpose**: Quick-capture interface for context-aware reflections that inform AI reasoning about user preferences, state, and capacity.
+
+**Components:**
+- `app/components/ReflectionInput.tsx` - Quick capture form
+- `app/components/ReflectionList.tsx` - Display recent reflections
+- `app/components/ReflectionPanel.tsx` - Full panel integration
+- `app/api/reflections/route.ts` - GET/POST endpoints
+
+**Database:** `reflections` table (migration 006)
+- Stores: content (text), tags (array), created_at
+- Used for: Contextual AI reasoning, preference tracking
+
+**Usage Pattern:**
+```typescript
+// Create reflection
+POST /api/reflections
+{ content: string, tags?: string[] }
+→ Returns: 201 with reflection ID
+
+// Retrieve reflections
+GET /api/reflections?limit=20&tags=work
+→ Returns: Array of reflections sorted by created_at DESC
+```
+
+---
+
 ### Database Schema (Supabase)
 
 **Tables:**
@@ -407,7 +513,9 @@ $$;
 - `processed_documents` - AI outputs, Markdown content, 30-day auto-expiry
 - `processing_logs` - Metrics, errors, retry attempts
 - `user_outcomes` - User-defined outcome statements (T008-T011)
+- `reflections` - Quick-capture reflections for context-aware reasoning (T020+)
 - `task_embeddings` - Vector embeddings for semantic search (T020-T027, see Vector Embedding Infrastructure section)
+- `task_relationships` - Prerequisite/blocking/related dependencies between tasks (Phase 2)
 
 **Storage:**
 - `notes/` - Original uploaded files (hash-based naming)
@@ -438,6 +546,12 @@ $$;
   - Returns: 200 with `{ tasks: SimilaritySearchResult[], query: string, count: number }`
   - Response time target: <500ms (95th percentile)
   - Error codes: 400 (invalid query/threshold), 500 (embedding generation failed), 503 (API unavailable)
+- `POST /api/reflections` - Create quick reflection entry (T020+)
+  - Request body: `{ content: string, tags?: string[] }`
+  - Returns: 201 with reflection ID and timestamp
+- `GET /api/reflections` - Retrieve recent reflections (T020+)
+  - Query params: `limit` (default 20), `tags` (comma-separated filter)
+  - Returns: Array of reflection objects sorted by created_at DESC
 - `GET /api/test-supabase` - Connection health check (dev only)
 
 ### Frontend Architecture
@@ -449,6 +563,9 @@ $$;
 - `app/components/OutcomeBuilder.tsx` - Modal form for creating/editing outcome statements with real-time preview, draft recovery (T009-T011)
 - `app/components/OutcomeDisplay.tsx` - Persistent banner showing active outcome across all pages (T009)
 - `app/components/ConfirmReplaceDialog.tsx` - Confirmation dialog for replacing existing outcome (T010)
+- `app/components/ReflectionInput.tsx` - Quick-capture reflection form (T020+)
+- `app/components/ReflectionList.tsx` - Display recent reflections with filtering (T020+)
+- `app/components/ReflectionPanel.tsx` - Full reflection panel integration (T020+)
 
 **shadcn/ui Components:**
 - Install via: `pnpm dlx shadcn@latest add <component>`
