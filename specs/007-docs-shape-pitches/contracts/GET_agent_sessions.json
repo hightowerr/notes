@@ -1,0 +1,283 @@
+{
+  "endpoint": "GET /api/agent/sessions/[sessionId]",
+  "description": "Retrieve agent session with prioritized plan and execution trace",
+  "functional_requirements": ["FR-018", "FR-034", "FR-036"],
+  "request": {
+    "method": "GET",
+    "path_parameters": {
+      "sessionId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Agent session identifier"
+      }
+    }
+  },
+  "response": {
+    "success": {
+      "status": 200,
+      "body": {
+        "type": "object",
+        "properties": {
+          "session": {
+            "type": "object",
+            "description": "Agent session data",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "user_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "outcome_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["running", "completed", "failed"]
+              },
+              "prioritized_plan": {
+                "type": "object",
+                "nullable": true,
+                "description": "Null if status='running', populated when completed",
+                "properties": {
+                  "ordered_task_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "execution_waves": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/ExecutionWave"
+                    }
+                  },
+                  "dependencies": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/TaskDependency"
+                    }
+                  },
+                  "confidence_scores": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "number"
+                    }
+                  },
+                  "synthesis_summary": {
+                    "type": "string"
+                  }
+                }
+              },
+              "execution_metadata": {
+                "type": "object",
+                "properties": {
+                  "steps_taken": {
+                    "type": "integer"
+                  },
+                  "tool_call_count": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "integer"
+                    }
+                  },
+                  "total_time_ms": {
+                    "type": "integer"
+                  },
+                  "error_count": {
+                    "type": "integer"
+                  },
+                  "success_rate": {
+                    "type": "number"
+                  }
+                },
+                "required": ["steps_taken", "tool_call_count", "total_time_ms", "error_count", "success_rate"]
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO 8601 timestamp"
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO 8601 timestamp"
+              }
+            },
+            "required": ["id", "user_id", "outcome_id", "status", "execution_metadata", "created_at", "updated_at"]
+          },
+          "trace": {
+            "type": "object",
+            "description": "Reasoning trace (embedded for convenience, full detail in /trace endpoint)",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "session_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "total_steps": {
+                "type": "integer",
+                "maximum": 10,
+                "description": "Count of reasoning steps (≤10 per FR-002)"
+              },
+              "total_duration_ms": {
+                "type": "integer",
+                "description": "Sum of all step durations"
+              },
+              "tools_used_count": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "description": "Map of tool_name to usage count"
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO 8601 timestamp (auto-deleted after 7 days per FR-020)"
+              }
+            },
+            "required": ["id", "session_id", "total_steps", "total_duration_ms", "tools_used_count", "created_at"]
+          }
+        },
+        "required": ["session", "trace"]
+      }
+    },
+    "errors": {
+      "404": {
+        "description": "Session not found (invalid sessionId or session expired)"
+      },
+      "500": {
+        "description": "Database query failed"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ExecutionWave": {
+        "type": "object",
+        "properties": {
+          "wave_number": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parallel_execution": {
+            "type": "boolean"
+          },
+          "estimated_duration_hours": {
+            "type": "number",
+            "nullable": true
+          }
+        },
+        "required": ["wave_number", "task_ids", "parallel_execution"]
+      },
+      "TaskDependency": {
+        "type": "object",
+        "properties": {
+          "source_task_id": {
+            "type": "string"
+          },
+          "target_task_id": {
+            "type": "string"
+          },
+          "relationship_type": {
+            "type": "string",
+            "enum": ["prerequisite", "blocks", "related"]
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0
+          },
+          "detection_method": {
+            "type": "string",
+            "enum": ["ai_inference", "stored_relationship"]
+          }
+        },
+        "required": ["source_task_id", "target_task_id", "relationship_type", "confidence", "detection_method"]
+      }
+    }
+  },
+  "examples": {
+    "request": {
+      "path": "/api/agent/sessions/7c9e6679-7425-40de-944b-e07fc1f90ae7"
+    },
+    "response": {
+      "session": {
+        "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "user_id": "123e4567-e89b-12d3-a456-426614174000",
+        "outcome_id": "550e8400-e29b-41d4-a716-446655440000",
+        "status": "completed",
+        "prioritized_plan": {
+          "ordered_task_ids": ["task-001", "task-002", "task-003"],
+          "execution_waves": [
+            {
+              "wave_number": 1,
+              "task_ids": ["task-001"],
+              "parallel_execution": false,
+              "estimated_duration_hours": 2.5
+            },
+            {
+              "wave_number": 2,
+              "task_ids": ["task-002", "task-003"],
+              "parallel_execution": true,
+              "estimated_duration_hours": 4.0
+            }
+          ],
+          "dependencies": [
+            {
+              "source_task_id": "task-002",
+              "target_task_id": "task-001",
+              "relationship_type": "prerequisite",
+              "confidence": 0.92,
+              "detection_method": "ai_inference"
+            }
+          ],
+          "confidence_scores": {
+            "task-001": 0.95,
+            "task-002": 0.88,
+            "task-003": 0.91
+          },
+          "synthesis_summary": "Prioritized based on revenue impact and dependency constraints. Task-001 blocks both task-002 and task-003, so it must complete first. Tasks 002/003 can run in parallel."
+        },
+        "execution_metadata": {
+          "steps_taken": 7,
+          "tool_call_count": {
+            "semantic-search": 2,
+            "detect-dependencies": 1,
+            "cluster-by-similarity": 1
+          },
+          "total_time_ms": 18500,
+          "error_count": 0,
+          "success_rate": 1.0
+        },
+        "created_at": "2025-10-19T14:30:00Z",
+        "updated_at": "2025-10-19T14:30:18Z"
+      },
+      "trace": {
+        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "session_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "total_steps": 7,
+        "total_duration_ms": 18500,
+        "tools_used_count": {
+          "semantic-search": 2,
+          "detect-dependencies": 1,
+          "cluster-by-similarity": 1
+        },
+        "created_at": "2025-10-19T14:30:00Z"
+      }
+    }
+  }
+}

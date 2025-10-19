@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -66,6 +67,9 @@ const validateFileBeforeUpload = (file: File): { valid: boolean; error?: string 
 };
 
 export default function Home() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const hasHandledOpenRef = useRef(false);
   const [files, setFiles] = useState<UploadedFileInfo[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [outcomeModalOpen, setOutcomeModalOpen] = useState(false);
@@ -73,6 +77,20 @@ export default function Home() {
   const [reflectionPanelOpen, setReflectionPanelOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingIntervalsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+
+  useEffect(() => {
+    if (hasHandledOpenRef.current) {
+      return;
+    }
+
+    const shouldOpen = searchParams.get('openOutcome');
+
+    if (shouldOpen === '1' || shouldOpen === 'true') {
+      hasHandledOpenRef.current = true;
+      setOutcomeModalOpen(true);
+      router.replace('/', { scroll: false });
+    }
+  }, [router, searchParams]);
 
   // Reflection panel keyboard shortcut (Cmd+R / Ctrl+R)
   useReflectionShortcut(() => setReflectionPanelOpen(prev => !prev));

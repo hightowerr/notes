@@ -27,9 +27,9 @@ const inputSchema = z.object({
     .string()
     .min(1, 'Query must contain text')
     .max(500, 'Query cannot exceed 500 characters')
-    .transform((value) => value.trim()),
-  limit: z.number().default(20),
-  threshold: z.number().default(0.7),
+    .transform(value => value.trim()),
+  limit: z.coerce.number().default(20),
+  threshold: z.coerce.number().default(0.7),
 });
 
 function isRetryableEmbeddingError(error: EmbeddingError): boolean {
@@ -63,7 +63,15 @@ async function executeSemanticSearch(
   count: number;
   query: string;
 }> {
-  const { query, limit, threshold } = inputSchema.parse(input);
+  const raw = (input ?? {}) as Record<string, unknown>;
+
+  const normalized = {
+    query: normalizeQuery(raw.query),
+    limit: normalizeNumber(raw.limit),
+    threshold: normalizeNumber(raw.threshold),
+  };
+
+  const { query, limit, threshold } = inputSchema.parse(normalized);
 
   if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
     throw new SemanticSearchToolError(
@@ -125,6 +133,36 @@ async function executeSemanticSearch(
       true
     );
   }
+}
+
+function normalizeQuery(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    const first = value.find(item => typeof item === 'string') ?? '';
+    return String(first);
+  }
+
+  if (value === null || typeof value === 'undefined') {
+    return '';
+  }
+
+  return String(value);
+}
+
+function normalizeNumber(value: unknown): unknown {
+  if (typeof value === 'number' || typeof value === 'bigint') {
+    return Number(value);
+  }
+
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  return value;
 }
 
 export const semanticSearchTool = createTool({

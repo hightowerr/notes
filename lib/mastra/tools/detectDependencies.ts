@@ -27,15 +27,22 @@ const inputSchema = z.object({
       required_error: 'At least one task ID is required.',
     })
     .min(1, 'At least one task ID is required.'),
-  use_document_context: z.boolean().default(true),
+  use_document_context: z.coerce.boolean().default(true),
 });
 
 async function executeDetectDependencies(
   input: z.input<typeof inputSchema>
 ): Promise<DependencyAnalysisResult> {
+  const raw = (input ?? {}) as Record<string, unknown>;
+
+  const normalized = {
+    task_ids: normalizeTaskIds(raw.task_ids),
+    use_document_context: normalizeBoolean(raw.use_document_context),
+  };
+
   let parsedInput;
   try {
-    parsedInput = inputSchema.parse(input);
+    parsedInput = inputSchema.parse(normalized);
   } catch (error) {
     if (error instanceof ZodError) {
       throw new DetectDependenciesToolError(
@@ -118,3 +125,64 @@ export const detectDependenciesTool = createTool({
 });
 
 export type DetectDependenciesTool = typeof detectDependenciesTool;
+
+function normalizeTaskIds(value: unknown): string[] {
+  const toString = (item: unknown): string => {
+    if (typeof item === 'string') {
+      return item.trim();
+    }
+    if (item === null || typeof item === 'undefined') {
+      return '';
+    }
+    if (typeof item === 'object' && 'task_id' in (item as Record<string, unknown>)) {
+      return String((item as Record<string, unknown>).task_id ?? '');
+    }
+    return String(item);
+  };
+
+  if (Array.isArray(value)) {
+    return value
+      .map(toString)
+      .map(str => str.trim())
+      .filter(str => str.length > 0);
+  }
+
+  if (value && typeof value === 'object' && Symbol.iterator in value) {
+    return Array.from(value as Iterable<unknown>)
+      .map(toString)
+      .map(str => str.trim())
+      .filter(str => str.length > 0);
+  }
+
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map(str => str.trim())
+      .filter(str => str.length > 0);
+  }
+
+  if (value === null || typeof value === 'undefined') {
+    return [];
+  }
+
+  return [toString(value)].filter(str => str.trim().length > 0);
+}
+
+function normalizeBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const lower = value.trim().toLowerCase();
+    if (lower === 'true') return true;
+    if (lower === 'false') return false;
+  }
+
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  return undefined;
+}

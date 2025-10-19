@@ -1,0 +1,375 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import { Loader2, ExternalLink, RefreshCw } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { PrioritizationPanel } from '@/app/components/PrioritizationPanel';
+import { prioritizedPlanSchema } from '@/lib/schemas/prioritizedPlanSchema';
+import { executionMetadataSchema } from '@/lib/schemas/executionMetadataSchema';
+import type { ExecutionMetadata, PrioritizedTaskPlan } from '@/lib/types/agent';
+
+const DEFAULT_USER_ID = 'default-user';
+const POLL_INTERVAL_MS = 2000;
+
+type OutcomeResponse = {
+  id: string;
+  assembled_text: string;
+  state_preference: string | null;
+  daily_capacity_hours: number | null;
+};
+
+type SessionStatus = 'idle' | 'running' | 'completed' | 'failed';
+
+type PrioritizeResponse = {
+  session_id: string;
+  status: SessionStatus | 'running' | 'completed' | 'failed';
+};
+
+export default function TaskPrioritiesPage() {
+  const [outcomeLoading, setOutcomeLoading] = useState(true);
+  const [activeOutcome, setActiveOutcome] = useState<OutcomeResponse | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus>('idle');
+  const [triggerError, setTriggerError] = useState<string | null>(null);
+  const [isTriggering, setIsTriggering] = useState(false);
+
+  const [prioritizedPlan, setPrioritizedPlan] = useState<PrioritizedTaskPlan | null>(null);
+  const [executionMetadata, setExecutionMetadata] = useState<ExecutionMetadata | null>(null);
+  const [resultsError, setResultsError] = useState<string | null>(null);
+  const [isLoadingResults, setIsLoadingResults] = useState(false);
+
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Fetch active outcome on mount
+  useEffect(() => {
+    const fetchOutcome = async () => {
+      try {
+        setOutcomeLoading(true);
+        setFetchError(null);
+
+        const response = await fetch('/api/outcomes');
+
+        if (response.status === 404) {
+          setActiveOutcome(null);
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch active outcome');
+        }
+
+        const data = await response.json();
+        setActiveOutcome(data.outcome);
+      } catch (error) {
+        console.error('[Task Priorities] Failed to load outcome:', error);
+        setFetchError('Unable to load active outcome. Please try again.');
+      } finally {
+        setOutcomeLoading(false);
+      }
+    };
+
+    fetchOutcome();
+
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+      }
+    };
+  }, []);
+
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  const applySessionResults = (session: unknown) => {
+    if (!session || typeof session !== 'object' || session === null) {
+      return;
+    }
+
+    const metadataResult = executionMetadataSchema.safeParse(
+      (session as { execution_metadata?: unknown }).execution_metadata
+    );
+    if (metadataResult.success) {
+      setExecutionMetadata(metadataResult.data);
+    }
+
+    const planResult = prioritizedPlanSchema.safeParse(
+      (session as { prioritized_plan?: unknown }).prioritized_plan
+    );
+    if (planResult.success) {
+      setPrioritizedPlan(planResult.data);
+      setResultsError(null);
+      return;
+    }
+
+    const rawStatus = (session as { status?: unknown }).status;
+    const status = typeof rawStatus === 'string' ? rawStatus : undefined;
+    if (status === 'completed') {
+      setPrioritizedPlan(null);
+      setResultsError('Prioritized plan is unavailable. Please run prioritization again.');
+    }
+  };
+
+  const pollSessionStatus = (id: string) => {
+    stopPolling();
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/agent/sessions/${id}`);
+        if (!res.ok) {
+          if (res.status === 404) {
+            stopPolling();
+            setTriggerError('Session not found. Please try again.');
+            setSessionStatus('failed');
+            return;
+          }
+          throw new Error('Failed to fetch session status');
+        }
+
+        const { session } = await res.json();
+        setTriggerError(null);
+        setSessionStatus(session.status as SessionStatus);
+        applySessionResults(session);
+
+        if (session.status === 'completed' || session.status === 'failed') {
+          setIsLoadingResults(false);
+        }
+
+        if (session.status !== 'running') {
+          stopPolling();
+        }
+      } catch (error) {
+        console.error('[Task Priorities] Polling error:', error);
+        setTriggerError('Lost connection while checking progress. Retrying…');
+      }
+    };
+
+    poll();
+    pollRef.current = setInterval(poll, POLL_INTERVAL_MS);
+  };
+
+  const handleAnalyzeTasks = async () => {
+    if (!activeOutcome) {
+      return;
+    }
+
+    setIsTriggering(true);
+    setTriggerError(null);
+    setPrioritizedPlan(null);
+    setExecutionMetadata(null);
+    setResultsError(null);
+    setIsLoadingResults(true);
+
+    try {
+      const response = await fetch('/api/agent/prioritize', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          outcome_id: activeOutcome.id,
+          user_id: DEFAULT_USER_ID,
+        }),
+      });
+
+      if (response.status === 403) {
+        setTriggerError('Active outcome required for prioritization.');
+        setSessionStatus('failed');
+        setIsLoadingResults(false);
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error('Failed to start prioritization');
+      }
+
+      const data: PrioritizeResponse = await response.json();
+      setSessionStatus('running');
+      pollSessionStatus(data.session_id);
+    } catch (error) {
+      console.error('[Task Priorities] Failed to trigger agent:', error);
+      setTriggerError('Could not start prioritization. Please retry.');
+      setSessionStatus('failed');
+      setIsLoadingResults(false);
+    } finally {
+      setIsTriggering(false);
+    }
+  };
+
+  const isButtonDisabled =
+    !activeOutcome || outcomeLoading || isTriggering || sessionStatus === 'running';
+
+  const showProgress = sessionStatus === 'running';
+
+  return (
+    <main className="min-h-screen bg-muted/30 py-12">
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6">
+        <div className="flex flex-col gap-3 text-left">
+          <h1 className="text-3xl font-semibold text-foreground">Task Priorities</h1>
+          <p className="text-muted-foreground max-w-2xl">
+            Trigger the autonomous agent to analyze your tasks, detect dependencies, and prepare an execution plan for your active outcome.
+          </p>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Prioritization Run</CardTitle>
+            <CardDescription>
+              The agent will review uploaded tasks, identify dependencies, and group work into execution waves.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {fetchError && (
+              <Alert variant="destructive">
+                <AlertTitle>Unable to fetch outcome</AlertTitle>
+                <AlertDescription>{fetchError}</AlertDescription>
+              </Alert>
+            )}
+
+            {!fetchError && (
+              <div className="space-y-4">
+                {outcomeLoading ? (
+                  <div className="h-16 animate-pulse rounded-lg bg-muted" />
+                ) : activeOutcome ? (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-muted-foreground">Active Outcome</p>
+                    <div className="rounded-lg border border-border bg-background px-4 py-3">
+                      <p className="text-base leading-relaxed text-foreground">{activeOutcome.assembled_text}</p>
+                      <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                        {activeOutcome.state_preference && (
+                          <Badge variant="secondary">
+                            State Preference: {activeOutcome.state_preference}
+                          </Badge>
+                        )}
+                        {activeOutcome.daily_capacity_hours !== null && (
+                          <Badge variant="outline">
+                            Daily Capacity: {activeOutcome.daily_capacity_hours}h
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <Alert>
+                    <AlertTitle>Active outcome required</AlertTitle>
+                    <AlertDescription className="flex flex-col gap-2 text-sm">
+                      <span>
+                        Create an outcome before running prioritization. This provides the agent with context for ranking your tasks.
+                      </span>
+                      <Button asChild variant="link" className="px-0 text-base">
+                        <Link href="/?openOutcome=1" prefetch>
+                          Open outcome builder
+                          <ExternalLink className="ml-2 inline h-4 w-4" />
+                        </Link>
+                      </Button>
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </div>
+            )}
+
+            <div className="flex flex-col gap-3">
+              <Button
+                onClick={handleAnalyzeTasks}
+                disabled={isButtonDisabled}
+                className="w-fit"
+              >
+                {isTriggering ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Initializing…
+                  </>
+                ) : sessionStatus === 'running' ? (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                    Analyzing…
+                  </>
+                ) : (
+                  'Analyze Tasks'
+                )}
+              </Button>
+
+              {triggerError && (
+                <p className="text-sm text-destructive">{triggerError}</p>
+              )}
+            </div>
+
+            {showProgress && (
+              <div className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                <span>Analyzing tasks… This may take up to 30 seconds.</span>
+              </div>
+            )}
+
+            {sessionStatus === 'completed' && (
+              <Alert>
+                <AlertTitle>Prioritization complete</AlertTitle>
+                <AlertDescription>
+                  Prioritized execution waves are ready below.
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {sessionStatus === 'failed' && !showProgress && triggerError && (
+              <Alert variant="destructive">
+                <AlertTitle>Prioritization failed</AlertTitle>
+                <AlertDescription>{triggerError}</AlertDescription>
+              </Alert>
+            )}
+          </CardContent>
+        </Card>
+
+        {resultsError && (
+          <Alert variant="destructive">
+            <AlertTitle>Unable to load prioritization results</AlertTitle>
+            <AlertDescription>{resultsError}</AlertDescription>
+          </Alert>
+        )}
+
+        {isLoadingResults && (
+          <Card className="border-dashed border-border/70 bg-muted/40">
+            <CardHeader>
+              <CardTitle>Preparing prioritized plan</CardTitle>
+              <CardDescription>
+                We will surface execution waves and dependencies as soon as the agent completes.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Skeleton className="h-6 w-40" />
+              <div className="grid gap-4 md:grid-cols-2">
+                <Skeleton className="h-36 rounded-xl" />
+                <Skeleton className="h-36 rounded-xl" />
+              </div>
+              <Skeleton className="h-6 w-56" />
+            </CardContent>
+          </Card>
+        )}
+
+        {prioritizedPlan ? (
+          <PrioritizationPanel plan={prioritizedPlan} executionMetadata={executionMetadata} />
+        ) : (
+          !isLoadingResults &&
+          sessionStatus !== 'running' && (
+            <Card className="border-dashed border-border/70 bg-muted/30">
+              <CardHeader>
+                <CardTitle>No prioritization results yet</CardTitle>
+                <CardDescription>
+                  Trigger analysis to generate execution waves, dependency notes, and confidence insights.
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          )
+        )}
+      </div>
+    </main>
+  );
+}
