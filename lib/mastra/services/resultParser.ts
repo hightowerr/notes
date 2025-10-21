@@ -1,9 +1,9 @@
-import { z } from 'zod';
-
 import {
   prioritizedPlanSchema,
   executionWaveSchema,
   taskDependencySchema,
+  taskAnnotationSchema,
+  taskRemovalSchema,
 } from '@/lib/schemas/prioritizedPlanSchema';
 import { executionMetadataSchema } from '@/lib/schemas/executionMetadataSchema';
 import { reasoningStepSchema } from '@/lib/schemas/reasoningStepSchema';
@@ -14,6 +14,8 @@ import type {
   TaskDependency,
   ExecutionWave,
   AgentRuntimeContext,
+  TaskAnnotation,
+  TaskRemoval,
   TaskSummary,
 } from '@/lib/types/agent';
 
@@ -81,6 +83,84 @@ function buildDefaultExecutionWaves(taskIds: string[]): ExecutionWave[] {
   }
 
   return waves;
+}
+
+function parseTaskAnnotations(source: unknown, orderedTaskIds: string[]): TaskAnnotation[] {
+  if (!Array.isArray(source)) {
+    return [];
+  }
+
+  const annotations: TaskAnnotation[] = [];
+  source.forEach(candidate => {
+    if (!isRecord(candidate)) {
+      return;
+    }
+
+    const sanitized: Record<string, unknown> = {
+      ...candidate,
+    };
+
+    if (typeof candidate.task_id === 'string') {
+      sanitized.task_id = candidate.task_id.trim();
+    }
+    if (typeof candidate.reasoning === 'string') {
+      sanitized.reasoning = candidate.reasoning.trim();
+    }
+    if (typeof candidate.dependency_notes === 'string') {
+      sanitized.dependency_notes = candidate.dependency_notes.trim();
+    }
+    if (typeof candidate.removal_reason === 'string') {
+      sanitized.removal_reason = candidate.removal_reason.trim();
+    }
+
+    const parsed = taskAnnotationSchema.safeParse(sanitized);
+    if (parsed.success && parsed.data.task_id) {
+      annotations.push(parsed.data);
+    }
+  });
+
+  if (annotations.length === 0) {
+    return [];
+  }
+
+  return annotations.filter(annotation => {
+    if (!annotation.task_id) {
+      return false;
+    }
+    return orderedTaskIds.includes(annotation.task_id) || annotation.state === 'manual_override';
+  });
+}
+
+function parseRemovedTasks(source: unknown): TaskRemoval[] {
+  if (!Array.isArray(source)) {
+    return [];
+  }
+
+  const removals: TaskRemoval[] = [];
+
+  source.forEach(candidate => {
+    if (!isRecord(candidate)) {
+      return;
+    }
+
+    const sanitized: Record<string, unknown> = {
+      ...candidate,
+    };
+
+    if (typeof candidate.task_id === 'string') {
+      sanitized.task_id = candidate.task_id.trim();
+    }
+    if (typeof candidate.removal_reason === 'string') {
+      sanitized.removal_reason = candidate.removal_reason.trim();
+    }
+
+    const parsed = taskRemovalSchema.safeParse(sanitized);
+    if (parsed.success && parsed.data.task_id) {
+      removals.push(parsed.data);
+    }
+  });
+
+  return removals;
 }
 
 function coercePlanCandidate(raw: unknown, narrative?: string): PrioritizedTaskPlan {
@@ -199,12 +279,17 @@ function coercePlanCandidate(raw: unknown, narrative?: string): PrioritizedTaskP
     summary = 'Prioritization completed with limited data.';
   }
 
+  const taskAnnotations = parseTaskAnnotations(raw.task_annotations, orderedTaskIds);
+  const removedTasks = parseRemovedTasks(raw.removed_tasks);
+
   const planCandidate = {
     ordered_task_ids: orderedTaskIds,
     execution_waves: executionWaves,
     dependencies,
     confidence_scores: confidenceScores,
     synthesis_summary: summary,
+    task_annotations: taskAnnotations,
+    removed_tasks: removedTasks,
   };
 
   const parsedPlan = prioritizedPlanSchema.safeParse(planCandidate);
@@ -213,7 +298,12 @@ function coercePlanCandidate(raw: unknown, narrative?: string): PrioritizedTaskP
     throw new Error('Plan did not match prioritizedPlanSchema');
   }
 
-  return parsedPlan.data;
+  const plan = parsedPlan.data;
+  return {
+    ...plan,
+    task_annotations: Array.isArray(plan.task_annotations) ? plan.task_annotations : [],
+    removed_tasks: Array.isArray(plan.removed_tasks) ? plan.removed_tasks : [],
+  };
 }
 
 function buildPlanFromJson(raw: unknown, narrative?: string): PrioritizedTaskPlan {
@@ -579,6 +669,8 @@ export function generateFallbackPlan(tasks: TaskSummary[], outcomeSummary: strin
     dependencies,
     confidence_scores: buildConfidenceScores(orderedTaskIds),
     synthesis_summary: outcomeSummary,
+    task_annotations: [],
+    removed_tasks: [],
   };
 
   return prioritizedPlanSchema.parse(planCandidate);
@@ -719,12 +811,54 @@ export function ensurePlanConsistency(plan: PrioritizedTaskPlan): PrioritizedTas
     uniqueIds.includes(dep.source_task_id) && uniqueIds.includes(dep.target_task_id)
   ).map(dep => taskDependencySchema.parse(dep));
 
+  const filteredAnnotations = Array.isArray(plan.task_annotations)
+    ? plan.task_annotations.filter(
+        annotation =>
+          annotation &&
+          typeof annotation.task_id === 'string' &&
+          (uniqueIds.includes(annotation.task_id) || annotation.state === 'manual_override')
+      )
+    : [];
+
+  const annotationMap = new Map<string, TaskAnnotation>();
+  filteredAnnotations.forEach(annotation => {
+    annotationMap.set(annotation.task_id, annotation);
+  });
+
+  uniqueIds.forEach(taskId => {
+    if (annotationMap.has(taskId)) {
+      return;
+    }
+    const candidate: Record<string, unknown> = {
+      task_id: taskId,
+      state: 'active',
+    };
+    const confidence = plan.confidence_scores?.[taskId];
+    if (typeof confidence === 'number' && Number.isFinite(confidence)) {
+      candidate.confidence = clampConfidence(confidence);
+    }
+    const parsed = taskAnnotationSchema.safeParse(candidate);
+    if (parsed.success) {
+      annotationMap.set(taskId, parsed.data);
+    }
+  });
+
+  const canonicalAnnotations = Array.from(annotationMap.values());
+
+  const filteredRemovals = Array.isArray(plan.removed_tasks)
+    ? plan.removed_tasks.filter(
+        removal => removal && typeof removal.task_id === 'string'
+      )
+    : [];
+
   return prioritizedPlanSchema.parse({
     ...plan,
     ordered_task_ids: uniqueIds,
     execution_waves: updatedWaves,
     dependencies: sanitizedDependencies,
     confidence_scores: plan.confidence_scores,
+    task_annotations: canonicalAnnotations,
+    removed_tasks: filteredRemovals,
   });
 }
 

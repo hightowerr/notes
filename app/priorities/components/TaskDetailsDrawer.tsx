@@ -17,11 +17,16 @@ type TaskSummary = {
   title: string;
   rank: number | null;
   confidence: number | null;
+  confidenceDelta?: number | null;
   movement: MovementInfo | null;
   dependencies: TaskDependency[];
   dependents: TaskDependency[];
   dependencyLinks: Array<{ taskId: string; rank: number | null; label: string }>;
   dependentLinks: Array<{ taskId: string; rank: number | null; label: string }>;
+  reasoning?: string | null;
+  dependencyNotes?: string | null;
+  manualOverride?: boolean;
+  state?: 'active' | 'completed' | 'discarded' | 'manual_override' | 'reintroduced';
 };
 
 type TaskDetailsDrawerProps = {
@@ -78,6 +83,20 @@ export function TaskDetailsDrawer({
     return `${percent}%`;
   }, [task]);
 
+  const confidenceDeltaLabel = useMemo(() => {
+    if (!task || typeof task.confidenceDelta !== 'number' || task.confidenceDelta === 0) {
+      return null;
+    }
+
+    const percent = Math.round(task.confidenceDelta * 100);
+    if (percent === 0) {
+      return null;
+    }
+    return `${percent > 0 ? '+' : ''}${percent}%`;
+  }, [task]);
+
+  const manualOverride = Boolean(task?.manualOverride);
+
   if (!isMounted || !open) {
     return null;
   }
@@ -119,6 +138,24 @@ export function TaskDetailsDrawer({
                       Confidence {confidenceLabel}
                     </Badge>
                   )}
+                  {confidenceDeltaLabel && (
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        'bg-muted/60',
+                        task.confidenceDelta && task.confidenceDelta < 0
+                          ? 'border-amber-400 text-amber-700'
+                          : 'border-emerald-400 text-emerald-700'
+                      )}
+                    >
+                      Δ {confidenceDeltaLabel}
+                    </Badge>
+                  )}
+                  {manualOverride && (
+                    <Badge variant="outline" className="bg-slate-600/10 text-slate-700">
+                      Manual override
+                    </Badge>
+                  )}
                   <Badge variant="outline" className={cn(statusBadge)}>
                     {isCompleted ? 'Completed' : isDiscarded ? 'Discarded' : 'To do'}
                   </Badge>
@@ -139,6 +176,41 @@ export function TaskDetailsDrawer({
             {isDiscarded && removalReason && (
               <div className="rounded-md border border-dashed border-border/60 bg-background/60 px-3 py-2 text-xs text-muted-foreground">
                 {removalReason}
+              </div>
+            )}
+
+            {task.reasoning && (
+              <section className="space-y-2 text-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Agent rationale
+                </p>
+                <p className="rounded-md border border-border/60 bg-muted/10 px-3 py-2 text-sm text-foreground">
+                  {task.reasoning}
+                </p>
+              </section>
+            )}
+
+            {task.dependencyNotes && (
+              <section className="space-y-2 text-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Dependency notes
+                </p>
+                <p className="rounded-md border border-border/60 bg-muted/10 px-3 py-2 text-sm text-foreground">
+                  {task.dependencyNotes}
+                </p>
+              </section>
+            )}
+
+            {typeof task.confidenceDelta === 'number' && task.confidenceDelta <= -0.1 && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                Confidence dropped by {Math.abs(Math.round(task.confidenceDelta * 100))}% since the previous run.
+                Review supporting evidence or reintroduce context before prioritising.
+              </div>
+            )}
+
+            {manualOverride && (
+              <div className="rounded-md border border-slate-400 bg-slate-100 px-3 py-2 text-xs text-slate-700">
+                This task stays active because it was manually restored. The agent will keep it unless you remove the override.
               </div>
             )}
 

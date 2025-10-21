@@ -4,7 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 
 import { supabase } from '@/lib/supabase';
-import type { ExecutionMetadata, PrioritizedTaskPlan, TaskDependency } from '@/lib/types/agent';
+import type {
+  ExecutionMetadata,
+  PrioritizedTaskPlan,
+  TaskAnnotation,
+  TaskDependency,
+  TaskRemoval,
+} from '@/lib/types/agent';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -36,10 +42,16 @@ type TaskRenderNode = {
   id: string;
   title: string;
   confidence: number | null;
+  confidenceDelta?: number | null;
   dependencies: TaskDependency[];
   dependents: TaskDependency[];
   movement?: MovementInfo;
   planRank?: number | null;
+  reasoning?: string | null;
+  dependencyNotes?: string | null;
+  manualOverride?: boolean;
+  state?: 'active' | 'completed' | 'discarded' | 'manual_override' | 'reintroduced';
+  removalReason?: string | null;
 };
 
 type TaskListProps = {
@@ -173,7 +185,40 @@ export function TaskList({
   onDiffSummary,
 }: TaskListProps) {
   const sanitizedTaskIds = useMemo(() => sanitizePlanOrder(plan), [plan]);
-  const { movementMap, highlightedIds, flashTask } = useTaskDiff(sanitizedTaskIds);
+  const taskAnnotations = useMemo<TaskAnnotation[]>(() => plan.task_annotations ?? [], [plan.task_annotations]);
+  const removedTasksFromPlan = useMemo<TaskRemoval[]>(() => plan.removed_tasks ?? [], [plan.removed_tasks]);
+  const annotationById = useMemo(() => {
+    const map = new Map<string, TaskAnnotation>();
+    taskAnnotations.forEach(annotation => {
+      if (annotation && typeof annotation.task_id === 'string') {
+        map.set(annotation.task_id, annotation);
+      }
+    });
+    return map;
+  }, [taskAnnotations]);
+  const removalById = useMemo(() => {
+    const map = new Map<string, TaskRemoval>();
+    removedTasksFromPlan.forEach(removal => {
+      if (removal && typeof removal.task_id === 'string') {
+        map.set(removal.task_id, removal);
+      }
+    });
+    return map;
+  }, [removedTasksFromPlan]);
+  const movementAnnotations = useMemo(
+    () =>
+      taskAnnotations.map(annotation => ({
+        task_id: annotation.task_id,
+        state: annotation.state,
+        confidence_delta:
+          typeof annotation.confidence_delta === 'number' ? annotation.confidence_delta : null,
+        manual_override: annotation.manual_override ?? false,
+      })),
+    [taskAnnotations]
+  );
+  const { movementMap, highlightedIds, flashTask } = useTaskDiff(sanitizedTaskIds, {
+    annotations: movementAnnotations,
+  });
   const scrollToTask = useScrollToTask({ flashTask });
 
   const statusNote = executionMetadata?.status_note ?? null;
@@ -328,13 +373,41 @@ export function TaskList({
     const newlyDiscarded: string[] = [];
 
     sanitizedTaskIds.forEach((taskId, index) => {
-      if (!nextState.statuses[taskId] || nextState.statuses[taskId] === 'discarded') {
+      const annotation = annotationById.get(taskId);
+      const previousStatus = nextState.statuses[taskId];
+
+      if (!previousStatus || previousStatus === 'discarded') {
         nextState.statuses[taskId] = 'active';
         stateChanged = true;
       }
-      if (nextState.ranks[taskId] !== index + 1) {
-        nextState.ranks[taskId] = index + 1;
+
+      if (annotation?.state === 'completed' && nextState.statuses[taskId] !== 'completed') {
+        nextState.statuses[taskId] = 'completed';
+        stateChanged = true;
+      }
+
+      if (annotation?.state === 'discarded' && nextState.statuses[taskId] !== 'discarded') {
+        nextState.statuses[taskId] = 'discarded';
+        stateChanged = true;
+        if (!newlyDiscarded.includes(taskId)) {
+          newlyDiscarded.push(taskId);
+        }
+      }
+
+      const desiredRank = index + 1;
+      if (nextState.ranks[taskId] !== desiredRank) {
+        nextState.ranks[taskId] = desiredRank;
         ranksChanged = true;
+      }
+
+      if (annotation?.removal_reason) {
+        if (nextState.reasons[taskId] !== annotation.removal_reason) {
+          nextState.reasons[taskId] = annotation.removal_reason;
+          stateChanged = true;
+        }
+      } else if (nextState.reasons[taskId] && nextState.statuses[taskId] !== 'discarded') {
+        delete nextState.reasons[taskId];
+        stateChanged = true;
       }
     });
 
@@ -344,16 +417,50 @@ export function TaskList({
           const status = nextState.statuses[taskId];
           if (status === 'active' || status === 'completed') {
             nextState.statuses[taskId] = 'discarded';
-            if (!nextState.reasons[taskId]) {
+            const removal = removalById.get(taskId);
+            if (removal?.removal_reason) {
+              nextState.reasons[taskId] = removal.removal_reason;
+            } else if (!nextState.reasons[taskId]) {
               const note = statusNote && statusNote.trim().length > 0 ? statusNote.trim() : null;
               nextState.reasons[taskId] = note ?? DEFAULT_REMOVAL_REASON;
             }
             stateChanged = true;
-            newlyDiscarded.push(taskId);
+            if (!newlyDiscarded.includes(taskId)) {
+              newlyDiscarded.push(taskId);
+            }
           }
         }
       });
     }
+
+    removedTasksFromPlan.forEach(removal => {
+      const currentStatus = nextState.statuses[removal.task_id];
+      if (currentStatus !== 'discarded') {
+        nextState.statuses[removal.task_id] = 'discarded';
+        stateChanged = true;
+        if (!newlyDiscarded.includes(removal.task_id)) {
+          newlyDiscarded.push(removal.task_id);
+        }
+      }
+
+      if (removal.removal_reason) {
+        if (nextState.reasons[removal.task_id] !== removal.removal_reason) {
+          nextState.reasons[removal.task_id] = removal.removal_reason;
+          stateChanged = true;
+        }
+      } else if (!nextState.reasons[removal.task_id]) {
+        nextState.reasons[removal.task_id] = DEFAULT_REMOVAL_REASON;
+        stateChanged = true;
+      }
+
+      if (
+        typeof removal.previous_rank === 'number' &&
+        nextState.ranks[removal.task_id] !== removal.previous_rank
+      ) {
+        nextState.ranks[removal.task_id] = removal.previous_rank;
+        ranksChanged = true;
+      }
+    });
 
     if (stateChanged || ranksChanged) {
       updatePriorityState(() => nextState);
@@ -379,6 +486,9 @@ export function TaskList({
     updatePriorityState,
     flagRecentlyDiscarded,
     statusNote,
+    annotationById,
+    removalById,
+    removedTasksFromPlan,
   ]);
 
   const trackedTaskIds = useMemo(
@@ -467,18 +577,47 @@ export function TaskList({
   const baseNodeMap = useMemo(() => {
     const map: Record<string, TaskRenderNode> = {};
     sanitizedTaskIds.forEach((taskId, index) => {
+      const annotation = annotationById.get(taskId);
+      const removal = removalById.get(taskId);
+      const confidence =
+        typeof annotation?.confidence === 'number'
+          ? annotation.confidence
+          : plan.confidence_scores[taskId] ?? null;
+      const confidenceDelta =
+        typeof annotation?.confidence_delta === 'number' ? annotation.confidence_delta : null;
+      const reasoning = annotation?.reasoning ?? null;
+      const dependencyNotes = annotation?.dependency_notes ?? null;
+      const manualOverride = annotation?.manual_override ?? false;
+      const state = annotation?.state;
+      const removalReason = annotation?.removal_reason ?? removal?.removal_reason ?? null;
+
       map[taskId] = {
         id: taskId,
         title: getTaskTitle(taskId),
-        confidence: plan.confidence_scores[taskId] ?? null,
+        confidence,
+        confidenceDelta,
         dependencies: dependenciesByTarget[taskId] ?? [],
         dependents: dependentsBySource[taskId] ?? [],
         movement: movementMap[taskId],
         planRank: index + 1,
+        reasoning,
+        dependencyNotes,
+        manualOverride,
+        state,
+        removalReason,
       };
     });
     return map;
-  }, [sanitizedTaskIds, getTaskTitle, plan.confidence_scores, dependenciesByTarget, dependentsBySource, movementMap]);
+  }, [
+    sanitizedTaskIds,
+    getTaskTitle,
+    plan.confidence_scores,
+    dependenciesByTarget,
+    dependentsBySource,
+    movementMap,
+    annotationById,
+    removalById,
+  ]);
 
   useEffect(() => {
     metadataRef.current = { ...metadataRef.current, ...baseNodeMap };
@@ -494,22 +633,51 @@ export function TaskList({
           ...existing,
           title: getTaskTitle(taskId),
           movement: movementMap[taskId] ?? existing.movement,
+          removalReason:
+            existing.removalReason ?? removalById.get(taskId)?.removal_reason ?? null,
+          manualOverride:
+            existing.manualOverride ??
+            annotationById.get(taskId)?.manual_override ??
+            !sanitizedTaskIds.includes(taskId),
         };
       } else {
+        const annotation = annotationById.get(taskId);
+        const removal = removalById.get(taskId);
         snapshot[taskId] = {
           id: taskId,
           title: getTaskTitle(taskId),
-          confidence: null,
+          confidence:
+            typeof annotation?.confidence === 'number'
+              ? annotation.confidence
+              : plan.confidence_scores[taskId] ?? null,
+          confidenceDelta:
+            typeof annotation?.confidence_delta === 'number'
+              ? annotation.confidence_delta
+              : null,
           dependencies: [],
           dependents: [],
           movement: movementMap[taskId],
           planRank: null,
+          reasoning: annotation?.reasoning ?? null,
+          dependencyNotes: annotation?.dependency_notes ?? null,
+          manualOverride: annotation?.manual_override ?? !sanitizedTaskIds.includes(taskId),
+          state: annotation?.state,
+          removalReason: annotation?.removal_reason ?? removal?.removal_reason ?? null,
         };
       }
     });
 
     return snapshot;
-  }, [baseNodeMap, priorityState.statuses, getTaskTitle, movementMap]);
+  }, [
+    baseNodeMap,
+    priorityState.statuses,
+    getTaskTitle,
+    movementMap,
+    annotationById,
+    plan.confidence_scores,
+    removalById,
+    sanitizedTaskIds,
+  ]);
 
   const activeIdsFromPlan = useMemo(
     () =>
@@ -546,11 +714,15 @@ export function TaskList({
       return {
         id: taskId,
         title: node.title,
-        movement: node.movement,
+        movement:
+          node.movement ??
+          ((node.manualOverride ?? !sanitizedTaskIds.includes(taskId))
+            ? { type: 'manual' as const }
+            : undefined),
         dependencies: buildDependencyLinks(node.dependencies, priorityState.ranks),
         status: priorityState.statuses[taskId] ?? 'active',
         displayOrder: index + 1,
-        isManual: !sanitizedTaskIds.includes(taskId),
+        isManual: node.manualOverride ?? !sanitizedTaskIds.includes(taskId),
         previousRank: priorityState.ranks[taskId],
       };
     })
@@ -594,7 +766,7 @@ export function TaskList({
             title: node?.title ?? getTaskTitle(taskId),
             dependencyLinks: buildDependencyLinks(node?.dependencies ?? [], priorityState.ranks),
             movement: movementMap[taskId],
-            reason: priorityState.reasons[taskId],
+            reason: node?.removalReason ?? priorityState.reasons[taskId],
             lastKnownRank: priorityState.ranks[taskId],
             isHighlighted: recentlyDiscarded.has(taskId),
           };
@@ -787,16 +959,22 @@ export function TaskList({
                 title: selectedNode.title,
                 rank: selectedNode.planRank ?? priorityState.ranks[selectedNode.id] ?? null,
                 confidence: selectedConfidence,
+                confidenceDelta: selectedNode.confidenceDelta ?? null,
                 movement: selectedMovement ?? null,
                 dependencies: selectedNode.dependencies,
                 dependents: selectedNode.dependents,
                 dependencyLinks: buildDependencyLinks(selectedNode.dependencies, priorityState.ranks),
                 dependentLinks: buildDependentLinks(selectedNode.dependents, priorityState.ranks),
+                reasoning: selectedNode.reasoning ?? null,
+                dependencyNotes: selectedNode.dependencyNotes ?? null,
+                manualOverride:
+                  selectedNode.manualOverride ?? !sanitizedTaskIds.includes(selectedNode.id),
+                state: selectedNode.state,
               }
             : null
         }
         status={selectedStatus}
-        removalReason={selectedReason}
+        removalReason={selectedNode?.removalReason ?? selectedReason}
         onMarkDone={() => {
           if (!selectedTaskId) {
             return;

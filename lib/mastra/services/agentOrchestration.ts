@@ -6,6 +6,7 @@ import { fetchRecentReflections } from '@/lib/services/reflectionService';
 import { generateTaskId } from '@/lib/services/embeddingService';
 import { EmbeddingQueue } from '@/lib/services/embeddingQueue';
 import { taskOrchestratorAgent } from '@/lib/mastra/agents/taskOrchestrator';
+import { prioritizedPlanSchema } from '@/lib/schemas/prioritizedPlanSchema';
 import {
   buildExecutionMetadata,
   buildPlanSummary,
@@ -26,6 +27,8 @@ import type {
   PrioritizedTaskPlan,
   ReasoningStep,
   ReasoningTraceRecord,
+  TaskAnnotation,
+  TaskRemoval,
   TaskSummary,
 } from '@/lib/types/agent';
 
@@ -159,10 +162,94 @@ async function fetchRuntimeContext(userId: string, outcomeId: string): Promise<A
     .limit(200)
     .returns<TaskEmbeddingRow[]>();
 
-  const [reflections, taskResult] = await Promise.all([reflectionsPromise, tasksPromise]);
+  const previousPlanPromise = supabase
+    .from('agent_sessions')
+    .select('prioritized_plan')
+    .eq('user_id', userId)
+    .eq('outcome_id', outcomeId)
+    .eq('status', 'completed')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-  let taskSummaries: TaskSummary[] = (taskResult.data ?? []).map(toTaskSummary);
-  let documentCount = new Set(taskSummaries.map(task => task.document_id)).size;
+  const [reflections, taskResult, previousSession] = await Promise.all([
+    reflectionsPromise,
+    tasksPromise,
+    previousPlanPromise,
+  ]);
+
+  const rawTaskSummaries: TaskSummary[] = (taskResult.data ?? []).map(toTaskSummary);
+  let documentCount = new Set(rawTaskSummaries.map(task => task.document_id)).size;
+  let previousPlan: PrioritizedTaskPlan | null = null;
+  let previousAnnotations: TaskAnnotation[] = [];
+  let previousRemovals: TaskRemoval[] = [];
+
+  if (previousSession && previousSession.prioritized_plan) {
+    try {
+      const rawPlan = previousSession.prioritized_plan as unknown;
+      if (typeof rawPlan === 'string') {
+        const parsed = parsePlanFromAgentResponse(rawPlan);
+        if (parsed.success) {
+          previousPlan = ensurePlanConsistency(parsed.plan);
+        }
+      } else {
+        const parsed = prioritizedPlanSchema.safeParse(rawPlan);
+        if (parsed.success) {
+          previousPlan = ensurePlanConsistency(parsed.data);
+        }
+      }
+    } catch (error) {
+      console.warn('[AgentOrchestration] Unable to parse previous prioritized plan', error);
+    }
+  }
+
+  if (previousPlan) {
+    previousAnnotations = Array.isArray(previousPlan.task_annotations)
+      ? previousPlan.task_annotations.filter(
+          annotation => annotation && typeof annotation.task_id === 'string'
+        )
+      : [];
+    previousRemovals = Array.isArray(previousPlan.removed_tasks)
+      ? previousPlan.removed_tasks.filter(
+          removal => removal && typeof removal.task_id === 'string'
+        )
+      : [];
+  }
+
+  const annotationByTask = new Map<string, TaskAnnotation>();
+  previousAnnotations.forEach(annotation => {
+    annotationByTask.set(annotation.task_id, annotation);
+  });
+
+  const removalByTask = new Map<string, TaskRemoval>();
+  previousRemovals.forEach(removal => {
+    removalByTask.set(removal.task_id, removal);
+  });
+
+  const augmentTaskSummary = (task: TaskSummary): TaskSummary => {
+    const annotation = annotationByTask.get(task.task_id);
+    const fallbackRank = previousPlan
+      ? previousPlan.ordered_task_ids.indexOf(task.task_id)
+      : -1;
+    const previousRank =
+      annotation?.previous_rank ??
+      (fallbackRank >= 0 ? fallbackRank + 1 : null);
+    const previousConfidence =
+      annotation?.confidence ??
+      previousPlan?.confidence_scores?.[task.task_id] ??
+      null;
+    return {
+      ...task,
+      previous_rank: previousRank ?? null,
+      previous_confidence:
+        typeof previousConfidence === 'number' ? previousConfidence : null,
+      previous_state: annotation?.state,
+      removal_reason: annotation?.removal_reason ?? removalByTask.get(task.task_id)?.removal_reason ?? null,
+      manual_override: annotation?.manual_override ?? false,
+    };
+  };
+
+  let taskSummaries: TaskSummary[] = rawTaskSummaries.map(augmentTaskSummary);
 
   if (taskSummaries.length === 0) {
     const { data: documents, error: documentsError } = await supabase
@@ -196,12 +283,11 @@ async function fetchRuntimeContext(userId: string, outcomeId: string): Promise<A
       const hydrated = await hydrateFallbackEmbeddings(fallbackTasks);
 
       if (hydrated.length > 0) {
-        taskSummaries = hydrated.slice(0, 200);
-        documentCount = new Set(taskSummaries.map(task => task.document_id)).size;
+        taskSummaries = hydrated.slice(0, 200).map(augmentTaskSummary);
       } else {
-        taskSummaries = fallbackTasks.slice(0, 200);
-        documentCount = new Set(taskSummaries.map(task => task.document_id)).size;
+        taskSummaries = fallbackTasks.slice(0, 200).map(augmentTaskSummary);
       }
+      documentCount = new Set(taskSummaries.map(task => task.document_id)).size;
     }
   }
 
@@ -228,7 +314,18 @@ async function fetchRuntimeContext(userId: string, outcomeId: string): Promise<A
       task_count: taskSummaries.length,
       document_count: documentCount,
       reflection_count: reflections.length,
+      has_previous_plan: !!previousPlan,
     },
+    history: previousPlan
+      ? {
+          previous_plan: {
+            ordered_task_ids: previousPlan.ordered_task_ids,
+            confidence_scores: previousPlan.confidence_scores,
+            task_annotations: previousAnnotations,
+            removed_tasks: previousRemovals,
+          },
+        }
+      : undefined,
   };
 }
 
@@ -433,6 +530,7 @@ async function runAgent(context: AgentRuntimeContext): Promise<AgentRunResult> {
   const startedAt = performance.now();
   let normalizedSteps: ReasoningStep[] = [];
   let lastNarrative: string | null = null;
+  const previousPlan = context.history?.previous_plan;
 
   const hasEmbeddingBackedTasks =
     context.tasks.length === 0 || context.tasks.some(task => task.source === 'embedding');
@@ -459,10 +557,86 @@ async function runAgent(context: AgentRuntimeContext): Promise<AgentRunResult> {
           `Daily capacity: ${context.outcome.daily_capacity_hours ?? 'unknown'} hours`,
           `Tasks available: ${context.metadata.task_count}`,
           `Reflections available: ${context.metadata.reflection_count}`,
+          `Previous plan available: ${context.metadata.has_previous_plan ? 'yes' : 'no'}`,
           'Return ONLY the JSON structure described in your instructions.',
         ].join('\n'),
       },
     ];
+
+    if (previousPlan) {
+      const annotationByTask = new Map<string, TaskAnnotation>();
+      previousPlan.task_annotations?.forEach(annotation => {
+        if (annotation && typeof annotation.task_id === 'string') {
+          annotationByTask.set(annotation.task_id, annotation);
+        }
+      });
+
+      const topTasks = previousPlan.ordered_task_ids.slice(0, 10).map((taskId, index) => {
+        const parts: string[] = [`${index + 1}. ${taskId}`];
+        const annotation = annotationByTask.get(taskId);
+        const confidence =
+          (annotation?.confidence ?? previousPlan.confidence_scores?.[taskId]) ?? null;
+        if (typeof confidence === 'number') {
+          parts.push(`confidence=${confidence.toFixed(2)}`);
+        }
+        if (annotation?.confidence_delta && Math.abs(annotation.confidence_delta) >= 0.05) {
+          const delta = annotation.confidence_delta > 0 ? '+' : '';
+          parts.push(`Δ=${delta}${annotation.confidence_delta.toFixed(2)}`);
+        }
+        if (annotation?.state && annotation.state !== 'active') {
+          parts.push(`state=${annotation.state}`);
+        }
+        if (annotation?.manual_override) {
+          parts.push('manual_override=true');
+        }
+        if (annotation?.removal_reason) {
+          parts.push(`note=${annotation.removal_reason}`);
+        }
+        return `- ${parts.join(' • ')}`;
+      });
+
+      const removals = (previousPlan.removed_tasks ?? [])
+        .slice(0, 10)
+        .map(removal => {
+          const parts: string[] = [removal.task_id];
+          if (typeof removal.previous_rank === 'number') {
+            parts.push(`rank=${removal.previous_rank}`);
+          }
+          if (typeof removal.previous_confidence === 'number') {
+            parts.push(`confidence=${removal.previous_confidence.toFixed(2)}`);
+          }
+          if (removal.removal_reason) {
+            parts.push(`reason=${removal.removal_reason}`);
+          }
+          return `- ${parts.join(' • ')}`;
+        });
+
+      const manualOverrides = Array.from(annotationByTask.values()).filter(
+        annotation => annotation?.manual_override
+      );
+
+      const summaryLines = [
+        'Previous prioritization snapshot:',
+        topTasks.length > 0 ? 'Top ranked tasks last run:' : 'No prior ranked tasks captured.',
+        ...topTasks,
+      ];
+
+      if (manualOverrides.length > 0) {
+        summaryLines.push(
+          'Manual overrides preserved:',
+          ...manualOverrides.map(annotation => `- ${annotation.task_id}`)
+        );
+      }
+
+      if (removals.length > 0) {
+        summaryLines.push('Tasks previously removed (with reasons):', ...removals);
+      }
+
+      messages.push({
+        role: 'user',
+        content: summaryLines.join('\n'),
+      });
+    }
 
     if (context.reflections.length > 0) {
       messages.push({
