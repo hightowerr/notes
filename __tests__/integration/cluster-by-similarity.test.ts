@@ -27,16 +27,11 @@ describe('cluster-by-similarity integration', () => {
           centroid: Array(1536).fill(0.1),
           average_similarity: 0.8,
         },
-        {
-          cluster_id: 1,
-          task_ids: ['task3'],
-          centroid: Array(1536).fill(0.2),
-          average_similarity: 1.0,
-        },
       ],
       task_count: 3,
-      cluster_count: 2,
+      cluster_count: 1,
       threshold_used: 0.75,
+      ungrouped_task_ids: ['task3'],
     };
 
     (clusteringService.performHierarchicalClustering as any).mockResolvedValue(mockResult);
@@ -45,6 +40,8 @@ describe('cluster-by-similarity integration', () => {
 
     expect(clusteringService.performHierarchicalClustering).toHaveBeenCalledWith(taskIds, { threshold: 0.75 });
     expect(result).toEqual(mockResult);
-    expect(result.clusters.reduce((acc, c) => acc + c.task_ids.length, 0)).toBe(taskIds.length);
+    const clusteredTaskIds = result.clusters.flatMap(c => c.task_ids);
+    const combined = new Set([...clusteredTaskIds, ...result.ungrouped_task_ids]);
+    expect(combined.size).toBe(taskIds.length);
   });
 });

@@ -34,17 +34,34 @@ const inputSchema = z.object({
 async function executeClusterBySimilarity(
   input: z.input<typeof inputSchema>
 ): Promise<ClusteringResult> {
-  const raw = (input ?? {}) as Record<string, unknown>;
+  const raw = input ?? {};
+  const context = extractProperty(raw, 'context');
 
   const normalized = {
-    task_ids: normalizeTaskIds(raw.task_ids),
-    similarity_threshold: normalizeNumber(raw.similarity_threshold),
+    task_ids: normalizeTaskIds(
+      extractProperty(raw, 'task_ids') ?? extractProperty(context, 'task_ids')
+    ),
+    similarity_threshold: normalizeNumber(
+      extractProperty(raw, 'similarity_threshold') ??
+        extractProperty(context, 'similarity_threshold')
+    ),
   };
+
+  console.log('[ClusterBySimilarity] Raw input:', input);
+  console.log('[ClusterBySimilarity] input.context:', context);
+  console.log('[ClusterBySimilarity] Normalized input:', normalized);
 
   let parsedInput;
   try {
     parsedInput = inputSchema.parse(normalized);
+    console.log('[ClusterBySimilarity] Parsed values:', parsedInput);
   } catch (error) {
+    console.error(
+      '[ClusterBySimilarity] Zod parse failed. Normalized snapshot:',
+      normalized,
+      'Error:',
+      error
+    );
     if (error instanceof ZodError) {
       throw new ClusterBySimilarityToolError(
         'CLUSTERING_FAILED',
@@ -181,4 +198,48 @@ function normalizeNumber(value: unknown): unknown {
   }
 
   return value;
+}
+
+function extractProperty(source: unknown, key: string): unknown {
+  if (!source) {
+    return undefined;
+  }
+
+  if (typeof source === 'object') {
+    if (key in (source as Record<string, unknown>)) {
+      return (source as Record<string, unknown>)[key];
+    }
+
+    if (source instanceof Map) {
+      return source.get(key);
+    }
+
+    const candidate = source as Record<string, unknown>;
+    const getter = candidate.get;
+    if (typeof getter === 'function') {
+      try {
+        const value = getter.call(source, key);
+        if (value !== undefined) {
+          return value;
+        }
+      } catch {
+        // Ignore getter errors
+      }
+    }
+
+    const entries = candidate.entries;
+    if (typeof entries === 'function') {
+      try {
+        for (const entry of entries.call(source) as Iterable<unknown>) {
+          if (Array.isArray(entry) && entry[0] === key) {
+            return entry[1];
+          }
+        }
+      } catch {
+        // Ignore iterator errors
+      }
+    }
+  }
+
+  return undefined;
 }

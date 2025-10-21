@@ -218,7 +218,7 @@ This feature enables users to trigger autonomous task prioritization via a dedic
 
 ---
 
-### T006 [SLICE] User expands reasoning trace to see agent decision-making
+### T006 [X] [SLICE] User expands reasoning trace to see agent decision-making
 
 **User Story**: As a user, after prioritization completes, I can expand a "View Reasoning" panel to see step-by-step how the agent made decisions (thoughts, tool calls, inputs/outputs), so I understand and trust the prioritization.
 
@@ -267,7 +267,7 @@ This feature enables users to trigger autonomous task prioritization via a dedic
 
 ---
 
-### T007 [SLICE] Agent handles tool failures gracefully with partial results
+### T007 [X] [SLICE] Agent handles tool failures gracefully with partial results
 
 **User Story**: As a user, if a tool fails during prioritization (e.g., detect-dependencies unavailable), I see partial results with a warning explaining what analysis couldn't complete, so I still get value despite the failure.
 
@@ -316,7 +316,7 @@ This feature enables users to trigger autonomous task prioritization via a dedic
 
 ---
 
-### T008 [SLICE] New prioritization replaces previous session (single session per user)
+### T008 [X] [SLICE] New prioritization replaces previous session (single session per user)
 
 **User Story**: As a user, when I trigger a new prioritization, my previous session is replaced (not accumulated), so I only see my most recent analysis and minimize database storage.
 
@@ -353,7 +353,7 @@ This feature enables users to trigger autonomous task prioritization via a dedic
 
 ---
 
-### T009 [SLICE] Old reasoning traces auto-delete after 7 days
+### T009 [X] [SLICE] Old reasoning traces auto-delete after 7 days
 
 **User Story**: As a system administrator, reasoning traces older than 7 days are automatically deleted to minimize database storage, while sessions themselves remain accessible.
 
@@ -390,7 +390,7 @@ This feature enables users to trigger autonomous task prioritization via a dedic
 
 ---
 
-### T010 [POLISH] Add navigation link to Task Priorities page
+### T010 [X] [POLISH] Add navigation link to Task Priorities page
 
 **User Story**: As a user, I can easily navigate to the Task Priorities page from the main navigation, so I can access prioritization without typing the URL.
 
@@ -416,7 +416,7 @@ This feature enables users to trigger autonomous task prioritization via a dedic
 
 ---
 
-### T011 [POLISH] Add contract tests for agent API endpoints
+### T011 [X] [POLISH] Add contract tests for agent API endpoints
 
 **User Story**: As a developer, I have automated tests validating agent API request/response schemas, so breaking changes are caught early.
 
@@ -451,7 +451,7 @@ This feature enables users to trigger autonomous task prioritization via a dedic
 
 ---
 
-### T012 [POLISH] Add integration test for end-to-end agent session
+### T012 [X] [POLISH] Add integration test for end-to-end agent session
 
 **User Story**: As a developer, I have an automated integration test validating the complete prioritization flow (trigger → agent execution → results retrieval), so regressions are detected.
 

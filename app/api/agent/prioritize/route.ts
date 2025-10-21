@@ -19,6 +19,7 @@ const defaultExecutionMetadata = {
   total_time_ms: 0,
   error_count: 0,
   success_rate: 0,
+  status_note: null,
 };
 
 export async function POST(request: Request) {

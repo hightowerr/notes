@@ -1,7 +1,5 @@
 import { getDocumentContextTool } from '@/lib/mastra/tools/getDocumentContext';
 import { supabase } from '@/lib/supabase';
-import { DocumentContext } from '@/lib/types/mastra';
-
 vi.mock('@/lib/supabase', () => ({
   supabase: {
     from: vi.fn().mockReturnThis(),
@@ -70,5 +68,32 @@ describe('get-document-context integration', () => {
     expect(result.documents[0].pagination_metadata).not.toBeNull();
     expect(result.documents[0].pagination_metadata?.current_chunk).toBe(1);
     expect(result.documents[0].pagination_metadata?.total_chunks).toBe(2);
+  });
+
+  it('supports context-wrapped task ID payloads', async () => {
+    const taskIds = ['task1'];
+    const documentId = 'doc1';
+
+    (supabase.from as any).mockImplementation((table: string) => {
+      if (table === 'task_embeddings') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          in: vi.fn().mockResolvedValue({ data: [{ task_id: 'task1', document_id: documentId }], error: null }),
+        };
+      }
+      if (table === 'processed_documents') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          in: vi.fn().mockResolvedValue({ data: [{ id: documentId, markdown_content: 'context markdown', uploaded_files: { name: 'context.pdf' } }], error: null }),
+        };
+      }
+    });
+
+    const result = await getDocumentContextTool.execute({
+      context: { task_ids: taskIds },
+    } as unknown as Parameters<typeof getDocumentContextTool.execute>[0]);
+
+    expect(result.documents).toHaveLength(1);
+    expect(result.documents[0].document_id).toBe(documentId);
   });
 });

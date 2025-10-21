@@ -489,7 +489,7 @@ export async function scoreActions(
  */
 export async function generateAndStoreEmbeddings(
   documentId: string,
-  actions: Action[]
+  output: DocumentOutput
 ): Promise<{
   success: number;
   failed: number;
@@ -498,12 +498,29 @@ export async function generateAndStoreEmbeddings(
 }> {
   console.log('[GenerateEmbeddings] Starting embedding generation:', {
     documentId,
-    actionCount: actions.length,
+    leverageCount: output.lno_tasks?.leverage?.length ?? 0,
+    neutralCount: output.lno_tasks?.neutral?.length ?? 0,
   });
 
-  // If no actions, skip embedding generation
-  if (!actions || actions.length === 0) {
-    console.log('[GenerateEmbeddings] No actions to process, skipping embedding generation');
+  const leverageTasks = Array.isArray(output.lno_tasks?.leverage)
+    ? output.lno_tasks!.leverage.filter(task => typeof task === 'string' && task.trim().length > 0)
+    : [];
+
+  const neutralTasks = Array.isArray(output.lno_tasks?.neutral)
+    ? output.lno_tasks!.neutral.filter(task => typeof task === 'string' && task.trim().length > 0)
+    : [];
+
+  const taskTexts = Array.from(
+    new Set(
+      [...leverageTasks, ...neutralTasks].map(task =>
+        task.trim()
+      )
+    )
+  );
+
+  // If no leverage/neutral tasks, skip embedding generation
+  if (taskTexts.length === 0) {
+    console.log('[GenerateEmbeddings] No leverage/neutral LNO tasks to process, skipping embedding generation');
     return {
       success: 0,
       failed: 0,
@@ -514,9 +531,9 @@ export async function generateAndStoreEmbeddings(
 
   try {
     // Prepare tasks for embedding generation
-    const tasks: EmbeddingTask[] = actions.map(action => ({
-      task_id: generateTaskId(action.text, documentId),
-      task_text: action.text,
+    const tasks: EmbeddingTask[] = taskTexts.map(taskText => ({
+      task_id: generateTaskId(taskText, documentId),
+      task_text: taskText,
       document_id: documentId,
     }));
 
@@ -566,7 +583,7 @@ export async function generateAndStoreEmbeddings(
     return {
       success: 0,
       failed: 0,
-      pending: actions.length,
+      pending: taskTexts.length,
       embeddingsStatus: 'pending',
     };
   }

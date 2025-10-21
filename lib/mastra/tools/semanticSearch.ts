@@ -63,15 +63,47 @@ async function executeSemanticSearch(
   count: number;
   query: string;
 }> {
-  const raw = (input ?? {}) as Record<string, unknown>;
+  const raw = input ?? {};
+  const context = extractProperty(raw, 'context');
 
   const normalized = {
-    query: normalizeQuery(raw.query),
-    limit: normalizeNumber(raw.limit),
-    threshold: normalizeNumber(raw.threshold),
+    query: normalizeQuery(
+      extractProperty(raw, 'query') ?? extractProperty(context, 'query')
+    ),
+    limit: normalizeNumber(
+      extractProperty(raw, 'limit') ?? extractProperty(context, 'limit')
+    ),
+    threshold: normalizeNumber(
+      extractProperty(raw, 'threshold') ?? extractProperty(context, 'threshold')
+    ),
   };
 
-  const { query, limit, threshold } = inputSchema.parse(normalized);
+  console.log('[SemanticSearch] Raw input:', input);
+  console.log('[SemanticSearch] Normalized input:', normalized);
+  console.log('[SemanticSearch] input.context:', context);
+  console.log(
+    '[SemanticSearch] Type of normalized.query:',
+    typeof normalized.query,
+    'Value:',
+    normalized.query
+  );
+
+  let query: string;
+  let limit: number;
+  let threshold: number;
+
+  try {
+    ({ query, limit, threshold } = inputSchema.parse(normalized));
+    console.log('[SemanticSearch] Parsed values:', { query, limit, threshold });
+  } catch (err) {
+    console.error(
+      '[SemanticSearch] Zod parse failed. Normalized snapshot:',
+      normalized,
+      'Error:',
+      err
+    );
+    throw err;
+  }
 
   if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
     throw new SemanticSearchToolError(
@@ -91,18 +123,49 @@ async function executeSemanticSearch(
 
   try {
     const embedding = await generateEmbedding(query);
-    const results = await searchSimilarTasks(embedding, threshold, limit);
 
-    // Defensive filtering keeps tool resilient if database function misconfigures threshold/ordering.
-    const filtered = results
-      .filter(
-        (task) =>
-          typeof task.similarity === 'number' &&
-          task.similarity >= threshold &&
-          Number.isFinite(task.similarity)
-      )
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, limit);
+    const MIN_DYNAMIC_THRESHOLD = 0.4;
+    const FALLBACK_STEP = 0.2;
+    const MAX_FALLBACK_ATTEMPTS = 2;
+
+    let attempts = 0;
+    let currentThreshold = threshold;
+    let filtered: SimilaritySearchResult[] = [];
+
+    while (attempts <= MAX_FALLBACK_ATTEMPTS) {
+      const results = await searchSimilarTasks(embedding, currentThreshold, limit);
+
+      filtered = results
+        .filter(
+          (task) =>
+            typeof task.similarity === 'number' &&
+            task.similarity >= currentThreshold &&
+            Number.isFinite(task.similarity)
+        )
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, limit);
+
+      if (filtered.length > 0 || currentThreshold <= MIN_DYNAMIC_THRESHOLD) {
+        break;
+      }
+
+      const nextThreshold = Math.max(
+        MIN_DYNAMIC_THRESHOLD,
+        Number((currentThreshold - FALLBACK_STEP).toFixed(2))
+      );
+
+      if (nextThreshold === currentThreshold) {
+        break;
+      }
+
+      console.log(
+        '[SemanticSearch] No matches above threshold; retrying with fallback threshold',
+        { previousThreshold: currentThreshold, nextThreshold }
+      );
+
+      currentThreshold = nextThreshold;
+      attempts += 1;
+    }
 
     return {
       tasks: filtered,
@@ -136,6 +199,10 @@ async function executeSemanticSearch(
 }
 
 function normalizeQuery(value: unknown): string {
+  if (value === undefined) {
+    return '';
+  }
+
   if (typeof value === 'string') {
     return value;
   }
@@ -163,6 +230,50 @@ function normalizeNumber(value: unknown): unknown {
   }
 
   return value;
+}
+
+function extractProperty(source: unknown, key: string): unknown {
+  if (!source) {
+    return undefined;
+  }
+
+  if (typeof source === 'object') {
+    if (key in (source as Record<string, unknown>)) {
+      return (source as Record<string, unknown>)[key];
+    }
+
+    if (source instanceof Map) {
+      return source.get(key);
+    }
+
+    const candidate = source as Record<string, unknown>;
+    const getter = candidate.get;
+    if (typeof getter === 'function') {
+      try {
+        const value = getter.call(source, key);
+        if (value !== undefined) {
+          return value;
+        }
+      } catch {
+        // Ignore getter errors and continue
+      }
+    }
+
+    const entries = candidate.entries;
+    if (typeof entries === 'function') {
+      try {
+        for (const entry of entries.call(source) as Iterable<unknown>) {
+          if (Array.isArray(entry) && entry[0] === key) {
+            return entry[1];
+          }
+        }
+      } catch {
+        // Ignore iterator errors
+      }
+    }
+  }
+
+  return undefined;
 }
 
 export const semanticSearchTool = createTool({

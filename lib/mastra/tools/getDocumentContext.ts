@@ -24,12 +24,58 @@ const inputSchema = z.object({
   chunk_number: z.number().int().min(1).optional(),
 });
 
+function normalizeTaskIds(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map(item => {
+        if (typeof item === 'string') {
+          return item.trim();
+        }
+        if (item && typeof item === 'object' && 'task_id' in (item as Record<string, unknown>)) {
+          const taskId = (item as { task_id?: unknown }).task_id;
+          return typeof taskId === 'string' ? taskId.trim() : '';
+        }
+        return typeof item === 'number' || typeof item === 'boolean' ? String(item) : '';
+      })
+      .filter(taskId => taskId.length > 0);
+  }
+
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return [value.trim()];
+  }
+
+  return [];
+}
+
+function normalizeInput(
+  input: z.input<typeof inputSchema>
+): z.input<typeof inputSchema> {
+  if (!input || typeof input !== 'object') {
+    return input;
+  }
+
+  const context = (input as Record<string, unknown>).context as Record<string, unknown> | undefined;
+  const taskIdsSource =
+    (input as Record<string, unknown>).task_ids ??
+    context?.task_ids;
+
+  const chunkNumberSource =
+    (input as Record<string, unknown>).chunk_number ??
+    context?.chunk_number;
+
+  return {
+    task_ids: normalizeTaskIds(taskIdsSource),
+    chunk_number: chunkNumberSource as number | undefined,
+  };
+}
+
 async function executeGetDocumentContext(
   input: z.input<typeof inputSchema>
 ): Promise<{
   documents: DocumentContext[];
 }> {
-  const { task_ids, chunk_number } = inputSchema.parse(input);
+  const normalized = normalizeInput(input);
+  const { task_ids, chunk_number } = inputSchema.parse(normalized);
 
   try {
     const documents = await getDocumentsByTaskIds(task_ids, chunk_number);

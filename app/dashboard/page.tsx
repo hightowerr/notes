@@ -16,6 +16,7 @@ import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Download, Package, Target } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { MainNav } from '@/components/main-nav';
 import { OutcomeDisplay } from '@/app/components/OutcomeDisplay';
 import { OutcomeBuilder } from '@/app/components/OutcomeBuilder';
 import { toast } from 'sonner';
@@ -260,7 +261,25 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="min-h-screen bg-bg-layer-1">
+      <MainNav
+        actions={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setOutcomeModalOpen(true)}
+              className="gap-2"
+            >
+              <Target className="h-4 w-4" />
+              <span className="hidden sm:inline">Set Outcome</span>
+            </Button>
+            <ThemeToggle />
+          </>
+        }
+      />
+
+      <div className="container mx-auto px-4 py-8">
       {/* Outcome Display Banner */}
       <OutcomeDisplay onEdit={(outcome) => {
         setEditingOutcome({
@@ -289,20 +308,8 @@ export default function DashboardPage() {
         }}
       />
 
-      <div className="flex items-center justify-between mb-6">
+      <div className="mb-6">
         <h1 className="text-3xl font-bold">Document Dashboard</h1>
-        <div className="flex items-center gap-3">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setOutcomeModalOpen(true)}
-            className="gap-2"
-          >
-            <Target className="h-4 w-4" />
-            Set Outcome
-          </Button>
-          <ThemeToggle />
-        </div>
       </div>
 
       {/* Bulk Export Controls */}
@@ -654,5 +661,6 @@ export default function DashboardPage() {
         </div>
       )}
     </div>
+  </div>
   );
 }

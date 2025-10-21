@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { generateBatchEmbeddings } from '@/lib/services/embeddingService';
 import { generateAndStoreEmbeddings } from '@/lib/services/aiSummarizer';
-import type { Action } from '@/lib/schemas';
+import type { DocumentOutput } from '@/lib/schemas';
 
 // Mock the AI SDK embed function
 vi.mock('ai', () => ({
@@ -36,6 +36,17 @@ vi.mock('@supabase/supabase-js', () => ({
 describe('Embedding API Failure Handling (T025)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  const buildOutput = (leverage: string[], neutral: string[]): DocumentOutput => ({
+    topics: ['Test Topic'],
+    decisions: [],
+    actions: [],
+    lno_tasks: {
+      leverage,
+      neutral,
+      overhead: [],
+    },
   });
 
   describe('generateBatchEmbeddings - API unavailable', () => {
@@ -122,13 +133,12 @@ describe('Embedding API Failure Handling (T025)', () => {
         new Error('OpenAI API unavailable')
       );
 
-      const actions: Action[] = [
-        { text: 'Review document', estimated_hours: 1.0, effort_level: 'low', relevance_score: 1.0 },
-        { text: 'Schedule meeting', estimated_hours: 0.5, effort_level: 'low', relevance_score: 1.0 },
-        { text: 'Prepare presentation', estimated_hours: 4.0, effort_level: 'high', relevance_score: 1.0 },
-      ];
+      const output = buildOutput(
+        ['Review document', 'Schedule meeting'],
+        ['Prepare presentation']
+      );
 
-      const result = await generateAndStoreEmbeddings('doc-999', actions);
+      const result = await generateAndStoreEmbeddings('doc-999', output);
 
       // FR-024: Document remains usable, embeddings marked pending
       expect(result.embeddingsStatus).toBe('pending');
@@ -151,13 +161,12 @@ describe('Embedding API Failure Handling (T025)', () => {
         return Promise.reject(new Error('API timeout'));
       });
 
-      const actions: Action[] = [
-        { text: 'Task 1', estimated_hours: 1.0, effort_level: 'low', relevance_score: 1.0 },
-        { text: 'Task 2', estimated_hours: 1.0, effort_level: 'low', relevance_score: 1.0 },
-        { text: 'Task 3', estimated_hours: 1.0, effort_level: 'low', relevance_score: 1.0 },
-      ];
+      const output = buildOutput(
+        ['Task 1', 'Task 2'],
+        ['Task 3']
+      );
 
-      const result = await generateAndStoreEmbeddings('doc-partial', actions);
+      const result = await generateAndStoreEmbeddings('doc-partial', output);
 
       // Partial success still returns 'pending' status (FR-024)
       expect(result.embeddingsStatus).toBe('pending');
@@ -173,12 +182,9 @@ describe('Embedding API Failure Handling (T025)', () => {
       // All succeed
       vi.mocked(embed).mockResolvedValue({ embedding: mockEmbedding });
 
-      const actions: Action[] = [
-        { text: 'Task 1', estimated_hours: 1.0, effort_level: 'low', relevance_score: 1.0 },
-        { text: 'Task 2', estimated_hours: 1.0, effort_level: 'low', relevance_score: 1.0 },
-      ];
+      const output = buildOutput(['Task 1'], ['Task 2']);
 
-      const result = await generateAndStoreEmbeddings('doc-complete', actions);
+      const result = await generateAndStoreEmbeddings('doc-complete', output);
 
       expect(result.embeddingsStatus).toBe('completed');
       expect(result.success).toBe(2);
@@ -187,7 +193,9 @@ describe('Embedding API Failure Handling (T025)', () => {
     });
 
     it('should handle empty actions array gracefully', async () => {
-      const result = await generateAndStoreEmbeddings('doc-empty', []);
+      const emptyOutput = buildOutput([], []);
+
+      const result = await generateAndStoreEmbeddings('doc-empty', emptyOutput);
 
       expect(result.embeddingsStatus).toBe('completed');
       expect(result.success).toBe(0);

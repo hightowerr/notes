@@ -33,17 +33,34 @@ const inputSchema = z.object({
 async function executeDetectDependencies(
   input: z.input<typeof inputSchema>
 ): Promise<DependencyAnalysisResult> {
-  const raw = (input ?? {}) as Record<string, unknown>;
+  const raw = input ?? {};
+  const context = extractProperty(raw, 'context');
 
   const normalized = {
-    task_ids: normalizeTaskIds(raw.task_ids),
-    use_document_context: normalizeBoolean(raw.use_document_context),
+    task_ids: normalizeTaskIds(
+      extractProperty(raw, 'task_ids') ?? extractProperty(context, 'task_ids')
+    ),
+    use_document_context: normalizeBoolean(
+      extractProperty(raw, 'use_document_context') ??
+        extractProperty(context, 'use_document_context')
+    ),
   };
+
+  console.log('[DetectDependencies] Raw input:', input);
+  console.log('[DetectDependencies] input.context:', context);
+  console.log('[DetectDependencies] Normalized input:', normalized);
 
   let parsedInput;
   try {
     parsedInput = inputSchema.parse(normalized);
+    console.log('[DetectDependencies] Parsed values:', parsedInput);
   } catch (error) {
+    console.error(
+      '[DetectDependencies] Zod parse failed. Normalized snapshot:',
+      normalized,
+      'Error:',
+      error
+    );
     if (error instanceof ZodError) {
       throw new DetectDependenciesToolError(
         'INVALID_TASK_IDS',
@@ -182,6 +199,50 @@ function normalizeBoolean(value: unknown): boolean | undefined {
   if (typeof value === 'number') {
     if (value === 1) return true;
     if (value === 0) return false;
+  }
+
+  return undefined;
+}
+
+function extractProperty(source: unknown, key: string): unknown {
+  if (!source) {
+    return undefined;
+  }
+
+  if (typeof source === 'object') {
+    if (key in (source as Record<string, unknown>)) {
+      return (source as Record<string, unknown>)[key];
+    }
+
+    if (source instanceof Map) {
+      return source.get(key);
+    }
+
+    const candidate = source as Record<string, unknown>;
+    const getter = candidate.get;
+    if (typeof getter === 'function') {
+      try {
+        const value = getter.call(source, key);
+        if (value !== undefined) {
+          return value;
+        }
+      } catch {
+        // Ignore getter errors
+      }
+    }
+
+    const entries = candidate.entries;
+    if (typeof entries === 'function') {
+      try {
+        for (const entry of entries.call(source) as Iterable<unknown>) {
+          if (Array.isArray(entry) && entry[0] === key) {
+            return entry[1];
+          }
+        }
+      } catch {
+        // Ignore iterator errors
+      }
+    }
   }
 
   return undefined;

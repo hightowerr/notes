@@ -35,6 +35,7 @@ export type ClusteringResult = {
   task_count: number;
   cluster_count: number;
   threshold_used: number;
+  ungrouped_task_ids: string[];
 };
 
 export type TaskCluster = {

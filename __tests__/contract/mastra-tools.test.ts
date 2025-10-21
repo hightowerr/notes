@@ -384,8 +384,9 @@ describe('Mastra Tools', () => {
       const mockResult: ClusteringResult = {
         clusters: [],
         task_count: 2,
-        cluster_count: 1,
+        cluster_count: 0,
         threshold_used: 0.75,
+        ungrouped_task_ids: ['task1', 'task2'],
       };
       vi.spyOn(clusteringService, 'performHierarchicalClustering').mockResolvedValue(mockResult);
 
