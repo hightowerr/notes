@@ -1,18 +1,12 @@
 'use client';
 
-import { ChevronRight } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { DependencyTag } from '@/app/priorities/components/DependencyTag';
 import { MovementBadge, type MovementInfo } from '@/app/priorities/components/MovementBadge';
-
-type TaskStatus = 'active' | 'completed' | 'discarded';
 
 type DependencyLink = {
   taskId: string;
   rank: number | null;
-  label: string;
 };
 
 type TaskRowProps = {
@@ -21,14 +15,11 @@ type TaskRowProps = {
   title: string;
   dependencyLinks: DependencyLink[];
   movement: MovementInfo;
-  status: TaskStatus;
-  isManual: boolean;
-  previousRank?: number | null;
+  checked: boolean;
   isSelected: boolean;
   isHighlighted: boolean;
   onSelect: (taskId: string) => void;
   onToggleCompleted: (taskId: string, nextChecked: boolean) => void;
-  onDependencyClick: (taskId: string) => void;
 };
 
 export function TaskRow({
@@ -37,29 +28,34 @@ export function TaskRow({
   title,
   dependencyLinks,
   movement,
-  status,
-  isManual,
-  previousRank,
+  checked,
   isSelected,
   isHighlighted,
   onSelect,
   onToggleCompleted,
-  onDependencyClick,
 }: TaskRowProps) {
-  const isCompleted = status === 'completed';
+  const dependencyLabel = dependencyLinks.length
+    ? dependencyLinks
+        .map(link => (typeof link.rank === 'number' ? `#${link.rank}` : '—'))
+        .join(', ')
+    : '—';
+  const dependencyTooltip = dependencyLinks.length
+    ? dependencyLinks.map(link => link.label).join(', ')
+    : undefined;
 
   return (
     <div
       data-task-id={taskId}
-      className={cn(
-        'group relative flex items-center gap-4 px-2 py-3 transition-colors',
-        'border-b border-border/60 last:border-b-0',
-        isSelected && 'bg-primary/5',
-        isHighlighted && 'bg-amber-100/40 dark:bg-amber-500/10'
-      )}
-      onClick={() => onSelect(taskId)}
       role="button"
       tabIndex={0}
+      className={cn(
+        'grid w-full grid-cols-[48px_minmax(0,1fr)_120px_96px_48px] items-center gap-2 px-3 py-2 text-sm transition-colors',
+        'border-b border-border/60 last:border-b-0',
+        isSelected && 'bg-primary/5',
+        isHighlighted && 'bg-amber-100/40 dark:bg-amber-500/10',
+        'hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+      )}
+      onClick={() => onSelect(taskId)}
       onKeyDown={event => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
@@ -67,75 +63,37 @@ export function TaskRow({
         }
       }}
     >
-      <span className="sticky left-0 w-10 shrink-0 text-sm font-semibold text-muted-foreground">{order}</span>
+      <span className="text-sm font-medium text-muted-foreground">{order}</span>
 
-      <div
-        className="flex shrink-0 items-center"
-        onClick={event => event.stopPropagation()}
-        onKeyDown={event => event.stopPropagation()}
-        role="presentation"
+      <span className="truncate text-left text-sm font-medium text-foreground">{title}</span>
+
+      <span
+        className="truncate text-sm text-muted-foreground"
+        title={dependencyTooltip}
+      >
+        {dependencyLabel}
+      </span>
+
+      <span className="flex justify-end text-xs text-muted-foreground">
+        <MovementBadge movement={movement} />
+      </span>
+
+      <span
+        className="flex justify-end"
+        onClick={event => {
+          event.stopPropagation();
+        }}
+        onKeyDown={event => {
+          event.stopPropagation();
+        }}
       >
         <Checkbox
           id={`task-complete-${taskId}`}
-          checked={isCompleted}
+          checked={checked}
           onCheckedChange={value => onToggleCompleted(taskId, value === true)}
-          aria-label={isCompleted ? 'Move to active' : 'Mark as done'}
+          aria-label="Mark as done"
         />
-      </div>
-
-      <div className="flex flex-1 flex-col gap-1">
-        <div className="flex items-center gap-2">
-          <span className={cn('truncate text-sm font-medium', isCompleted && 'text-muted-foreground line-through')}>
-            {title}
-          </span>
-          {isManual && (
-            <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
-              Restored
-            </Badge>
-          )}
-          {typeof previousRank === 'number' && previousRank !== order && (
-            <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
-              Prev. #{previousRank}
-            </Badge>
-          )}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          {dependencyLinks.length === 0 ? (
-            <span>· No dependencies</span>
-          ) : (
-            dependencyLinks.map(link => (
-              <DependencyTag
-                key={`${taskId}-depends-${link.taskId}`}
-                label={`Depends on #${link.rank ?? '?'}`}
-                onClick={
-                  link.rank !== null
-                    ? () => {
-                        onDependencyClick(link.taskId);
-                      }
-                    : undefined
-                }
-              />
-            ))
-          )}
-        </div>
-      </div>
-
-      <div className="flex shrink-0 items-center gap-3 pl-2">
-        <MovementBadge movement={movement} />
-
-        <button
-          type="button"
-          className="rounded-full p-1 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          onClick={event => {
-            event.stopPropagation();
-            onSelect(taskId);
-          }}
-          aria-label={`Open details for ${title}`}
-        >
-          <ChevronRight className="h-4 w-4" />
-        </button>
-      </div>
+      </span>
     </div>
   );
 }

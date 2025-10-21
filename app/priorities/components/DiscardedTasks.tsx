@@ -1,24 +1,14 @@
 'use client';
 
-import { useMemo } from 'react';
-import { Trash2 } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { ChevronDown, ChevronUp, RotateCcw, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { DependencyTag } from '@/app/priorities/components/DependencyTag';
-import { MovementBadge, type MovementInfo } from '@/app/priorities/components/MovementBadge';
 import { cn } from '@/lib/utils';
-
-type DependencyLink = {
-  taskId: string;
-  rank: number | null;
-  label: string;
-};
 
 type DiscardedTask = {
   id: string;
   title: string;
-  dependencyLinks: DependencyLink[];
-  movement: MovementInfo;
   reason?: string;
   lastKnownRank?: number | null;
   isHighlighted?: boolean;
@@ -28,11 +18,10 @@ type DiscardedTasksProps = {
   tasks: DiscardedTask[];
   onReturnToActive: (taskId: string) => void;
   onSelect: (taskId: string) => void;
-  onDependencyClick: (taskId: string) => void;
 };
 
-export function DiscardedTasks({ tasks, onReturnToActive, onSelect, onDependencyClick }: DiscardedTasksProps) {
-  const hasTasks = tasks.length > 0;
+export function DiscardedTasks({ tasks, onReturnToActive, onSelect }: DiscardedTasksProps) {
+  const [isOpen, setIsOpen] = useState(false);
   const sortedTasks = useMemo(
     () =>
       [...tasks].sort((a, b) => {
@@ -51,87 +40,75 @@ export function DiscardedTasks({ tasks, onReturnToActive, onSelect, onDependency
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-base font-semibold text-foreground">Discarded</h2>
-          <p className="text-sm text-muted-foreground">
-            Priorities dropped in the latest recalculation. Review the rationale and reinstate anything still relevant.
-          </p>
+          <p className="text-sm text-muted-foreground">Hidden priorities from the last run.</p>
         </div>
+        <button
+          type="button"
+          className="inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          onClick={() => setIsOpen(value => !value)}
+          aria-expanded={isOpen}
+        >
+          {isOpen ? (
+            <>
+              <ChevronUp className="h-4 w-4" />
+              Hide
+            </>
+          ) : (
+            <>
+              <ChevronDown className="h-4 w-4" />
+              Show Discarded ({tasks.length})
+            </>
+          )}
+        </button>
       </div>
 
-      <div className="divide-y divide-border/60 border-y border-border/60">
-        {!hasTasks ? (
-          <div className="flex items-center gap-3 px-2 py-4 text-sm text-muted-foreground">
-            <Trash2 className="h-4 w-4" />
-            <span>No discarded priorities.</span>
-          </div>
-        ) : (
-          sortedTasks.map(task => (
-            <div
-              key={`discarded-${task.id}`}
-              className={cn(
-                'flex flex-col gap-3 px-2 py-4 transition-colors hover:bg-muted/40',
-                task.isHighlighted && 'bg-amber-100/40 dark:bg-amber-500/10'
-              )}
-            >
+      {isOpen && (
+        <div className="divide-y divide-border/60 border-y border-border/60">
+          {tasks.length === 0 ? (
+            <div className="px-3 py-4 text-sm text-muted-foreground">Nothing has been discarded.</div>
+          ) : (
+            sortedTasks.map(task => (
               <div
-                className="flex items-center gap-3 text-sm font-medium text-foreground"
-                role="button"
-                tabIndex={0}
-                onClick={() => onSelect(task.id)}
-                onKeyDown={event => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    onSelect(task.id);
-                  }
-                }}
+                key={`discarded-${task.id}`}
+                className={cn(
+                  'flex items-center justify-between gap-3 px-3 py-2 text-sm transition-colors hover:bg-muted/30',
+                  task.isHighlighted && 'bg-amber-100/40 dark:bg-amber-500/10'
+                )}
               >
-                <Trash2 className="h-4 w-4 text-muted-foreground" />
-                <span className="truncate">{task.title}</span>
-                {typeof task.lastKnownRank === 'number' && (
-                  <span className="text-xs text-muted-foreground/80">Prev. #{task.lastKnownRank}</span>
-                )}
-              </div>
+                <button
+                  type="button"
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm text-muted-foreground hover:text-foreground"
+                  onClick={() => onSelect(task.id)}
+                >
+                  <X className="h-4 w-4" />
+                  <span className="truncate text-foreground">{task.title}</span>
+                  {typeof task.lastKnownRank === 'number' && (
+                    <span className="text-xs text-muted-foreground">(prev. #{task.lastKnownRank})</span>
+                  )}
+                </button>
 
-              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                {task.dependencyLinks.length === 0 ? (
-                  <span>· No dependencies recorded</span>
-                ) : (
-                  task.dependencyLinks.map(link => (
-                    <DependencyTag
-                      key={`${task.id}-discarded-${link.taskId}`}
-                      label={`Depends on #${link.rank ?? '?'}`}
-                      onClick={
-                        link.rank !== null
-                          ? () => {
-                              onDependencyClick(link.taskId);
-                            }
-                          : undefined
-                      }
-                    />
-                  ))
-                )}
-              </div>
+                <span
+                  className="text-xs text-muted-foreground"
+                  title={task.reason ?? undefined}
+                  aria-label={task.reason ?? undefined}
+                >
+                  {task.reason ? 'why?' : ''}
+                </span>
 
-              {task.reason && (
-                <p className="rounded-md border border-dashed border-border/60 bg-background/60 px-3 py-2 text-xs text-muted-foreground">
-                  {task.reason}
-                </p>
-              )}
-
-              <div className="flex items-center justify-between gap-3">
-                <MovementBadge movement={task.movement} />
                 <Button
-                  variant="secondary"
+                  variant="ghost"
                   size="sm"
                   onClick={() => onReturnToActive(task.id)}
-                  className="ml-auto"
+                  className="flex items-center gap-1"
                 >
-                  Return to active
+                  <RotateCcw className="h-4 w-4" />
+                  Restore
                 </Button>
               </div>
-            </div>
-          ))
-        )}
-      </div>
+            ))
+          )}
+        </div>
+      )}
     </section>
   );
 }

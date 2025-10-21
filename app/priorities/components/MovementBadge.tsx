@@ -1,8 +1,5 @@
 'use client';
 
-import { AlertTriangle, ArrowDown, ArrowUp, RotateCcw } from 'lucide-react';
-import { cn } from '@/lib/utils';
-
 export type MovementInfo =
   | { type: 'up'; delta: number }
   | { type: 'down'; delta: number }
@@ -22,56 +19,28 @@ export function MovementBadge({ movement }: MovementBadgeProps) {
     return null;
   }
 
+  const baseClass = 'text-xs font-medium text-muted-foreground';
+
   if (movement.type === 'new') {
-    return (
-      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-primary">
-        NEW
-      </span>
-    );
+    return <span className={`${baseClass}`}>new</span>;
   }
 
   if (movement.type === 'reintroduced') {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-600">
-        <RotateCcw className="h-3 w-3" />
-        RETURNED
-      </span>
-    );
+    return <span className={baseClass}>↺</span>;
   }
 
   if (movement.type === 'manual') {
-    return (
-      <span className="rounded-full bg-slate-600/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-700">
-        MANUAL
-      </span>
-    );
+    return <span className={baseClass}>manual</span>;
   }
 
   if (movement.type === 'confidence-drop') {
     const delta = Math.abs(movement.delta ?? 0);
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-600">
-        <AlertTriangle className="h-3 w-3" />
-        Δ-{delta.toFixed(2)}
-      </span>
-    );
+    return <span className={baseClass}>Δ-{delta.toFixed(2)}</span>;
   }
 
-  const isUp = movement.type === 'up';
-  const delta = movement.delta ?? 0;
-  const Icon = isUp ? ArrowUp : ArrowDown;
-
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold',
-        isUp
-          ? 'bg-emerald-500/10 text-emerald-600'
-          : 'bg-rose-500/10 text-rose-600'
-      )}
-    >
-      <Icon className="h-3 w-3" />
-      {isUp ? `+${delta}` : `-${delta}`}
-    </span>
-  );
+  const delta = Math.abs(movement.delta ?? 0);
+  if (movement.type === 'up') {
+    return <span className={baseClass}>↑{delta}</span>;
+  }
+  return <span className={baseClass}>↓{delta}</span>;
 }

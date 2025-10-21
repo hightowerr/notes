@@ -719,22 +719,18 @@ export function TaskList({
           ((node.manualOverride ?? !sanitizedTaskIds.includes(taskId))
             ? { type: 'manual' as const }
             : undefined),
-        dependencies: buildDependencyLinks(node.dependencies, priorityState.ranks),
-        status: priorityState.statuses[taskId] ?? 'active',
+        dependencyLinks: buildDependencyLinks(node.dependencies, priorityState.ranks),
         displayOrder: index + 1,
-        isManual: node.manualOverride ?? !sanitizedTaskIds.includes(taskId),
-        previousRank: priorityState.ranks[taskId],
+        checked: priorityState.statuses[taskId] === 'completed',
       };
     })
     .filter(Boolean) as Array<{
       id: string;
       title: string;
       movement: MovementInfo;
-      dependencies: ReturnType<typeof buildDependencyLinks>;
-      status: TaskStatus;
+      dependencyLinks: ReturnType<typeof buildDependencyLinks>;
       displayOrder: number;
-      isManual: boolean;
-      previousRank?: number | null;
+      checked: boolean;
     }>;
 
   const completedTasks = useMemo(
@@ -746,13 +742,10 @@ export function TaskList({
           return {
             id: taskId,
             title: node?.title ?? getTaskTitle(taskId),
-            dependencyLinks: buildDependencyLinks(node?.dependencies ?? [], priorityState.ranks),
-            movement: movementMap[taskId],
             isHighlighted: highlightedIds.has(taskId),
-            lastKnownRank: priorityState.ranks[taskId],
           };
         }),
-    [priorityState.statuses, nodeMap, getTaskTitle, priorityState.ranks, movementMap, highlightedIds]
+    [priorityState.statuses, nodeMap, getTaskTitle, highlightedIds]
   );
 
   const discardedTasks = useMemo(
@@ -764,8 +757,6 @@ export function TaskList({
           return {
             id: taskId,
             title: node?.title ?? getTaskTitle(taskId),
-            dependencyLinks: buildDependencyLinks(node?.dependencies ?? [], priorityState.ranks),
-            movement: movementMap[taskId],
             reason: node?.removalReason ?? priorityState.reasons[taskId],
             lastKnownRank: priorityState.ranks[taskId],
             isHighlighted: recentlyDiscarded.has(taskId),
@@ -776,7 +767,6 @@ export function TaskList({
       nodeMap,
       getTaskTitle,
       priorityState.ranks,
-      movementMap,
       priorityState.reasons,
       recentlyDiscarded,
     ]
@@ -909,6 +899,13 @@ export function TaskList({
             </div>
           ) : (
             <ScrollArea className="max-h-[560px]">
+              <div className="sticky top-0 z-10 grid grid-cols-[48px_minmax(0,1fr)_120px_96px_48px] gap-2 border-b border-border/60 bg-background/95 px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground backdrop-blur">
+                <span>#</span>
+                <span className="text-left">Task</span>
+                <span className="text-left">Depends</span>
+                <span className="text-right">Movement</span>
+                <span className="text-right">Done</span>
+              </div>
               <div className="divide-y divide-border/60">
                 {activeTasks.map(task => (
                   <TaskRow
@@ -916,16 +913,13 @@ export function TaskList({
                     taskId={task.id}
                     order={task.displayOrder}
                     title={task.title}
-                    dependencyLinks={task.dependencies}
+                    dependencyLinks={task.dependencyLinks}
                     movement={task.movement}
-                    status={task.status}
-                    isManual={task.isManual}
-                    previousRank={task.previousRank}
+                    checked={task.checked}
                     isSelected={selectedTaskId === task.id && isDrawerOpen}
                     isHighlighted={highlightedIds.has(task.id)}
                     onSelect={handleSelectTask}
                     onToggleCompleted={handleToggleCompleted}
-                    onDependencyClick={scrollToTask}
                   />
                 ))}
               </div>
@@ -938,14 +932,12 @@ export function TaskList({
         tasks={completedTasks}
         onMoveToActive={taskId => handleReturnToActive(taskId)}
         onSelect={handleSelectTask}
-        onDependencyClick={scrollToTask}
       />
 
       <DiscardedTasks
         tasks={discardedTasks}
         onReturnToActive={handleReturnToActive}
         onSelect={handleSelectTask}
-        onDependencyClick={scrollToTask}
       />
 
       <TaskDetailsDrawer
