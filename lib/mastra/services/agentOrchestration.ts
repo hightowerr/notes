@@ -4,13 +4,17 @@ import { z } from 'zod';
 import { supabase } from '@/lib/supabase';
 import { fetchRecentReflections } from '@/lib/services/reflectionService';
 import { generateTaskId } from '@/lib/services/embeddingService';
+import { EmbeddingQueue } from '@/lib/services/embeddingQueue';
 import { taskOrchestratorAgent } from '@/lib/mastra/agents/taskOrchestrator';
+import { prioritizedPlanSchema } from '@/lib/schemas/prioritizedPlanSchema';
 import {
   buildExecutionMetadata,
   buildPlanSummary,
   ensurePlanConsistency,
   generateFallbackPlan,
   generateFallbackTrace,
+  MASRA_TOOL_NAMES,
+  extractFailedTools,
   normalizeReasoningSteps,
   parsePlanFromAgentResponse,
   summariseToolUsage,
@@ -23,6 +27,8 @@ import type {
   PrioritizedTaskPlan,
   ReasoningStep,
   ReasoningTraceRecord,
+  TaskAnnotation,
+  TaskRemoval,
   TaskSummary,
 } from '@/lib/types/agent';
 
@@ -66,6 +72,65 @@ function toTaskSummary(row: TaskEmbeddingRow): TaskSummary {
   };
 }
 
+const embeddingQueue = new EmbeddingQueue();
+
+async function hydrateFallbackEmbeddings(tasks: TaskSummary[]): Promise<TaskSummary[]> {
+  if (tasks.length === 0) {
+    return [];
+  }
+
+  const grouped = new Map<string, TaskSummary[]>();
+  for (const task of tasks) {
+    if (!task.document_id) {
+      continue;
+    }
+    const bucket = grouped.get(task.document_id) ?? [];
+    bucket.push(task);
+    grouped.set(task.document_id, bucket);
+  }
+
+  for (const [documentId, docTasks] of grouped) {
+    try {
+      await embeddingQueue.enqueue(
+        docTasks.map(({ task_id, task_text, document_id }) => ({
+          task_id,
+          task_text,
+          document_id,
+        })),
+        documentId
+      );
+    } catch (error) {
+      console.error(
+        '[AgentOrchestration] Failed to enqueue embeddings for fallback tasks',
+        { documentId, taskCount: docTasks.length },
+        error
+      );
+    }
+  }
+
+  const taskIds = tasks.map(task => task.task_id);
+  if (taskIds.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from('task_embeddings')
+    .select('task_id, task_text, document_id')
+    .in('task_id', taskIds)
+    .eq('status', 'completed')
+    .returns<TaskEmbeddingRow[]>();
+
+  if (error) {
+    console.error(
+      '[AgentOrchestration] Unable to refresh embeddings after fallback hydration',
+      error
+    );
+    return [];
+  }
+
+  return (data ?? []).map(toTaskSummary);
+}
+
 async function fetchRuntimeContext(userId: string, outcomeId: string): Promise<AgentRuntimeContext> {
   const [{ data: outcome, error: outcomeError }] = await Promise.all([
     supabase
@@ -97,10 +162,94 @@ async function fetchRuntimeContext(userId: string, outcomeId: string): Promise<A
     .limit(200)
     .returns<TaskEmbeddingRow[]>();
 
-  const [reflections, taskResult] = await Promise.all([reflectionsPromise, tasksPromise]);
+  const previousPlanPromise = supabase
+    .from('agent_sessions')
+    .select('prioritized_plan')
+    .eq('user_id', userId)
+    .eq('outcome_id', outcomeId)
+    .eq('status', 'completed')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-  let taskSummaries: TaskSummary[] = (taskResult.data ?? []).map(toTaskSummary);
-  let documentCount = new Set(taskSummaries.map(task => task.document_id)).size;
+  const [reflections, taskResult, previousSession] = await Promise.all([
+    reflectionsPromise,
+    tasksPromise,
+    previousPlanPromise,
+  ]);
+
+  const rawTaskSummaries: TaskSummary[] = (taskResult.data ?? []).map(toTaskSummary);
+  let documentCount = new Set(rawTaskSummaries.map(task => task.document_id)).size;
+  let previousPlan: PrioritizedTaskPlan | null = null;
+  let previousAnnotations: TaskAnnotation[] = [];
+  let previousRemovals: TaskRemoval[] = [];
+
+  if (previousSession && previousSession.prioritized_plan) {
+    try {
+      const rawPlan = previousSession.prioritized_plan as unknown;
+      if (typeof rawPlan === 'string') {
+        const parsed = parsePlanFromAgentResponse(rawPlan);
+        if (parsed.success) {
+          previousPlan = ensurePlanConsistency(parsed.plan);
+        }
+      } else {
+        const parsed = prioritizedPlanSchema.safeParse(rawPlan);
+        if (parsed.success) {
+          previousPlan = ensurePlanConsistency(parsed.data);
+        }
+      }
+    } catch (error) {
+      console.warn('[AgentOrchestration] Unable to parse previous prioritized plan', error);
+    }
+  }
+
+  if (previousPlan) {
+    previousAnnotations = Array.isArray(previousPlan.task_annotations)
+      ? previousPlan.task_annotations.filter(
+          annotation => annotation && typeof annotation.task_id === 'string'
+        )
+      : [];
+    previousRemovals = Array.isArray(previousPlan.removed_tasks)
+      ? previousPlan.removed_tasks.filter(
+          removal => removal && typeof removal.task_id === 'string'
+        )
+      : [];
+  }
+
+  const annotationByTask = new Map<string, TaskAnnotation>();
+  previousAnnotations.forEach(annotation => {
+    annotationByTask.set(annotation.task_id, annotation);
+  });
+
+  const removalByTask = new Map<string, TaskRemoval>();
+  previousRemovals.forEach(removal => {
+    removalByTask.set(removal.task_id, removal);
+  });
+
+  const augmentTaskSummary = (task: TaskSummary): TaskSummary => {
+    const annotation = annotationByTask.get(task.task_id);
+    const fallbackRank = previousPlan
+      ? previousPlan.ordered_task_ids.indexOf(task.task_id)
+      : -1;
+    const previousRank =
+      annotation?.previous_rank ??
+      (fallbackRank >= 0 ? fallbackRank + 1 : null);
+    const previousConfidence =
+      annotation?.confidence ??
+      previousPlan?.confidence_scores?.[task.task_id] ??
+      null;
+    return {
+      ...task,
+      previous_rank: previousRank ?? null,
+      previous_confidence:
+        typeof previousConfidence === 'number' ? previousConfidence : null,
+      previous_state: annotation?.state,
+      removal_reason: annotation?.removal_reason ?? removalByTask.get(task.task_id)?.removal_reason ?? null,
+      manual_override: annotation?.manual_override ?? false,
+    };
+  };
+
+  let taskSummaries: TaskSummary[] = rawTaskSummaries.map(augmentTaskSummary);
 
   if (taskSummaries.length === 0) {
     const { data: documents, error: documentsError } = await supabase
@@ -131,7 +280,13 @@ async function fetchRuntimeContext(userId: string, outcomeId: string): Promise<A
         });
       });
 
-      taskSummaries = fallbackTasks.slice(0, 200);
+      const hydrated = await hydrateFallbackEmbeddings(fallbackTasks);
+
+      if (hydrated.length > 0) {
+        taskSummaries = hydrated.slice(0, 200).map(augmentTaskSummary);
+      } else {
+        taskSummaries = fallbackTasks.slice(0, 200).map(augmentTaskSummary);
+      }
       documentCount = new Set(taskSummaries.map(task => task.document_id)).size;
     }
   }
@@ -159,12 +314,238 @@ async function fetchRuntimeContext(userId: string, outcomeId: string): Promise<A
       task_count: taskSummaries.length,
       document_count: documentCount,
       reflection_count: reflections.length,
+      has_previous_plan: !!previousPlan,
+    },
+    history: previousPlan
+      ? {
+          previous_plan: {
+            ordered_task_ids: previousPlan.ordered_task_ids,
+            confidence_scores: previousPlan.confidence_scores,
+            task_annotations: previousAnnotations,
+            removed_tasks: previousRemovals,
+          },
+        }
+      : undefined,
+  };
+}
+
+function condenseStatusText(value?: string | null, maxLength = 160): string | null {
+  if (!value) {
+    return null;
+  }
+  const cleaned = value.replace(/\s+/g, ' ').trim();
+  if (!cleaned) {
+    return null;
+  }
+  if (cleaned.length <= maxLength) {
+    return cleaned;
+  }
+  return `${cleaned.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function detectToolsInText(text?: string | null): string[] {
+  if (!text) {
+    return [];
+  }
+  const lowered = text.toLowerCase();
+  return MASRA_TOOL_NAMES.filter(tool => lowered.includes(tool));
+}
+
+function toErrorMessage(error: unknown): string | null {
+  if (!error) {
+    return null;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'object' && 'message' in (error as Record<string, unknown>)) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string') {
+      return message;
+    }
+  }
+  return null;
+}
+
+function inferFailureTools(
+  steps: ReasoningStep[],
+  narrative?: string | null,
+  errorMessage?: string | null
+): string[] {
+  const collected = new Set<string>();
+  extractFailedTools(steps, narrative ?? null).forEach(tool => collected.add(tool));
+  detectToolsInText(narrative).forEach(tool => collected.add(tool));
+  detectToolsInText(errorMessage).forEach(tool => collected.add(tool));
+  return Array.from(collected);
+}
+
+function buildFailureThought(
+  failedTools: string[],
+  errorMessage?: string | null,
+  narrative?: string | null
+): string {
+  if (failedTools.length > 0) {
+    const label = failedTools.length === 1 ? 'tool' : 'tools';
+    return condenseStatusText(
+      `Failed to finish ${failedTools.join(', ')} ${label}. Showing partial results.`
+    ) ?? 'Failed to finish one or more tools. Showing partial results.';
+  }
+
+  const narrativeSummary = condenseStatusText(narrative);
+  if (narrativeSummary) {
+    return narrativeSummary;
+  }
+
+  const errorSummary = condenseStatusText(errorMessage);
+  if (errorSummary) {
+    return errorSummary;
+  }
+
+  return 'Agent returned partial results after encountering an error.';
+}
+
+function buildPartialStatusNote(
+  failedTools: string[],
+  narrative?: string | null,
+  errorMessage?: string | null
+): string {
+  if (failedTools.length > 0) {
+    const base = `Some analysis steps failed (${failedTools.join(', ')}).`;
+    const extra = condenseStatusText(narrative) ?? condenseStatusText(errorMessage);
+    return extra ? `${base} ${extra}` : `${base} Partial results shown.`;
+  }
+
+  return (
+    condenseStatusText(narrative) ??
+    condenseStatusText(errorMessage) ??
+    'Some analysis steps failed. Partial results shown.'
+  );
+}
+
+type PartialResultOptions = {
+  context: AgentRuntimeContext;
+  startedAt: number;
+  normalizedSteps: ReasoningStep[];
+  narrative: string | null;
+  error: unknown;
+};
+
+function buildPartialResult(options: PartialResultOptions): AgentRunResult {
+  const { context, startedAt, normalizedSteps } = options;
+  const narrative = condenseStatusText(options.narrative);
+  const errorMessage = toErrorMessage(options.error);
+
+  if (context.tasks.length === 0) {
+    const failedSteps: ReasoningStep[] = normalizeReasoningSteps([
+      {
+        step_number: 1,
+        timestamp: new Date().toISOString(),
+        thought: 'No available tasks to prioritize. Agent cannot produce a plan.',
+        tool_name: null,
+        tool_input: null,
+        tool_output: null,
+        duration_ms: 10,
+        status: 'failed' as const,
+      },
+    ]);
+
+    const completedAt = performance.now();
+    const metadata = buildExecutionMetadata({
+      steps: failedSteps,
+      startedAt,
+      completedAt,
+      errors: 1,
+      statusNote: buildPartialStatusNote([], narrative, errorMessage),
+      failedTools: [],
+    });
+
+    return {
+      status: 'failed',
+      error: 'No tasks available to prioritize.',
+      metadata,
+      trace: {
+        session_id: '',
+        steps: failedSteps,
+        total_duration_ms: metadata.total_time_ms,
+        total_steps: metadata.steps_taken,
+        tools_used_count: metadata.tool_call_count,
+      },
+    };
+  }
+
+  const planSummary = buildPlanSummary(context);
+  const plan = generateFallbackPlan(context.tasks, planSummary);
+  const fallbackSteps = generateFallbackTrace(context.tasks, plan, { narrative: null });
+
+  const provisionalFailedTools = inferFailureTools(normalizedSteps, narrative, errorMessage);
+  const combinedRawSteps: Array<Record<string, unknown>> = [...normalizedSteps];
+  const hasFailureStep = normalizedSteps.some(step => step.status === 'failed');
+
+  if (!hasFailureStep) {
+    combinedRawSteps.push({
+      step_number: combinedRawSteps.length + 1,
+      timestamp: new Date().toISOString(),
+      thought: buildFailureThought(provisionalFailedTools, errorMessage, narrative),
+      tool_name: provisionalFailedTools[0] ?? null,
+      tool_input: null,
+      tool_output: errorMessage ? { error: errorMessage } : null,
+      duration_ms: 10,
+      status: 'failed',
+    });
+  }
+
+  combinedRawSteps.push(...fallbackSteps);
+
+  const combinedSteps = normalizeReasoningSteps(combinedRawSteps);
+  const failedTools = inferFailureTools(combinedSteps, narrative, errorMessage);
+  const statusNote = buildPartialStatusNote(failedTools, narrative, errorMessage);
+
+  const completedAt = performance.now();
+  const metadata = buildExecutionMetadata({
+    steps: combinedSteps,
+    startedAt,
+    completedAt,
+    statusNote,
+    failedTools,
+  });
+
+  return {
+    status: 'completed',
+    plan,
+    metadata,
+    trace: {
+      session_id: '',
+      steps: combinedSteps,
+      total_duration_ms: metadata.total_time_ms,
+      total_steps: metadata.steps_taken,
+      tools_used_count: metadata.tool_call_count,
     },
   };
 }
 
 async function runAgent(context: AgentRuntimeContext): Promise<AgentRunResult> {
   const startedAt = performance.now();
+  let normalizedSteps: ReasoningStep[] = [];
+  let lastNarrative: string | null = null;
+  const previousPlan = context.history?.previous_plan;
+
+  const hasEmbeddingBackedTasks =
+    context.tasks.length === 0 || context.tasks.some(task => task.source === 'embedding');
+
+  if (context.tasks.length > 0 && !hasEmbeddingBackedTasks) {
+    return buildPartialResult({
+      context,
+      startedAt,
+      normalizedSteps,
+      narrative: 'Task embeddings are still being generated.',
+      error: new Error(
+        'Task embeddings are still processing. Please retry once document ingestion completes.'
+      ),
+    });
+  }
 
   try {
     const messages: Array<{ role: 'user'; content: string }> = [
@@ -176,10 +557,86 @@ async function runAgent(context: AgentRuntimeContext): Promise<AgentRunResult> {
           `Daily capacity: ${context.outcome.daily_capacity_hours ?? 'unknown'} hours`,
           `Tasks available: ${context.metadata.task_count}`,
           `Reflections available: ${context.metadata.reflection_count}`,
+          `Previous plan available: ${context.metadata.has_previous_plan ? 'yes' : 'no'}`,
           'Return ONLY the JSON structure described in your instructions.',
         ].join('\n'),
       },
     ];
+
+    if (previousPlan) {
+      const annotationByTask = new Map<string, TaskAnnotation>();
+      previousPlan.task_annotations?.forEach(annotation => {
+        if (annotation && typeof annotation.task_id === 'string') {
+          annotationByTask.set(annotation.task_id, annotation);
+        }
+      });
+
+      const topTasks = previousPlan.ordered_task_ids.slice(0, 10).map((taskId, index) => {
+        const parts: string[] = [`${index + 1}. ${taskId}`];
+        const annotation = annotationByTask.get(taskId);
+        const confidence =
+          (annotation?.confidence ?? previousPlan.confidence_scores?.[taskId]) ?? null;
+        if (typeof confidence === 'number') {
+          parts.push(`confidence=${confidence.toFixed(2)}`);
+        }
+        if (annotation?.confidence_delta && Math.abs(annotation.confidence_delta) >= 0.05) {
+          const delta = annotation.confidence_delta > 0 ? '+' : '';
+          parts.push(`Δ=${delta}${annotation.confidence_delta.toFixed(2)}`);
+        }
+        if (annotation?.state && annotation.state !== 'active') {
+          parts.push(`state=${annotation.state}`);
+        }
+        if (annotation?.manual_override) {
+          parts.push('manual_override=true');
+        }
+        if (annotation?.removal_reason) {
+          parts.push(`note=${annotation.removal_reason}`);
+        }
+        return `- ${parts.join(' • ')}`;
+      });
+
+      const removals = (previousPlan.removed_tasks ?? [])
+        .slice(0, 10)
+        .map(removal => {
+          const parts: string[] = [removal.task_id];
+          if (typeof removal.previous_rank === 'number') {
+            parts.push(`rank=${removal.previous_rank}`);
+          }
+          if (typeof removal.previous_confidence === 'number') {
+            parts.push(`confidence=${removal.previous_confidence.toFixed(2)}`);
+          }
+          if (removal.removal_reason) {
+            parts.push(`reason=${removal.removal_reason}`);
+          }
+          return `- ${parts.join(' • ')}`;
+        });
+
+      const manualOverrides = Array.from(annotationByTask.values()).filter(
+        annotation => annotation?.manual_override
+      );
+
+      const summaryLines = [
+        'Previous prioritization snapshot:',
+        topTasks.length > 0 ? 'Top ranked tasks last run:' : 'No prior ranked tasks captured.',
+        ...topTasks,
+      ];
+
+      if (manualOverrides.length > 0) {
+        summaryLines.push(
+          'Manual overrides preserved:',
+          ...manualOverrides.map(annotation => `- ${annotation.task_id}`)
+        );
+      }
+
+      if (removals.length > 0) {
+        summaryLines.push('Tasks previously removed (with reasons):', ...removals);
+      }
+
+      messages.push({
+        role: 'user',
+        content: summaryLines.join('\n'),
+      });
+    }
 
     if (context.reflections.length > 0) {
       messages.push({
@@ -219,11 +676,17 @@ async function runAgent(context: AgentRuntimeContext): Promise<AgentRunResult> {
       (response as any)?.data ??
       (response as any);
 
-    const parsedPlan = parsePlanFromAgentResponse(rawOutput);
-
-    if (!parsedPlan.success) {
-      throw parsedPlan.error;
+    console.log('[AgentOrchestration] Raw agent output:', rawOutput);
+    if (typeof rawOutput === 'string') {
+      const text = rawOutput;
+      console.log('[AgentOrchestration] Raw agent output TEXT:', text);
+      console.log('[AgentOrchestration] Output length:', text.length);
+      console.log('[AgentOrchestration] BeginsWith "{"?:', text.trim().startsWith('{'));
+    } else {
+      console.log('[AgentOrchestration] Raw agent output is not a string:', typeof rawOutput);
     }
+
+    const parsedPlan = parsePlanFromAgentResponse(rawOutput);
 
     const rawSteps =
       (response as any)?.steps ??
@@ -231,13 +694,31 @@ async function runAgent(context: AgentRuntimeContext): Promise<AgentRunResult> {
       (response as any)?.execution?.steps ??
       [];
 
-    const normalizedSteps = normalizeReasoningSteps(Array.isArray(rawSteps) ? rawSteps : []);
+    normalizedSteps = normalizeReasoningSteps(Array.isArray(rawSteps) ? rawSteps : []);
+    console.log(
+      '[AgentOrchestration] Tool execution summary:',
+      summariseToolUsage(normalizedSteps)
+    );
+
+    if (!parsedPlan.success) {
+      return buildPartialResult({
+        context,
+        startedAt,
+        normalizedSteps,
+        narrative: parsedPlan.narrative ?? null,
+        error: parsedPlan.error,
+      });
+    }
+
+    lastNarrative = condenseStatusText(parsedPlan.narrative ?? null);
     const completedAt = performance.now();
 
     const metadata = buildExecutionMetadata({
       steps: normalizedSteps,
       startedAt,
       completedAt,
+      statusNote: lastNarrative,
+      failedTools: extractFailedTools(normalizedSteps, lastNarrative),
     });
 
     const plan = ensurePlanConsistency(parsedPlan.plan);
@@ -257,65 +738,18 @@ async function runAgent(context: AgentRuntimeContext): Promise<AgentRunResult> {
       trace,
     };
   } catch (error) {
+    console.log('[AgentOrchestration] Agent decided to fallback narrative path.');
     console.warn('[AgentOrchestration] Agent execution failed, falling back', error);
+    const fallbackNarrative =
+      (error as { statusNote?: string | undefined })?.statusNote ?? lastNarrative ?? null;
 
-    if (context.tasks.length === 0) {
-      const failedSteps: ReasoningStep[] = normalizeReasoningSteps([
-        {
-          step_number: 1,
-          timestamp: new Date().toISOString(),
-          thought: 'No available tasks to prioritize. Agent cannot produce a plan.',
-          tool_name: null,
-          tool_input: null,
-          tool_output: null,
-          duration_ms: 10,
-          status: 'failed',
-        },
-      ]);
-
-      const metadata = buildExecutionMetadata({
-        steps: failedSteps,
-        startedAt,
-        completedAt: performance.now(),
-        errors: 1,
-      });
-
-      return {
-        status: 'failed',
-        error: 'No tasks available to prioritize.',
-        metadata,
-        trace: {
-          session_id: '',
-          steps: failedSteps,
-          total_duration_ms: metadata.total_time_ms,
-          total_steps: metadata.steps_taken,
-          tools_used_count: metadata.tool_call_count,
-        },
-      };
-    }
-
-    const planSummary = buildPlanSummary(context);
-    const plan = generateFallbackPlan(context.tasks, planSummary);
-    const steps = generateFallbackTrace(context.tasks, plan);
-    const completedAt = performance.now();
-    const metadata = buildExecutionMetadata({
-      steps,
+    return buildPartialResult({
+      context,
       startedAt,
-      completedAt,
+      normalizedSteps,
+      narrative: fallbackNarrative,
+      error,
     });
-
-    return {
-      status: 'completed',
-      plan,
-      metadata,
-      trace: {
-        session_id: '',
-        steps,
-        total_duration_ms: metadata.total_time_ms,
-        total_steps: metadata.steps_taken,
-        tools_used_count: metadata.tool_call_count,
-      },
-    };
   }
 }
 
@@ -379,6 +813,7 @@ export async function orchestrateTaskPriorities(options: OrchestrateTaskOptions)
           total_time_ms: 0,
           error_count: 1,
           success_rate: 0,
+          status_note: 'Unable to build runtime context for prioritization.',
         },
         updated_at: new Date().toISOString(),
       })

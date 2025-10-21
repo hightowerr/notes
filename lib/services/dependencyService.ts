@@ -77,15 +77,18 @@ ${taskDescriptions}`;
   if (validDependencies.length > 0) {
     const { error: insertError } = await supabase
       .from('task_relationships')
-      .insert(
+      .upsert(
         validDependencies.map((dep) => ({
           ...dep,
           detection_method: 'ai',
-        }))
+        })),
+        {
+          onConflict: 'source_task_id,target_task_id,relationship_type',
+        }
       );
 
     if (insertError) {
-      console.error('Failed to insert dependencies:', insertError);
+      console.error('Failed to upsert dependencies:', insertError);
     }
   }
 

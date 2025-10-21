@@ -41,6 +41,31 @@ describe('semanticSearchTool', () => {
     expect(vectorStorage.searchSimilarTasks).toHaveBeenCalledWith(mockEmbedding, 0.8, 10);
   });
 
+  it('retries with a lower threshold when no tasks meet initial threshold', async () => {
+    vi.spyOn(embeddingService, 'generateEmbedding').mockResolvedValue(mockEmbedding);
+
+    const belowThresholdResults = [
+      { ...baseResult[0], similarity: 0.62 },
+      { ...baseResult[1], similarity: 0.58 },
+    ];
+
+    const searchSpy = vi
+      .spyOn(vectorStorage, 'searchSimilarTasks')
+      .mockResolvedValueOnce(belowThresholdResults)
+      .mockResolvedValueOnce(belowThresholdResults);
+
+    const result = await semanticSearchTool.execute({
+      query: 'organic growth',
+      limit: 5,
+      threshold: 0.7,
+    });
+
+    expect(searchSpy).toHaveBeenNthCalledWith(1, mockEmbedding, 0.7, 5);
+    expect(searchSpy).toHaveBeenNthCalledWith(2, mockEmbedding, 0.5, 5);
+    expect(result.count).toBe(2);
+    expect(result.tasks[0].similarity).toBeGreaterThanOrEqual(result.tasks[1].similarity);
+  });
+
   it('throws when threshold is out of range', async () => {
     await expect(
       semanticSearchTool.execute({ query: 'test', threshold: 1.5 })

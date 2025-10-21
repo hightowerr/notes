@@ -287,7 +287,7 @@ export async function POST(request: NextRequest) {
 
     const embeddingResult = await generateAndStoreEmbeddings(
       docId,
-      aiResult.output.actions
+      aiResult.output
     );
 
     const embeddingDuration = Date.now() - embeddingStartTime;

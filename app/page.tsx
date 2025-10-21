@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Upload, FileText, AlertCircle, Loader2, CheckCircle2, Clock, Target, MessageSquare } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { MainNav } from '@/components/main-nav';
 import SummaryPanel from '@/app/components/SummaryPanel';
 import { OutcomeDisplay } from '@/app/components/OutcomeDisplay';
 import { OutcomeBuilder } from '@/app/components/OutcomeBuilder';
@@ -446,47 +447,35 @@ export default function Home() {
         }}
       />
 
-      {/* Header */}
-      <header className="sticky top-0 z-10 border-b-0 bg-bg-layer-2 shadow-2layer-md">
-        <div className="mx-auto max-w-7xl px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <FileText className="h-8 w-8 text-primary-2" />
-              <div>
-                <h1 className="text-2xl font-bold text-text-heading">AI Note Synthesiser</h1>
-                <p className="text-sm text-text-muted">
-                  Autonomous document analysis and structured insights
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setReflectionPanelOpen(true)}
-                className="gap-2"
-                title="Reflections (Cmd+Shift+R / Ctrl+Shift+R)"
-              >
-                <MessageSquare className="h-4 w-4" />
-                <span className="hidden sm:inline">Reflections</span>
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setOutcomeModalOpen(true)}
-                className="gap-2"
-              >
-                <Target className="h-4 w-4" />
-                <span className="hidden sm:inline">Set Outcome</span>
-              </Button>
-              <Badge variant="secondary" className="px-4 py-2">
-                {files.length} {files.length === 1 ? 'Document' : 'Documents'}
-              </Badge>
-              <ThemeToggle />
-            </div>
-          </div>
-        </div>
-      </header>
+      <MainNav
+        actions={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setReflectionPanelOpen(true)}
+              className="gap-2"
+              title="Reflections (Cmd+Shift+R / Ctrl+Shift+R)"
+            >
+              <MessageSquare className="h-4 w-4" />
+              <span className="hidden sm:inline">Reflections</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setOutcomeModalOpen(true)}
+              className="gap-2"
+            >
+              <Target className="h-4 w-4" />
+              <span className="hidden sm:inline">Set Outcome</span>
+            </Button>
+            <Badge variant="secondary" className="px-4 py-2">
+              {files.length} {files.length === 1 ? 'Document' : 'Documents'}
+            </Badge>
+            <ThemeToggle />
+          </>
+        }
+      />
 
       {/* Main Content */}
       <main className="mx-auto max-w-7xl px-6 py-8 space-y-8">

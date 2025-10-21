@@ -2,7 +2,11 @@ import type { z } from 'zod';
 
 import type { executionMetadataSchema } from '@/lib/schemas/executionMetadataSchema';
 import type { reasoningStepSchema } from '@/lib/schemas/reasoningStepSchema';
-import type { prioritizedPlanSchema } from '@/lib/schemas/prioritizedPlanSchema';
+import type {
+  prioritizedPlanSchema,
+  taskAnnotationSchema,
+  taskRemovalSchema,
+} from '@/lib/schemas/prioritizedPlanSchema';
 
 export type AgentSessionStatus = 'running' | 'completed' | 'failed';
 
@@ -11,6 +15,8 @@ export type ExecutionMetadata = z.infer<typeof executionMetadataSchema>;
 export type ReasoningStep = z.infer<typeof reasoningStepSchema>;
 
 export type PrioritizedTaskPlan = z.infer<typeof prioritizedPlanSchema>;
+export type TaskAnnotation = z.infer<typeof taskAnnotationSchema>;
+export type TaskRemoval = z.infer<typeof taskRemovalSchema>;
 
 export type TaskDependency = PrioritizedTaskPlan['dependencies'][number];
 
@@ -61,6 +67,11 @@ export interface TaskSummary {
   task_text: string;
   document_id: string;
   source?: 'structured_output' | 'embedding';
+  previous_rank?: number | null;
+  previous_confidence?: number | null;
+  previous_state?: 'active' | 'completed' | 'discarded' | 'manual_override' | 'reintroduced';
+  removal_reason?: string | null;
+  manual_override?: boolean;
 }
 
 export interface AgentRuntimeContext {
@@ -71,6 +82,15 @@ export interface AgentRuntimeContext {
     task_count: number;
     document_count: number;
     reflection_count: number;
+    has_previous_plan: boolean;
+  };
+  history?: {
+    previous_plan?: {
+      ordered_task_ids: string[];
+      confidence_scores: Record<string, number>;
+      task_annotations: TaskAnnotation[];
+      removed_tasks: TaskRemoval[];
+    };
   };
 }
 

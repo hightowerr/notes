@@ -7,16 +7,21 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-type RouteParams = {
-  sessionId: string;
-};
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const outcomeId = url.searchParams.get('outcomeId');
+  const userId = url.searchParams.get('userId');
 
-export async function GET(_: Request, { params }: { params: Promise<RouteParams> }) {
-  const { sessionId } = await params;
-
-  if (!sessionId) {
+  if (!outcomeId) {
     return NextResponse.json(
-      { error: 'VALIDATION_ERROR', message: 'sessionId is required' },
+      { error: 'VALIDATION_ERROR', message: 'outcomeId is required' },
+      { status: 400 }
+    );
+  }
+
+  if (!userId) {
+    return NextResponse.json(
+      { error: 'VALIDATION_ERROR', message: 'userId is required' },
       { status: 400 }
     );
   }
@@ -25,20 +30,24 @@ export async function GET(_: Request, { params }: { params: Promise<RouteParams>
     const { data: session, error } = await supabase
       .from('agent_sessions')
       .select('*')
-      .eq('id', sessionId)
+      .eq('user_id', userId)
+      .eq('outcome_id', outcomeId)
+      .eq('status', 'completed')
+      .order('created_at', { ascending: false })
+      .limit(1)
       .maybeSingle();
 
     if (error) {
-      console.error('[Agent Session API] Failed to fetch session:', error);
+      console.error('[Agent Latest Session API] Failed to fetch session:', error);
       return NextResponse.json(
-        { error: 'DATABASE_ERROR', message: 'Failed to fetch agent session' },
+        { error: 'DATABASE_ERROR', message: 'Failed to fetch latest agent session' },
         { status: 500 }
       );
     }
 
     if (!session) {
       return NextResponse.json(
-        { error: 'NOT_FOUND', message: 'Session not found' },
+        { error: 'NOT_FOUND', message: 'No completed session found' },
         { status: 404 }
       );
     }
@@ -57,7 +66,7 @@ export async function GET(_: Request, { params }: { params: Promise<RouteParams>
           try {
             prioritizedPlan = JSON.parse(candidate);
           } catch (error) {
-            console.error('[Agent Session API] Failed to parse trimmed prioritized plan', error);
+            console.error('[Agent Latest Session API] Failed to parse trimmed prioritized plan', error);
           }
         }
       }
@@ -71,14 +80,13 @@ export async function GET(_: Request, { params }: { params: Promise<RouteParams>
     return NextResponse.json(
       {
         session: sanitizedSession,
-        trace: null,
       },
       { status: 200 }
     );
   } catch (err) {
-    console.error('[Agent Session API] Unexpected error:', err);
+    console.error('[Agent Latest Session API] Unexpected error:', err);
     return NextResponse.json(
-      { error: 'INTERNAL_ERROR', message: 'Unexpected error fetching session' },
+      { error: 'INTERNAL_ERROR', message: 'Unexpected error fetching latest session' },
       { status: 500 }
     );
   }

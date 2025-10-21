@@ -1,4 +1,4 @@
-# Mobile Responsiveness Review Report
+ Mobile Responsiveness Review Report
 **AI Note Synthesiser Application**
 
 **Date:** 2025-10-16

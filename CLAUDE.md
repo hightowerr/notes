@@ -17,6 +17,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Testing requirements
 - Known issues & workarounds
 
+## Quick Start (First 5 Minutes)
+
+**Get running immediately:**
+
+1. **Check Node version**: `node --version` (requires 20+, run `nvm use` to switch)
+2. **Install dependencies**: `pnpm install` (this project uses pnpm, not npm)
+3. **Copy environment template**: `cp .env.local.example .env.local` (if exists) or create `.env.local`
+4. **Add required keys to `.env.local`**:
+   ```env
+   NEXT_PUBLIC_SUPABASE_URL=https://emgvqqqqdbfpjwbouybj.supabase.co
+   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_key_here
+   OPENAI_API_KEY=sk-proj-...
+   ```
+5. **Start dev server**: `pnpm dev`
+6. **Open browser**: http://localhost:3000
+
+**Before making changes**, read the [Design Principles](#design-principles-system_rulesmd) section below - this project requires vertical slice development.
+
 ## Project Overview
 
 **AI Note Synthesiser** — An autonomous agent that detects uploaded note files, converts them to Markdown, summarizes content, and extracts structured data without manual intervention.
@@ -31,31 +49,41 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
-### Core Commands
-- `npm run dev` - Start development server (http://localhost:3000)
-- `npm run build` - Build for production
-- `npm run start` - Start production server
-- `npm run lint` - Run ESLint
+**Important:** This project uses **pnpm** as the package manager. Use `pnpm` instead of `npm` for all commands.
 
-**Important:** Use Node.js 20+ (check `.nvmrc`). Run `nvm use` before starting development.
+### Core Commands
+- `pnpm dev` - Start development server (http://localhost:3000)
+- `pnpm build` - Build for production
+- `pnpm start` - Start production server
+- `pnpm lint` - Run ESLint
+
+**Important:** Use Node.js 20 (check `.nvmrc`). Run `nvm use` before starting development.
 
 ### Testing Commands
-- `npm run test` - Run tests in watch mode
-- `npm run test:ui` - Run tests with Vitest UI
-- `npm run test:run` - Run tests once (CI mode)
-- `npm run test:run -- <file>` - Run specific test file
-- `npm run test:unit` - Run unit tests only
-- `npm run test:contract` - Run contract tests only
-- `npm run test:integration` - Run integration tests only
+- `pnpm test` - Run tests in watch mode
+- `pnpm test:ui` - Run tests with Vitest UI
+- `pnpm test:run` - Run tests once (CI mode)
+- `pnpm test:run -- <file>` - Run specific test file
+- `pnpm test:unit` - Run unit tests only (filter pattern: `__tests__/unit/**`)
+- `pnpm test:contract` - Run contract tests only (filter pattern: `__tests__/contract/**`)
+- `pnpm test:integration` - Run integration tests only (filter pattern: `__tests__/integration/**`)
 
-**Note:** 27/44 automated tests passing (61% pass rate). Blockers: FormData serialization in test environment, test isolation timing. Use manual testing guides (`T002_MANUAL_TEST.md`, etc.) for upload/processing validation.
+**Current Test Status:**
+- **Overall**: 27/44 tests passing (61% pass rate)
+- **What's Reliable**: Component tests, database tests, schema validation, service logic
+- **What's Blocked**: Upload API contract tests (FormData serialization issue in test environment)
+- **What's Flaky**: 2 cleanup integration tests (async timing issues)
+- **Workaround**: Use manual testing guides (`T002_MANUAL_TEST.md`, `T004_MANUAL_TEST.md`, etc.) for comprehensive validation of blocked features
+- **Root Cause**: Incompatibility between undici's FormData implementation and Next.js API route handlers in Vitest
+- **Action Required**: Manual testing for upload flows until test environment issue resolved
 
 ### Utility Scripts
 - `npx tsx scripts/test-mastra.ts` - Validate Mastra tool registry and telemetry setup
 - `npx tsx scripts/run-semantic-search.ts` - Test semantic search functionality manually
 - `bash scripts/test-search-endpoint.sh` - Quick test of embedding search API endpoint
-- `node scripts/clear-database.sql` - Database cleanup script (use with caution)
 - `node scripts/patch-pdf-parse.js` - Fix pdf-parse debug mode (runs automatically via postinstall)
+
+**Note**: Do NOT run `node scripts/clear-database.sql` directly - this is a SQL file, not a Node script. Run it through Supabase Dashboard SQL Editor.
 
 ### Workflow Commands (.specify/)
 - `/plan` - Create implementation plan from feature spec
@@ -636,10 +664,11 @@ OPENAI_API_KEY=sk-proj-...
 - `007_enable_pgvector.sql` - Enable pgvector extension for vector embeddings (T020)
 - `008_create_task_embeddings.sql` - task_embeddings table with IVFFlat index (T020)
 - `009_create_search_function.sql` - search_similar_tasks() RPC function (T020)
+- `010_create_task_relationships.sql` - task_relationships table for dependency tracking (Phase 2)
 
-Apply migrations manually via Supabase Dashboard → SQL Editor (run `npm run db:migrate` if configured)
+**Applying Migrations**: Migrations must be applied manually via Supabase Dashboard → SQL Editor. Copy the SQL from the migration file and execute in the SQL Editor. There is no automated migration command in this project.
 
-**⚠️ IMPORTANT:** After applying migration 003, restart the dev server for queue management to work correctly.
+**⚠️ IMPORTANT:** After applying migration 003, restart the dev server (`pnpm dev`) for queue management to work correctly.
 
 ## Design Principles (SYSTEM_RULES.md)
 
@@ -850,13 +879,18 @@ __tests__/
 ├── setup.ts                           # Test environment setup
 ├── contract/
 │   ├── upload.test.ts                 # Upload API contract tests
-│   └── process.test.ts                # Processing API contract tests
+│   ├── process.test.ts                # Processing API contract tests
+│   ├── mastra-tools.test.ts           # Mastra tool validation
+│   └── ...
 ├── integration/
 │   ├── upload-flow.test.ts            # Upload user journey
 │   ├── summary-flow.test.ts           # Summary display journey
-│   └── cleanup.test.ts                # Cleanup service tests (T006)
+│   ├── cleanup.test.ts                # Cleanup service tests (T006)
+│   ├── tool-execution.test.ts         # Mastra tool execution
+│   └── ...
 └── app/components/__tests__/
-    └── SummaryPanel.test.tsx          # Component tests
+    ├── SummaryPanel.test.tsx          # Component tests
+    └── ...
 ```
 
 ## Edge Cases & Error Handling
@@ -953,7 +987,7 @@ setTimeout(() => { const values = form.getValues(); }, 0);
 
 ### pdf-parse Library
 - **Issue:** Debug mode causes test file errors
-- **Fix:** Automatic patch via `npm install` postinstall hook
+- **Fix:** Automatic patch via `pnpm install` postinstall hook
 - **Verify:** Check `node_modules/.pnpm/pdf-parse@1.1.1/node_modules/pdf-parse/index.js` has `isDebugMode = false`
 
 ### FormData Testing
@@ -962,7 +996,7 @@ setTimeout(() => { const values = form.getValues(); }, 0);
 - **Status:** 27/44 tests passing (61% pass rate)
 
 ### Node.js Version
-- **Required:** Node.js 20+ (check `.nvmrc`)
+- **Required:** Node.js 20 (check `.nvmrc`)
 - **Command:** `nvm use` before development
 
 ### AI Hallucination (RESOLVED)
