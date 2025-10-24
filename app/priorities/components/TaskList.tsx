@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
 
 import { supabase } from '@/lib/supabase';
 import type {
@@ -12,6 +12,7 @@ import type {
   TaskRemoval,
 } from '@/lib/types/agent';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TaskRow } from '@/app/priorities/components/TaskRow';
@@ -61,6 +62,9 @@ type TaskListProps = {
   planVersion: number;
   outcomeId: string | null;
   onDiffSummary?: (summary: { hasChanges: boolean; isInitial: boolean }) => void;
+  onToggleTrace?: () => void;
+  isTraceExpanded?: boolean;
+  stepCount?: number;
 };
 
 const DEFAULT_REMOVAL_REASON =
@@ -183,6 +187,9 @@ export function TaskList({
   planVersion,
   outcomeId,
   onDiffSummary,
+  onToggleTrace,
+  isTraceExpanded = false,
+  stepCount = 0,
 }: TaskListProps) {
   const sanitizedTaskIds = useMemo(() => sanitizePlanOrder(plan), [plan]);
   const taskAnnotations = useMemo<TaskAnnotation[]>(() => plan.task_annotations ?? [], [plan.task_annotations]);
@@ -844,12 +851,29 @@ export function TaskList({
               Work down the list in order. Dependencies are linked inline.
             </p>
           </div>
-          {executionMetadata && (
-            <span className="text-xs text-muted-foreground">
-              {executionMetadata.steps_taken} steps •{' '}
-              {Math.round(executionMetadata.total_time_ms / 100) / 10}s runtime
-            </span>
-          )}
+          <div className="flex flex-wrap items-center gap-3">
+            {executionMetadata && (
+              <span className="text-xs text-muted-foreground">
+                {executionMetadata.steps_taken} steps •{' '}
+                {Math.round(executionMetadata.total_time_ms / 100) / 10}s runtime
+              </span>
+            )}
+            {onToggleTrace && stepCount > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onToggleTrace}
+                className="gap-2"
+              >
+                {isTraceExpanded ? (
+                  <ChevronUp className="h-4 w-4" />
+                ) : (
+                  <ChevronDown className="h-4 w-4" />
+                )}
+                View Reasoning ({stepCount} steps)
+              </Button>
+            )}
+          </div>
         </div>
 
         <p className="text-sm text-muted-foreground">{plan.synthesis_summary}</p>

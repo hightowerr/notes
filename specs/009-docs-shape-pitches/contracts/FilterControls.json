@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FilterControls Component Contract",
+  "description": "Props interface for the FilterControls component that manages trace filtering UI",
+  "type": "object",
+  "required": ["availableTools", "usedTools", "filterState", "onFilterChange"],
+  "properties": {
+    "availableTools": {
+      "type": "array",
+      "description": "Complete list of all Mastra tools in the registry",
+      "items": {
+        "type": "string",
+        "enum": [
+          "semantic-search",
+          "detect-dependencies",
+          "get-document-context",
+          "query-task-graph",
+          "cluster-by-similarity"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "usedTools": {
+      "type": "array",
+      "description": "Tools actually used in the current trace (for determining disabled state)",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "filterState": {
+      "type": "object",
+      "description": "Current filter selections",
+      "required": ["toolType", "statusFilters", "showOnlyFailed"],
+      "properties": {
+        "toolType": {
+          "type": "string",
+          "description": "Selected tool name or 'all' for no tool filter",
+          "default": "all"
+        },
+        "statusFilters": {
+          "type": "object",
+          "description": "Which status types to show",
+          "required": ["success", "failed", "skipped"],
+          "properties": {
+            "success": { "type": "boolean", "default": true },
+            "failed": { "type": "boolean", "default": true },
+            "skipped": { "type": "boolean", "default": true }
+          }
+        },
+        "showOnlyFailed": {
+          "type": "boolean",
+          "description": "Quick toggle to show only failed steps (overrides statusFilters)",
+          "default": false
+        }
+      }
+    },
+    "onFilterChange": {
+      "description": "Callback invoked when any filter changes. Receives partial FilterState update.",
+      "type": "function",
+      "signature": "(updates: Partial<FilterState>) => void"
+    }
+  },
+  "example": {
+    "availableTools": [
+      "semantic-search",
+      "detect-dependencies",
+      "get-document-context",
+      "query-task-graph",
+      "cluster-by-similarity"
+    ],
+    "usedTools": ["semantic-search", "detect-dependencies"],
+    "filterState": {
+      "toolType": "all",
+      "statusFilters": { "success": true, "failed": true, "skipped": true },
+      "showOnlyFailed": false
+    },
+    "onFilterChange": "function(updates) { setFilterState(prev => ({ ...prev, ...updates })) }"
+  },
+  "acceptance_criteria": [
+    "Tool dropdown shows all available tools with disabled state for unused ones",
+    "Status checkboxes are checked/unchecked based on filterState.statusFilters",
+    "Show only failed toggle overrides status checkboxes when enabled",
+    "Filter changes trigger onFilterChange callback with delta updates",
+    "At least one status filter must remain checked (UI enforces constraint)"
+  ]
+}

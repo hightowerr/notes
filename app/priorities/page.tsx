@@ -10,9 +10,12 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { MainNav } from '@/components/main-nav';
 import { TaskList } from '@/app/priorities/components/TaskList';
+import { ReasoningTracePanel } from '@/app/components/ReasoningTracePanel';
 import { prioritizedPlanSchema } from '@/lib/schemas/prioritizedPlanSchema';
 import { executionMetadataSchema } from '@/lib/schemas/executionMetadataSchema';
 import type { ExecutionMetadata, PrioritizedTaskPlan } from '@/lib/types/agent';
+import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
+import { useSessionStorage } from '@/lib/hooks/useSessionStorage';
 
 const DEFAULT_USER_ID = 'default-user';
 const POLL_INTERVAL_MS = 2000;
@@ -50,6 +53,11 @@ export default function TaskPrioritiesPage() {
   const [planVersion, setPlanVersion] = useState(0);
   const [planStatusMessage, setPlanStatusMessage] = useState<string | null>(null);
   const [hasFetchedInitialPlan, setHasFetchedInitialPlan] = useState(false);
+
+  // T005: Reasoning trace discoverability
+  const [hasSeenTrace, setHasSeenTrace] = useSessionStorage('trace-first-visit', false);
+  const [isTraceCollapsed, setIsTraceCollapsed] = useLocalStorage('reasoning-trace-collapsed', false);
+  const [isTraceExpanded, setIsTraceExpanded] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -328,6 +336,26 @@ export default function TaskPrioritiesPage() {
     };
   }, [activeOutcome, prioritizedPlan, hasFetchedInitialPlan, applySessionResults]);
 
+  // T005: Auto-expand trace on first visit
+  useEffect(() => {
+    if (!hasSeenTrace && prioritizedPlan && currentSessionId && executionMetadata) {
+      const hasSteps = executionMetadata.steps_taken > 0;
+      if (hasSteps && !isTraceCollapsed) {
+        setIsTraceExpanded(true);
+        setHasSeenTrace(true);
+      }
+    }
+  }, [hasSeenTrace, prioritizedPlan, currentSessionId, executionMetadata, isTraceCollapsed, setHasSeenTrace]);
+
+  // T005: Handle manual toggle
+  const handleToggleTrace = useCallback(() => {
+    setIsTraceExpanded(prev => {
+      const nextExpanded = !prev;
+      setIsTraceCollapsed(!nextExpanded);
+      return nextExpanded;
+    });
+  }, [setIsTraceCollapsed]);
+
   return (
     <div className="min-h-screen bg-muted/30">
       <MainNav />
@@ -550,6 +578,9 @@ export default function TaskPrioritiesPage() {
               planVersion={planVersion}
               outcomeId={activeOutcome?.id ?? null}
               onDiffSummary={handleDiffSummary}
+              onToggleTrace={handleToggleTrace}
+              isTraceExpanded={isTraceExpanded}
+              stepCount={executionMetadata?.steps_taken ?? 0}
             />
           </>
         ) : (
@@ -564,6 +595,14 @@ export default function TaskPrioritiesPage() {
               </CardHeader>
             </Card>
           )
+        )}
+
+        {currentSessionId && prioritizedPlan && (
+          <ReasoningTracePanel
+            sessionId={currentSessionId}
+            open={isTraceExpanded}
+            onTraceUnavailable={() => setIsTraceExpanded(false)}
+          />
         )}
       </main>
     </div>

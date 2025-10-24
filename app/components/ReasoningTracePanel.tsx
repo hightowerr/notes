@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { CheckCircle2, CircleDashed, CircleSlash, Loader2 } from 'lucide-react';
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
@@ -13,6 +13,9 @@ import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import type { ReasoningStep, ReasoningTraceRecord } from '@/lib/types/agent';
+import { FilterControls } from './reasoning-trace/FilterControls';
+import { ErrorSummaryBanner } from './reasoning-trace/ErrorSummaryBanner';
+import { ExportButton } from './reasoning-trace/ExportButton';
 
 type ReasoningTracePanelProps = {
   sessionId: string;
@@ -57,7 +60,7 @@ function formatRelativeTimestamp(timestamp?: string): string {
 function formatJson(value: unknown): string {
   try {
     return JSON.stringify(value, null, 2);
-  } catch (error) {
+  } catch {
     return String(value);
   }
 }
@@ -91,6 +94,11 @@ export function ReasoningTracePanel({ sessionId, open, onTraceUnavailable }: Rea
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasFetched, setHasFetched] = useState(false);
+  const [filters, setFilters] = useState({
+    toolType: 'all',
+    statusFilters: { success: true, failed: true, skipped: true },
+    showOnlyFailed: false,
+  });
 
   useEffect(() => {
     setTrace(null);
@@ -149,7 +157,7 @@ export function ReasoningTracePanel({ sessionId, open, onTraceUnavailable }: Rea
     return () => {
       isActive = false;
     };
-  }, [open, sessionId, hasFetched]);
+  }, [open, sessionId, hasFetched, onTraceUnavailable]);
 
   const toolsUsed = useMemo(() => {
     if (!trace) {
@@ -159,17 +167,53 @@ export function ReasoningTracePanel({ sessionId, open, onTraceUnavailable }: Rea
     return Object.entries(trace.tools_used_count ?? {}).sort((a, b) => b[1] - a[1]);
   }, [trace]);
 
+  const availableTools = useMemo(() => toolsUsed.map(([tool]) => tool), [toolsUsed]);
+
+  const filteredSteps = useMemo(() => {
+    if (!trace) return [];
+    return trace.steps.filter(step => {
+      const { toolType, statusFilters, showOnlyFailed } = filters;
+
+      if (showOnlyFailed) {
+        return step.status === 'failed';
+      }
+
+      const statusMatch = statusFilters[step.status];
+      const toolMatch = toolType === 'all' || step.tool_name === toolType;
+
+      return statusMatch && toolMatch;
+    });
+  }, [trace, filters]);
+
+  const failedSteps = useMemo(() => {
+    if (!trace) return [];
+    return trace.steps.filter(step => step.status === 'failed');
+  }, [trace]);
+
+  const handleJumpToFirstFailure = useCallback(() => {
+    const firstFailedStep = failedSteps[0];
+    if (firstFailedStep) {
+      const element = document.getElementById(`step-${firstFailedStep.step_number}`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }, [failedSteps]);
+
   if (!open) {
     return null;
   }
 
   return (
     <Card className="border-border/70 shadow-2layer-md">
-      <CardHeader>
-        <CardTitle>Reasoning Trace</CardTitle>
-        <CardDescription>
-          Step-by-step breakdown of the agent&apos;s decisions, including tool usage and runtime.
-        </CardDescription>
+      <CardHeader className="flex-row items-start justify-between">
+        <div>
+          <CardTitle>Reasoning Trace</CardTitle>
+          <CardDescription>
+            Step-by-step breakdown of the agent&apos;s decisions, including tool usage and runtime.
+          </CardDescription>
+        </div>
+        {trace && <ExportButton sessionId={sessionId} traceData={trace} disabled={trace.steps.length === 0} />}
       </CardHeader>
       <CardContent className="space-y-6">
         {isLoading && (
@@ -202,9 +246,11 @@ export function ReasoningTracePanel({ sessionId, open, onTraceUnavailable }: Rea
 
         {trace && !error && (
           <div className="space-y-6">
+            <ErrorSummaryBanner failedSteps={failedSteps} onJumpToFirstFailure={handleJumpToFirstFailure} />
+
             <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
               <Badge variant="secondary" className="uppercase tracking-wide">
-                {trace.total_steps} steps
+                {filteredSteps.length} of {trace.total_steps} steps shown
               </Badge>
               <span>{formatDurationMs(trace.total_duration_ms)} total runtime</span>
               {trace.created_at && (
@@ -213,6 +259,12 @@ export function ReasoningTracePanel({ sessionId, open, onTraceUnavailable }: Rea
                 </span>
               )}
             </div>
+
+            <FilterControls
+                filterState={filters}
+                onFilterChange={(newFilters) => setFilters(prev => ({...prev, ...newFilters}))}
+                availableTools={availableTools}
+            />
 
             {toolsUsed.length > 0 && (
               <div className="space-y-2">
@@ -232,7 +284,7 @@ export function ReasoningTracePanel({ sessionId, open, onTraceUnavailable }: Rea
 
             <ScrollArea className="max-h-[520px] pr-3">
               <Accordion type="single" collapsible className="divide-y rounded-lg border border-border/70">
-                {trace.steps.map(step => {
+                {filteredSteps.map(step => {
                   const badge = getStatusBadge(step);
                   const StatusIcon = badge.icon;
                   const thoughtText =
@@ -240,10 +292,15 @@ export function ReasoningTracePanel({ sessionId, open, onTraceUnavailable }: Rea
                       ? step.thought.trim()
                       : null;
                   const displayThought = thoughtText ?? 'No thought recorded for this step.';
+                  const isFailed = step.status === 'failed';
 
                   return (
-                    <AccordionItem key={`trace-step-${step.step_number}`} value={`step-${step.step_number}`}>
-                      <AccordionTrigger className="px-4">
+                    <AccordionItem 
+                      key={`trace-step-${step.step_number}`} 
+                      value={`step-${step.step_number}`}
+                      className={cn(isFailed && 'border-destructive/30 bg-destructive/10')}
+                    >
+                      <AccordionTrigger id={`step-${step.step_number}`} className={cn("px-4", isFailed && "hover:bg-destructive/20")}>
                         <div className="flex flex-1 flex-col gap-2 text-sm">
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <div className="flex flex-wrap items-center gap-2 text-foreground">
@@ -252,16 +309,16 @@ export function ReasoningTracePanel({ sessionId, open, onTraceUnavailable }: Rea
                                 {formatDurationMs(step.duration_ms)}
                               </Badge>
                             </div>
-                            <Badge className={cn('gap-1', badge.className)} variant="secondary">
+                            <Badge className={cn('gap-1', badge.className, isFailed && 'text-destructive-foreground bg-destructive')} variant="secondary">
                               <StatusIcon className="h-3.5 w-3.5" />
                               {badge.label}
                             </Badge>
                           </div>
 
-                          <p className="text-sm text-muted-foreground">{displayThought}</p>
+                          <p className={cn("text-sm", isFailed ? "text-destructive-foreground/80" : "text-muted-foreground")}>{displayThought}</p>
 
                           {step.tool_name && (
-                            <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                            <span className={cn("text-xs uppercase tracking-wide", isFailed ? "text-destructive-foreground/70" : "text-muted-foreground")}>
                               Tool: {step.tool_name}
                             </span>
                           )}
@@ -283,7 +340,7 @@ export function ReasoningTracePanel({ sessionId, open, onTraceUnavailable }: Rea
                             <span>Recorded at: {new Date(step.timestamp).toLocaleString()}</span>
                           </div>
 
-                          {step.status === 'failed' && (step.tool_output === undefined || step.tool_output === null) && (
+                          {isFailed && (step.tool_output === undefined || step.tool_output === null) && (
                             <p className="rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                               No output captured because the tool failed.
                             </p>

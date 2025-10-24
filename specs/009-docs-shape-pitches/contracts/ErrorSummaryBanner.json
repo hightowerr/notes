@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ErrorSummaryBanner Component Contract",
+  "description": "Props interface for the ErrorSummaryBanner component that displays trace failure summary",
+  "type": "object",
+  "required": ["failedSteps", "onJumpToFailure"],
+  "properties": {
+    "failedSteps": {
+      "type": "array",
+      "description": "Array of failed reasoning steps with details",
+      "items": {
+        "type": "object",
+        "required": ["step_number", "tool_name", "error_message"],
+        "properties": {
+          "step_number": {
+            "type": "integer",
+            "description": "Original step number in trace (1-based)",
+            "minimum": 1
+          },
+          "tool_name": {
+            "type": "string",
+            "description": "Name of the tool that failed"
+          },
+          "error_message": {
+            "type": "string",
+            "description": "Error message explaining what went wrong"
+          }
+        }
+      }
+    },
+    "onJumpToFailure": {
+      "description": "Callback invoked when user clicks the jump-to-failure link. Receives step number to scroll to.",
+      "type": "function",
+      "signature": "(stepNumber: number) => void"
+    }
+  },
+  "behavior": {
+    "visibility": "Only render when failedSteps.length > 0",
+    "styling": {
+      "background": "var(--destructive-bg)",
+      "border": "1px solid var(--destructive-hover)",
+      "text": "var(--destructive-text)",
+      "icon": "⚠️ warning symbol"
+    },
+    "message_format": "{count} step{s} failed: {tool_names}",
+    "examples": [
+      "2 steps failed: detect-dependencies, semantic-search",
+      "1 step failed: query-task-graph"
+    ]
+  },
+  "example": {
+    "failedSteps": [
+      {
+        "step_number": 3,
+        "tool_name": "detect-dependencies",
+        "error_message": "Failed to parse task relationships from outcome"
+      },
+      {
+        "step_number": 7,
+        "tool_name": "semantic-search",
+        "error_message": "Embedding service timeout after 10s"
+      }
+    ],
+    "onJumpToFailure": "function(stepNumber) { document.getElementById(`step-${stepNumber}`).scrollIntoView({ behavior: 'smooth' }) }"
+  },
+  "acceptance_criteria": [
+    "Banner only visible when at least one step has status === 'failed'",
+    "Message lists count of failed steps and tool names (comma-separated)",
+    "Click on 'Jump to first failure' scrolls to first failed step in trace",
+    "Banner uses destructive color scheme (red border, red background, white text)",
+    "Banner appears at top of trace panel above step list"
+  ]
+}
