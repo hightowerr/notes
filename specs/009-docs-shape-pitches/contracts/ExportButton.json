@@ -1,0 +1,126 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExportButton Component Contract",
+  "description": "Props interface for the ExportButton component that handles trace export with clipboard fallback",
+  "type": "object",
+  "required": ["sessionId", "traceData", "executionMetadata"],
+  "properties": {
+    "sessionId": {
+      "type": "string",
+      "description": "UUID of the agent session",
+      "format": "uuid",
+      "example": "550e8400-e29b-41d4-a716-446655440000"
+    },
+    "traceData": {
+      "type": "array",
+      "description": "Complete array of reasoning steps to export",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "session_id",
+          "step_number",
+          "tool_name",
+          "status",
+          "input",
+          "output",
+          "error_message",
+          "duration_ms",
+          "created_at"
+        ],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "session_id": { "type": "string", "format": "uuid" },
+          "step_number": { "type": "integer", "minimum": 1 },
+          "tool_name": { "type": "string" },
+          "status": { "type": "string", "enum": ["success", "failed", "skipped"] },
+          "input": { "type": "object" },
+          "output": { "type": ["object", "null"] },
+          "error_message": { "type": ["string", "null"] },
+          "duration_ms": { "type": "number" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "minItems": 1
+    },
+    "executionMetadata": {
+      "type": "object",
+      "description": "Session-level metadata for export context",
+      "required": ["started_at", "total_steps", "failed_steps", "tools_used"],
+      "properties": {
+        "started_at": { "type": "string", "format": "date-time" },
+        "completed_at": { "type": ["string", "null"], "format": "date-time" },
+        "total_steps": { "type": "integer", "minimum": 0 },
+        "failed_steps": { "type": "integer", "minimum": 0 },
+        "tools_used": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "disabled": {
+      "type": "boolean",
+      "description": "Whether button is disabled (e.g., when traceData is empty)",
+      "default": false
+    }
+  },
+  "export_structure": {
+    "description": "JSON structure of exported file",
+    "schema": {
+      "session_id": "string (UUID)",
+      "exported_at": "string (ISO 8601 timestamp)",
+      "execution_metadata": "object (from props)",
+      "steps": "array (from traceData prop)"
+    },
+    "filename_pattern": "reasoning-trace-{sessionId}-{timestamp}.json",
+    "example_filename": "reasoning-trace-550e8400-e29b-41d4-a716-446655440000-1698765432000.json"
+  },
+  "behavior": {
+    "export_flow": [
+      "1. User clicks Export button",
+      "2. Build ExportPayload from props",
+      "3. Try: Create Blob → URL.createObjectURL → trigger download",
+      "4. Catch: Fallback to navigator.clipboard.writeText(json)",
+      "5. Show toast notification (success or clipboard fallback)"
+    ],
+    "toast_messages": {
+      "success": "Trace exported successfully",
+      "clipboard_fallback": "Export failed, trace copied to clipboard",
+      "error": "Failed to export trace (copied to clipboard failed)"
+    }
+  },
+  "example": {
+    "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+    "traceData": [
+      {
+        "id": "abc123",
+        "session_id": "550e8400-e29b-41d4-a716-446655440000",
+        "step_number": 1,
+        "tool_name": "semantic-search",
+        "status": "success",
+        "input": { "query": "find related tasks", "limit": 10 },
+        "output": { "results": [] },
+        "error_message": null,
+        "duration_ms": 245,
+        "created_at": "2025-10-23T12:34:56Z"
+      }
+    ],
+    "executionMetadata": {
+      "started_at": "2025-10-23T12:34:00Z",
+      "completed_at": "2025-10-23T12:35:00Z",
+      "total_steps": 10,
+      "failed_steps": 2,
+      "tools_used": ["semantic-search", "detect-dependencies"]
+    },
+    "disabled": false
+  },
+  "acceptance_criteria": [
+    "Button triggers file download with correct filename pattern",
+    "Exported JSON includes session_id, exported_at, execution_metadata, and complete steps array",
+    "If download fails, automatically copies JSON to clipboard without manual intervention",
+    "Toast notification shows appropriate message (success vs clipboard fallback)",
+    "Export completes in <500ms for typical traces (10-20 steps)",
+    "Button is disabled when traceData is empty (0 steps)"
+  ]
+}

@@ -34,7 +34,8 @@
       "Bash(npx tsx:*)",
       "Bash(npm run test:contract:*)",
       "Bash(npx vitest run:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(bash:*)"
     ],
     "deny": [],
     "ask": []

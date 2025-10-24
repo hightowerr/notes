@@ -1,489 +1,290 @@
-# Shape Up Pitch: Phase 4 - Integration & UI (Mastra)
+# Shape Up Pitch: Phase 4 - Reasoning Trace Enhancements
 
 ## Problem
 
-**The agent works but users can't see it working—no visibility into reasoning, no way to understand why tasks were prioritized.**
+**Reasoning trace exists but could be more discoverable and actionable.**
 
 Current state:
-- ✅ Agent can reason and execute tools (Phase 3)
-- ✅ Agent produces prioritized task lists
-- ❌ No UI to show reasoning trace
-- ❌ No way to visualize dependencies
-- ❌ No integration with existing recompute service
-- ❌ Users see results but not HOW agent got there
+- ✅ Agent integration complete (`/api/agent/prioritize`)
+- ✅ Reasoning trace panel built and functional
+- ✅ Task list with movement indicators working
+- ✅ Mastra telemetry storing all traces
+- ✅ API endpoints operational (`/api/agent/sessions/*`)
+- ❓ Trace collapsed by default - users may not discover it
+- ❓ No filtering or search within reasoning steps
+- ❓ Failed steps could be more prominent
 
-**Trust issue:** Users won't trust AI-generated priorities if they can't see the reasoning. "Why is Task A before Task B?"
+**Opportunity:** Small UX improvements to increase trace visibility and utility without rebuilding what already works.
 
 ---
 
 ## Solution
 
-**Integrate Mastra agent into recompute service and build UI using Mastra's telemetry API.**
+**Minor enhancements to existing ReasoningTracePanel for better discoverability and debugging.**
 
-### Appetite: 1 week (5 working days)
+### Appetite: 2-3 days (reduced from original 1 week estimate)
 
-### Breadboard Sketch
+### What's Already Built (No Work Needed)
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│              INTEGRATION FLOW (MASTRA)                      │
-│                                                             │
-│  User changes outcome                                       │
-│    ↓                                                         │
-│  recomputeService.ts triggers                               │
-│    ↓                                                         │
-│  ✨ Call Mastra: orchestrateTaskPriorities()                │
-│    ↓                                                         │
-│  Agent executes tools, builds plan                          │
-│    ↓                                                         │
-│  Mastra stores reasoning trace automatically                │
-│    ↓                                                         │
-│  Return execution ID to frontend                            │
-│    ↓                                                         │
-│  ✨ UI fetches trace via Mastra API                         │
-│    ↓                                                         │
-│  ✨ Visualize reasoning + dependency graph                  │
-└─────────────────────────────────────────────────────────────┘
+The following components are **production-ready**:
 
-┌─────────────────────────────────────────────────────────────┐
-│              UI COMPONENTS (NEW)                            │
-│                                                             │
-│  1. ReasoningTracePanel.tsx                                 │
-│     - Fetch trace from Mastra API                           │
-│     - Display: Thought → Tool → Result                      │
-│     - Collapsible accordion (dev mode)                      │
-│                                                             │
-│  2. DependencyGraphVisualization.tsx                        │
-│     - D3.js force-directed graph                            │
-│     - Extract dependencies from tool outputs                │
-│     - Color-coded edges: prerequisite/blocks/related        │
-│                                                             │
-│  3. ExecutionWavesTimeline.tsx                              │
-│     - Topologically sorted task waves                       │
-│     - Parallel vs sequential execution                      │
-│     - Estimated duration per wave                           │
-└─────────────────────────────────────────────────────────────┘
-```
+✅ **Agent Orchestration**: `lib/mastra/services/agentOrchestration.ts`
+- Complete integration with Mastra agent
+- Context assembly (outcome, reflections, tasks, previous plans)
+- Graceful failure handling with fallback plans
+- Execution metadata tracking
 
-### Integration with Recompute Service
+✅ **API Endpoints**: All functional and tested
+- `POST /api/agent/prioritize` - Trigger prioritization
+- `GET /api/agent/sessions/[sessionId]` - Get session details
+- `GET /api/agent/sessions/[sessionId]/trace` - Get reasoning trace
+- `GET /api/agent/sessions/latest` - Get latest session for outcome
 
-**Update `lib/services/recomputeService.ts`:**
-```typescript
-import { orchestrateTaskPriorities } from '@/lib/mastra/services/agentOrchestration';
+✅ **Reasoning Trace Panel**: `app/components/ReasoningTracePanel.tsx`
+- Step-by-step breakdown with accordion UI
+- Tool usage summary with counts
+- Status badges (success/failed/skipped)
+- Duration tracking per step
+- Collapsible tool input/output display
 
-export async function recomputeTaskPriorities(
-  outcomeId: string,
-  userId: string = 'anonymous-user-p0'
-): Promise<{ executionId: string }> {
-  console.log('[RecomputeService] Starting Mastra agent orchestration...');
+✅ **Priorities Page**: `app/priorities/page.tsx`
+- Complete workflow (trigger → poll → display results)
+- Task list with prioritization and movement indicators
+- Recalculation support with diff visualization
+- Error handling and loading states
 
-  try {
-    // Fetch initial context
-    const context = await fetchTaskOrchestrationContext(userId);
-
-    if (!context.outcome) {
-      console.log('[RecomputeService] No active outcome, skipping');
-      return { executionId: '' };
-    }
-
-    // ✨ Run Mastra agent
-    const result = await orchestrateTaskPriorities(context);
-
-    // Store results in your database
-    await persistAgentResults(result);
-
-    console.log('[RecomputeService] Orchestration complete:', {
-      execution_id: result.session_id,
-      steps_taken: result.metadata.steps_taken,
-      tasks_prioritized: result.prioritized_tasks.length,
-    });
-
-    return { executionId: result.session_id };
-
-  } catch (error) {
-    console.error('[RecomputeService] Mastra agent failed:', error);
-    throw error;
-  }
-}
-```
-
-### Mastra Telemetry API Endpoints
-
-**Create Next.js API routes for Mastra telemetry:**
-
-**Endpoint 1: Get Execution Trace**
-```typescript
-// app/api/agent/executions/[executionId]/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import { taskOrchestratorAgent } from '@/lib/mastra/agents/taskOrchestrator';
-
-export async function GET(
-  request: NextRequest,
-  { params }: { params: { executionId: string } }
-) {
-  try {
-    // Fetch execution trace from Mastra
-    const trace = await taskOrchestratorAgent.getExecutionTrace(params.executionId);
-
-    return NextResponse.json({
-      execution_id: trace.executionId,
-      status: trace.status,
-      duration_ms: trace.durationMs,
-      steps: trace.steps.map(step => ({
-        step_number: step.stepNumber,
-        thought: step.content, // Agent's reasoning
-        tool: step.toolName || null,
-        tool_input: step.toolInput,
-        tool_output: step.toolOutput,
-        duration_ms: step.durationMs,
-        timestamp: step.timestamp,
-      })),
-      metadata: {
-        steps_taken: trace.steps.length,
-        tools_used: trace.steps.filter(s => s.toolName).length,
-      },
-    });
-
-  } catch (error) {
-    console.error('[API] Failed to fetch execution trace:', error);
-    return NextResponse.json(
-      { error: 'Execution not found' },
-      { status: 404 }
-    );
-  }
-}
-```
-
-**Endpoint 2: Get All Executions (Optional)**
-```typescript
-// app/api/agent/executions/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import { mastra } from '@/lib/mastra';
-
-export async function GET(request: NextRequest) {
-  try {
-    // Fetch recent executions from Mastra
-    const executions = await mastra.listExecutions({
-      agentName: 'Task Orchestrator',
-      limit: 20,
-      orderBy: 'created_at',
-    });
-
-    return NextResponse.json({
-      executions: executions.map(exec => ({
-        execution_id: exec.executionId,
-        status: exec.status,
-        created_at: exec.createdAt,
-        duration_ms: exec.durationMs,
-        steps_count: exec.stepsCount,
-      })),
-    });
-
-  } catch (error) {
-    console.error('[API] Failed to list executions:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch executions' },
-      { status: 500 }
-    );
-  }
-}
-```
-
-### UI Components
-
-**Component 1: `ReasoningTracePanel.tsx`**
-```typescript
-// app/components/ReasoningTracePanel.tsx
-import { useState, useEffect } from 'react';
-import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
-import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
-import { Badge } from '@/components/ui/badge';
-import { Code } from 'lucide-react';
-
-interface ReasoningTracePanelProps {
-  executionId: string;
-}
-
-export function ReasoningTracePanel({ executionId }: ReasoningTracePanelProps) {
-  const [trace, setTrace] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function fetchTrace() {
-      try {
-        const response = await fetch(`/api/agent/executions/${executionId}`);
-        const data = await response.json();
-        setTrace(data);
-      } catch (error) {
-        console.error('Failed to fetch reasoning trace:', error);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    if (executionId) {
-      fetchTrace();
-    }
-  }, [executionId]);
-
-  if (loading) return <div>Loading reasoning trace...</div>;
-  if (!trace) return null;
-
-  return (
-    <Accordion type="single" collapsible className="w-full">
-      <AccordionItem value="reasoning-trace">
-        <AccordionTrigger>
-          <div className="flex items-center gap-2">
-            <Code className="h-4 w-4" />
-            <span>Reasoning Trace ({trace.steps.length} steps)</span>
-            <Badge variant="outline">Dev Mode</Badge>
-            <Badge variant="secondary">{trace.duration_ms}ms</Badge>
-          </div>
-        </AccordionTrigger>
-        <AccordionContent>
-          <div className="space-y-4">
-            {trace.steps.map((step: any, i: number) => (
-              <Card key={i} className="bg-bg-layer-3">
-                <CardHeader>
-                  <CardTitle className="text-sm">
-                    Step {step.step_number}
-                    {step.tool && (
-                      <Badge className="ml-2" variant="outline">
-                        {step.tool}
-                      </Badge>
-                    )}
-                  </CardTitle>
-                  <CardDescription className="text-xs text-text-muted">
-                    {step.duration_ms}ms
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-2 text-xs">
-                  {/* Agent's thought process */}
-                  <div>
-                    <span className="font-semibold">Thought:</span>
-                    <p className="text-text-muted mt-1">{step.thought}</p>
-                  </div>
-
-                  {/* Tool input/output if tool was used */}
-                  {step.tool && (
-                    <>
-                      <div>
-                        <span className="font-semibold">Input:</span>
-                        <pre className="bg-bg-layer-1 p-2 rounded mt-1 overflow-x-auto">
-                          {JSON.stringify(step.tool_input, null, 2)}
-                        </pre>
-                      </div>
-                      <div>
-                        <span className="font-semibold">Output:</span>
-                        <pre className="bg-bg-layer-1 p-2 rounded mt-1 overflow-x-auto max-h-40">
-                          {JSON.stringify(step.tool_output, null, 2).substring(0, 500)}
-                          {JSON.stringify(step.tool_output).length > 500 && '...'}
-                        </pre>
-                      </div>
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </AccordionContent>
-      </AccordionItem>
-    </Accordion>
-  );
-}
-```
-
-**Component 2: `DependencyGraphVisualization.tsx`**
-```typescript
-// app/components/DependencyGraphVisualization.tsx
-import { useEffect, useRef } from 'react';
-import * as d3 from 'd3';
-
-interface DependencyGraphProps {
-  executionId: string;
-}
-
-export function DependencyGraphVisualization({ executionId }: DependencyGraphProps) {
-  const svgRef = useRef<SVGSVGElement>(null);
-
-  useEffect(() => {
-    async function fetchAndRender() {
-      if (!svgRef.current) return;
-
-      // Fetch execution trace
-      const response = await fetch(`/api/agent/executions/${executionId}`);
-      const data = await response.json();
-
-      // Extract dependencies from detect-dependencies tool calls
-      const dependencySteps = data.steps.filter(
-        (s: any) => s.tool === 'detect-dependencies'
-      );
-
-      const allDependencies = [];
-      const taskMap = new Map();
-
-      for (const step of dependencySteps) {
-        if (step.tool_output?.dependencies) {
-          allDependencies.push(...step.tool_output.dependencies);
-        }
-      }
-
-      // Build graph data
-      const nodes = Array.from(
-        new Set(
-          allDependencies.flatMap((d: any) => [d.source_task_id, d.target_task_id])
-        )
-      ).map(id => ({ id, label: id.substring(0, 8) }));
-
-      const links = allDependencies.map((d: any) => ({
-        source: d.source_task_id,
-        target: d.target_task_id,
-        type: d.relationship_type,
-      }));
-
-      // Render D3 graph
-      const width = 800;
-      const height = 600;
-
-      const simulation = d3.forceSimulation(nodes)
-        .force('link', d3.forceLink(links).id((d: any) => d.id))
-        .force('charge', d3.forceManyBody().strength(-200))
-        .force('center', d3.forceCenter(width / 2, height / 2));
-
-      const svg = d3.select(svgRef.current);
-      svg.selectAll('*').remove(); // Clear previous
-
-      const link = svg.append('g')
-        .selectAll('line')
-        .data(links)
-        .enter().append('line')
-        .attr('stroke', (d: any) => {
-          if (d.type === 'prerequisite') return '#3b82f6'; // blue
-          if (d.type === 'blocks') return '#ef4444'; // red
-          return '#6b7280'; // gray
-        })
-        .attr('stroke-width', 2);
-
-      const node = svg.append('g')
-        .selectAll('circle')
-        .data(nodes)
-        .enter().append('circle')
-        .attr('r', 10)
-        .attr('fill', '#4f46e5');
-
-      simulation.on('tick', () => {
-        link
-          .attr('x1', (d: any) => d.source.x)
-          .attr('y1', (d: any) => d.source.y)
-          .attr('x2', (d: any) => d.target.x)
-          .attr('y2', (d: any) => d.target.y);
-
-        node
-          .attr('cx', (d: any) => d.x)
-          .attr('cy', (d: any) => d.y);
-      });
-    }
-
-    if (executionId) {
-      fetchAndRender();
-    }
-  }, [executionId]);
-
-  return (
-    <div className="border rounded-lg p-4">
-      <h3 className="text-sm font-semibold mb-2">Task Dependencies</h3>
-      <p className="text-xs text-text-muted mb-4">
-        Blue = prerequisite, Red = blocks, Gray = related
-      </p>
-      <svg ref={svgRef} width={800} height={600} />
-    </div>
-  );
-}
-```
-
-**Component 3: `ExecutionWavesTimeline.tsx`** (unchanged from original, reuses same logic)
+✅ **Database Schema**: `reasoning_traces` table
+- Stores all reasoning steps with 7-day retention
+- Automatic cleanup via trigger
+- Efficient querying by session_id
 
 ---
 
-## Rabbit Holes
+## Scope (What's Left to Build)
 
-**1. Building custom Mastra UI**
-- **Risk:** Building visual workflow editor or agent playground
-- **Timebox:** Use Mastra's built-in telemetry API only.
-- **Why:** Mastra provides observability out-of-the-box. Custom UI is Phase 6+.
+### 1. Improve Trace Discoverability
 
-**2. Real-time streaming updates**
-- **Risk:** Building WebSocket infrastructure for live progress
-- **Timebox:** Show results after agent completes. No streaming for Phase 4.
-- **Why:** Agent runs <30s. Users can wait for final result.
+**Problem**: Reasoning trace is hidden in collapsed accordion. Users may not know it exists.
 
-**3. Advanced graph layouts**
-- **Risk:** Spending time on hierarchical or circular layouts
-- **Timebox:** Use D3 force-directed layout only.
-- **Why:** Good enough for <100 nodes. Optimize if needed later.
+**Solution**:
+- Add prominent "View Reasoning" button in TaskList header
+- Show trace step count badge (e.g., "12 steps")
+- Auto-expand trace on first visit per session
+- Save collapse/expand preference to localStorage
 
-**4. Agent session history browser**
-- **Risk:** Building UI to browse past executions
-- **Timebox:** Show current execution only. History in Phase 6+.
-- **Why:** Users care about current priorities, not past reasoning.
+**UI Mockup**:
+```
+[TaskList Header]
+  Prioritized Tasks (15)    [View Reasoning (12 steps) ▼]
+```
+
+---
+
+### 2. Add Basic Filtering
+
+**Problem**: Trace with 10+ steps is hard to scan. Users want to focus on failures or specific tools.
+
+**Solution**:
+- Filter by tool type dropdown (All, semantic-search, detect-dependencies, etc.)
+- Filter by status chips (All, Success, Failed, Skipped)
+- Quick toggle: "Show only failed steps"
+
+**UI Mockup**:
+```
+[Reasoning Trace Panel]
+  Filters: [All Tools ▼] [✓ Success] [✓ Failed] [✓ Skipped]
+           [Toggle: Show only failures]
+```
+
+---
+
+### 3. Better Error Highlighting
+
+**Problem**: Failed steps blend in with successful ones. Errors hard to spot.
+
+**Solution**:
+- Failed steps get red border + destructive background
+- Error summary banner at top of trace panel
+- Click error banner to jump to first failed step
+- Show error message inline at step level
+
+**UI Mockup**:
+```
+[Error Banner - Red]
+  ⚠ 2 steps failed: detect-dependencies, semantic-search
+  [Jump to first failure →]
+```
+
+---
+
+### 4. Optional: Export Trace
+
+**Problem**: Users want to save traces for debugging or sharing with support.
+
+**Solution**:
+- "Export as JSON" button in trace panel header
+- Downloads reasoning trace with all step details
+- Filename: `reasoning-trace-{sessionId}-{date}.json`
+
+---
+
+## Files to Modify
+
+**Estimated changes: ~150-200 lines total**
+
+1. `app/components/ReasoningTracePanel.tsx` (~100 lines)
+   - Add filtering state and UI
+   - Add error summary banner
+   - Add export button
+
+2. `app/priorities/components/TaskList.tsx` (~30 lines)
+   - Add "View Reasoning" button in header
+   - Pass trace open/close state to parent
+
+3. `app/priorities/page.tsx` (~20 lines)
+   - Manage trace visibility state
+   - Pass sessionId to trace panel
+
+4. `lib/hooks/useLocalStorage.ts` (~20 lines - new file)
+   - Helper for saving trace collapse preference
+
+---
+
+## Rabbit Holes (Timeboxed)
+
+**1. Advanced filtering**
+- **Risk:** Adding complex query builder or regex search
+- **Timebox:** Basic dropdown + checkboxes only. No search for Phase 4.
+- **Why:** 95% of use cases covered by tool/status filters.
+
+**2. Inline editing of trace**
+- **Risk:** Allowing users to annotate or modify reasoning steps
+- **Timebox:** Read-only display only. No editing.
+- **Why:** Trace is historical record, should not be mutable.
+
+**3. Trace comparison**
+- **Risk:** Building diff view to compare two reasoning traces
+- **Timebox:** Single trace view only. Comparison in Phase 6+.
+- **Why:** Low frequency use case, not worth complexity.
 
 ---
 
 ## No-Gos
 
-**❌ Custom reasoning loop UI**
-- Use Mastra's telemetry. Don't build custom trace storage.
+**❌ Dependency graph visualization (D3.js)**
+- Current inline dependency display in TaskList is sufficient
+- Graph adds complexity without user value
 
-**❌ Agent re-run from UI**
-- Users can't trigger agent manually. Only via outcome changes.
+**❌ Execution waves timeline**
+- Movement indicators already show task reordering
+- Redundant with existing TaskList visualization
 
-**❌ Step-by-step agent execution (debugger)**
-- Agent runs to completion. No pause/step/resume.
+**❌ Real-time streaming updates**
+- Agent runs complete in <30s
+- Polling every 2s works fine
 
 **❌ Agent performance profiling UI**
-- No charts for token usage or tool execution times.
+- No charts for token usage or detailed tool timing
+- Execution metadata already captures key metrics
 
-**❌ Export reasoning trace as PDF**
-- Trace visible in UI only. No export feature.
+**❌ Manual step-by-step agent execution**
+- No debugger or pause/resume controls
+- Agent runs to completion only
+
+**❌ Trace history browser**
+- Show current execution only
+- Historical traces via database queries (future)
 
 ---
 
 ## Success Metrics
 
-**Integration:**
-- Agent runs when user changes outcome (100% success rate)
-- Recompute service completes in <45s
+**Discoverability:**
+- 60%+ of users expand reasoning trace at least once
+- Average time to discover trace: <1 minute from page load
 
-**UI Usability:**
-- Reasoning trace comprehensible to non-technical users
-- Dependency graph renders without lag (<2s)
-- Execution waves show clear task ordering
+**Utility:**
+- Failed step errors surfaced within 5 seconds
+- Users can identify problematic tools without reading full trace
+- Error recovery actions clear from failure messages
 
-**User Trust:**
-- Manual review: 80% of dependency links make sense
-- User survey: "I understand why tasks are prioritized" ≥4.0/5.0
+**Performance:**
+- Filtering applies instantly (<100ms)
+- Export completes in <500ms
+- No UI lag when expanding/collapsing steps
 
-**Deliverables:**
-- ✅ `recomputeService.ts` integrated with Mastra agent
-- ✅ `/api/agent/executions/[executionId]` endpoint functional
-- ✅ `ReasoningTracePanel.tsx` fetches from Mastra API
-- ✅ `DependencyGraphVisualization.tsx` renders D3 graph
-- ✅ `ExecutionWavesTimeline.tsx` shows task sequence
-- ✅ E2E test: User changes outcome → Agent runs → UI updates
+**User Satisfaction:**
+- Manual review: 80% of error messages are actionable
+- Survey: "I understand why prioritization failed" ≥4.0/5.0
 
 ---
 
-## What Changed from Custom Implementation
+## Deliverables
 
-| Feature | Custom (Original) | Mastra (New) |
-|---------|------------------|--------------|
-| Trace Storage | Custom database tables | Mastra telemetry DB |
-| Trace Retrieval | Custom API endpoint | Mastra `getExecutionTrace()` |
-| Agent Session Management | Custom `saveAgentSession()` | Built-in by Mastra |
-| Reasoning Trace Format | Custom `ReasoningStep` | Mastra execution steps |
-| Observability | Custom logging | Built-in telemetry |
-| Time to Build | 4-5 days | 2-3 days |
+### Must-Have (Day 1-2)
+- ✅ "View Reasoning" button in TaskList header with step count
+- ✅ Filter by tool type (dropdown)
+- ✅ Filter by status (checkboxes)
+- ✅ Failed step error highlighting (red border + background)
 
-**Time Saved:** 40-50% (2-3 days vs 5 days)
+### Nice-to-Have (Day 3)
+- ✅ Error summary banner with "jump to failure" link
+- ✅ Auto-expand trace on first visit (localStorage)
+- ✅ Export trace as JSON button
 
-**Key Benefit:** No need to build custom trace storage or retrieval. Mastra handles everything.
+### Out of Scope (Future Phases)
+- ❌ Dependency graph visualization
+- ❌ Trace comparison/diff view
+- ❌ Real-time streaming progress
+- ❌ Inline step editing or annotations
+- ❌ Historical trace browser
+
+---
+
+## Implementation Notes
+
+**Existing Infrastructure (Reuse):**
+- Trace fetching: `GET /api/agent/sessions/[sessionId]/trace`
+- Trace data type: `ReasoningTraceRecord` (already defined)
+- UI components: ShadCN Accordion, Badge, Alert (already installed)
+
+**New Patterns:**
+- Filtering state: Use React useState, filter client-side (no API changes)
+- localStorage: Wrap in custom hook for SSR safety
+- Export: Use browser `download` attribute, no backend needed
+
+**Testing:**
+- Manual testing only (existing pattern for UI features)
+- Test with traces that have 0, 1, and 10+ failed steps
+- Verify filtering doesn't break step numbering
+
+---
+
+## What Changed from Original Pitch
+
+| Aspect | Original (5 days) | Revised (2-3 days) |
+|--------|-------------------|---------------------|
+| Scope | Full integration + 3 components | Minor enhancements to 1 existing component |
+| Agent Integration | Build from scratch | ✅ Already complete |
+| API Endpoints | Build 2 new endpoints | ✅ Already exist |
+| ReasoningTracePanel | Build new component | ✅ Enhance existing |
+| DependencyGraph | D3.js visualization | ❌ Not needed (inline display works) |
+| ExecutionWaves | Timeline component | ❌ Not needed (movement indicators work) |
+| Effort | ~40 hours | ~16-20 hours |
+
+**Time Saved:** 60% (2-3 days vs 5 days)
+
+**Key Insight:** Phase 4 integration was largely completed during earlier phases. This pitch now focuses on polish and discoverability rather than foundational work.
+
+---
+
+## Next Steps
+
+1. **Validate scope** with user (this document)
+2. **Prototype filtering UI** in ReasoningTracePanel (~2 hours)
+3. **Implement error highlighting** (~3 hours)
+4. **Add "View Reasoning" button** to TaskList (~2 hours)
+5. **Test with real agent runs** (multiple failure scenarios)
+6. **Ship to production** and gather user feedback
+
+**Total estimated effort:** 2-3 days for complete delivery of all enhancements.
