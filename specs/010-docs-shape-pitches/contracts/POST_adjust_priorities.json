@@ -1,0 +1,205 @@
+{
+  "endpoint": "POST /api/agent/adjust-priorities",
+  "description": "Instantly recalculate task priorities based on active reflections without full agent re-run. Target: <500ms (p95).",
+  "request": {
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "type": "object",
+      "required": ["session_id", "active_reflection_ids"],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Agent session ID containing baseline plan"
+        },
+        "active_reflection_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": "Array of reflection IDs currently toggled ON (empty array allowed)"
+        }
+      },
+      "example": {
+        "session_id": "550e8400-e29b-41d4-a716-446655440000",
+        "active_reflection_ids": [
+          "650e8400-e29b-41d4-a716-446655440001",
+          "750e8400-e29b-41d4-a716-446655440002"
+        ]
+      }
+    }
+  },
+  "responses": {
+    "200": {
+      "description": "Adjustment successful",
+      "body": {
+        "type": "object",
+        "required": ["adjusted_plan", "performance"],
+        "properties": {
+          "adjusted_plan": {
+            "type": "object",
+            "required": ["ordered_task_ids", "confidence_scores", "diff", "adjustment_metadata"],
+            "properties": {
+              "ordered_task_ids": {
+                "type": "array",
+                "items": {"type": "string", "format": "uuid"},
+                "description": "Re-ranked task IDs"
+              },
+              "confidence_scores": {
+                "type": "object",
+                "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1},
+                "description": "Adjusted confidence scores per task"
+              },
+              "diff": {
+                "type": "object",
+                "required": ["moved", "filtered"],
+                "properties": {
+                  "moved": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["task_id", "from", "to", "reason"],
+                      "properties": {
+                        "task_id": {"type": "string", "format": "uuid"},
+                        "from": {"type": "integer", "minimum": 1},
+                        "to": {"type": "integer", "minimum": 1},
+                        "reason": {"type": "string", "minLength": 1, "maxLength": 200}
+                      }
+                    }
+                  },
+                  "filtered": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["task_id", "reason"],
+                      "properties": {
+                        "task_id": {"type": "string", "format": "uuid"},
+                        "reason": {"type": "string", "minLength": 1, "maxLength": 200}
+                      }
+                    }
+                  }
+                }
+              },
+              "adjustment_metadata": {
+                "type": "object",
+                "required": ["reflections", "tasks_moved", "tasks_filtered", "duration_ms"],
+                "properties": {
+                  "reflections": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["id", "text", "recency_weight", "created_at"],
+                      "properties": {
+                        "id": {"type": "string", "format": "uuid"},
+                        "text": {"type": "string", "minLength": 1},
+                        "recency_weight": {"type": "number", "minimum": 0, "maximum": 1},
+                        "created_at": {"type": "string", "format": "date-time"}
+                      }
+                    }
+                  },
+                  "tasks_moved": {"type": "integer", "minimum": 0},
+                  "tasks_filtered": {"type": "integer", "minimum": 0},
+                  "duration_ms": {"type": "number", "minimum": 0}
+                }
+              }
+            }
+          },
+          "performance": {
+            "type": "object",
+            "required": ["total_ms", "ranking_ms"],
+            "properties": {
+              "total_ms": {"type": "number", "description": "Total API response time"},
+              "ranking_ms": {"type": "number", "description": "Time spent in ranking service"}
+            }
+          }
+        },
+        "example": {
+          "adjusted_plan": {
+            "ordered_task_ids": ["task-1", "task-3", "task-2"],
+            "confidence_scores": {
+              "task-1": 0.92,
+              "task-2": 0.65,
+              "task-3": 0.88
+            },
+            "diff": {
+              "moved": [
+                {
+                  "task_id": "task-3",
+                  "from": 3,
+                  "to": 2,
+                  "reason": "Matches 'design phase' context"
+                }
+              ],
+              "filtered": []
+            },
+            "adjustment_metadata": {
+              "reflections": [
+                {
+                  "id": "650e8400-e29b-41d4-a716-446655440001",
+                  "text": "Still in design phase, no app yet",
+                  "recency_weight": 1.0,
+                  "created_at": "2025-10-20T14:30:00Z"
+                },
+                {
+                  "id": "750e8400-e29b-41d4-a716-446655440002",
+                  "text": "Client demo tomorrow",
+                  "recency_weight": 1.0,
+                  "created_at": "2025-10-21T09:15:00Z"
+                }
+              ],
+              "tasks_moved": 1,
+              "tasks_filtered": 0,
+              "duration_ms": 387
+            }
+          },
+          "performance": {
+            "total_ms": 423,
+            "ranking_ms": 387
+          }
+        }
+      }
+    },
+    "400": {
+      "description": "Bad request (invalid input or missing baseline plan)",
+      "body": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {"type": "string"}
+        },
+        "examples": [
+          {"error": "Session not found"},
+          {"error": "Baseline plan not found. Run analysis first."},
+          {"error": "Baseline plan too old (>7 days). Run full analysis."}
+        ]
+      }
+    },
+    "500": {
+      "description": "Server error during adjustment",
+      "body": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {"type": "string"}
+        },
+        "example": {
+          "error": "Failed to adjust priorities"
+        }
+      }
+    }
+  },
+  "validation_rules": {
+    "session_id": "Must exist in agent_sessions table",
+    "baseline_plan": "Must not be null",
+    "baseline_staleness": "Error if >7 days old, warning if >24 hours",
+    "active_reflection_ids": "Must belong to authenticated user"
+  },
+  "performance_requirements": {
+    "p50": "<200ms",
+    "p95": "<500ms",
+    "p99": "<1000ms"
+  }
+}

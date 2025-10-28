@@ -22,6 +22,7 @@ type AgentSessionRecord = {
   outcome_id: string;
   status: 'running' | 'completed' | 'failed';
   prioritized_plan: Record<string, unknown> | null;
+  baseline_plan: Record<string, unknown> | null;
   execution_metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -131,6 +132,9 @@ vi.mock('@supabase/supabase-js', () => {
         if (!record.id) record.id = randomUUID();
         if (!record.created_at) record.created_at = now;
         if (!record.updated_at) record.updated_at = now;
+        if (!Object.prototype.hasOwnProperty.call(record, 'baseline_plan')) {
+          record.baseline_plan = null;
+        }
         tables[tableName].push(record);
         return record;
       });
@@ -197,6 +201,7 @@ type OrchestrateOptions = {
   sessionId: string;
   userId: string;
   outcomeId: string;
+  activeReflectionIds?: string[];
 };
 
 const orchestrateTaskPrioritiesImpl = async ({ sessionId }: OrchestrateOptions) => {
@@ -238,6 +243,10 @@ const orchestrateTaskPrioritiesImpl = async ({ sessionId }: OrchestrateOptions) 
   Object.assign(session, {
     status: 'completed' as const,
     prioritized_plan: prioritizedPlan,
+    baseline_plan: {
+      ...prioritizedPlan,
+      created_at: new Date().toISOString(),
+    },
     execution_metadata: {
       steps_taken: 3,
       tool_call_count: {
@@ -470,6 +479,10 @@ describe('Agent Orchestration Integration (T012)', () => {
         }),
       ]),
     });
+    expect(session.baseline_plan).toMatchObject({
+      ordered_task_ids: ['task-001', 'task-002', 'task-003'],
+      created_at: expect.any(String),
+    });
 
     const traceResponse = await fetch(
       `http://localhost/api/agent/sessions/${sessionId}/trace`,
@@ -499,6 +512,7 @@ describe('Agent Orchestration Integration (T012)', () => {
       sessionId,
       userId: DEFAULT_USER_ID,
       outcomeId: activeOutcomeId,
+      activeReflectionIds: [],
     });
   });
 });
