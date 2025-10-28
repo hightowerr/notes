@@ -1,11 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { X } from 'lucide-react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ReflectionInput } from './ReflectionInput';
 import { ReflectionList } from './ReflectionList';
 import type { ReflectionWithWeight } from '@/lib/schemas/reflectionSchema';
+import { toggleReflection } from '@/lib/api/toggleReflection';
+import { toast } from 'sonner';
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 interface ReflectionPanelProps {
   isOpen: boolean;
@@ -16,6 +20,19 @@ export function ReflectionPanel({ isOpen, onOpenChange }: ReflectionPanelProps) 
   const [reflections, setReflections] = useState<ReflectionWithWeight[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [pendingToggleIds, setPendingToggleIds] = useState<Set<string>>(new Set());
+
+  const setTogglePending = useCallback((reflectionId: string, pending: boolean) => {
+    setPendingToggleIds((prev) => {
+      const next = new Set(prev);
+      if (pending) {
+        next.add(reflectionId);
+      } else {
+        next.delete(reflectionId);
+      }
+      return next;
+    });
+  }, []);
 
   // Detect mobile viewport
   useEffect(() => {
@@ -70,6 +87,67 @@ export function ReflectionPanel({ isOpen, onOpenChange }: ReflectionPanelProps) 
     }
   };
 
+  const handleReflectionToggle = useCallback(
+    async (reflectionId: string, isActive: boolean) => {
+      if (pendingToggleIds.has(reflectionId) || !UUID_PATTERN.test(reflectionId)) {
+        return;
+      }
+
+      let previousState = isActive;
+
+      setReflections((prev) =>
+        prev.map((reflection) => {
+          if (reflection.id === reflectionId) {
+            previousState =
+              typeof reflection.is_active_for_prioritization === 'boolean'
+                ? reflection.is_active_for_prioritization
+                : true;
+            return { ...reflection, is_active_for_prioritization: isActive };
+          }
+          return reflection;
+        })
+      );
+
+      setTogglePending(reflectionId, true);
+
+      try {
+        const updatedReflection = await toggleReflection(reflectionId, isActive);
+
+        setReflections((prev) =>
+          prev.map((reflection) =>
+            reflection.id === reflectionId
+              ? {
+                  ...reflection,
+                  ...updatedReflection,
+                  is_active_for_prioritization:
+                    typeof updatedReflection.is_active_for_prioritization === 'boolean'
+                      ? updatedReflection.is_active_for_prioritization
+                      : isActive,
+                }
+              : reflection
+          )
+        );
+      } catch (error) {
+        setReflections((prev) =>
+          prev.map((reflection) =>
+            reflection.id === reflectionId
+              ? {
+                  ...reflection,
+                  is_active_for_prioritization: previousState,
+                }
+              : reflection
+          )
+        );
+        const message =
+          error instanceof Error ? error.message : 'Failed to update reflection';
+        toast.error(message);
+      } finally {
+        setTogglePending(reflectionId, false);
+      }
+    },
+    [pendingToggleIds, setTogglePending]
+  );
+
   const handleMobileClose = () => {
     // Mobile-specific: close modal after reflection added
     if (isMobile) {
@@ -112,7 +190,12 @@ export function ReflectionPanel({ isOpen, onOpenChange }: ReflectionPanelProps) 
 
       {/* Recent Reflections List */}
       <div className="flex-1 overflow-y-auto">
-        <ReflectionList reflections={reflections} isLoading={isLoading} />
+        <ReflectionList
+          reflections={reflections}
+          isLoading={isLoading}
+          onToggle={handleReflectionToggle}
+          pendingIds={pendingToggleIds}
+        />
       </div>
     </div>
   );
@@ -120,34 +203,38 @@ export function ReflectionPanel({ isOpen, onOpenChange }: ReflectionPanelProps) 
   return (
     <>
       {/* Desktop: Collapsible sidebar */}
-      <div className="hidden md:block">
-        <div
-          className={`fixed right-0 top-0 h-full w-80 bg-bg-layer-2 shadow-2layer-lg z-50 transform transition-transform duration-300 ease-in-out ${
-            isOpen ? 'translate-x-0' : 'translate-x-full'
-          }`}
-        >
-          <div className="h-full p-6 overflow-hidden">
-            <PanelContent />
+      <Dialog open={isOpen} onOpenChange={onOpenChange}>
+        <div className="hidden md:block">
+          <div
+            className={`fixed right-0 top-0 h-full w-80 bg-bg-layer-2 shadow-2layer-lg z-50 transform transition-transform duration-300 ease-in-out ${
+              isOpen ? 'translate-x-0' : 'translate-x-full'
+            }`}
+          >
+            <div className="h-full p-6 overflow-hidden">
+              <PanelContent />
+            </div>
           </div>
+
+          {/* Overlay (click to close) */}
+          {isOpen && (
+            <div
+              className="fixed inset-0 bg-black/20 z-40 transition-opacity duration-300"
+              onClick={() => onOpenChange(false)}
+            />
+          )}
         </div>
 
-        {/* Overlay (click to close) */}
-        {isOpen && (
-          <div
-            className="fixed inset-0 bg-black/20 z-40 transition-opacity duration-300"
-            onClick={() => onOpenChange(false)}
-          />
-        )}
-      </div>
-
-      {/* Mobile: Full-screen modal */}
-      <div className="md:hidden">
-        <Dialog open={isOpen} onOpenChange={onOpenChange}>
+        {/* Mobile: Full-screen modal */}
+        <div className="md:hidden">
           <DialogContent className="w-full h-full max-w-none p-6 overflow-y-auto">
+            <DialogHeader className="sr-only">
+              <DialogTitle>Reflections</DialogTitle>
+              <DialogDescription>Capture current context reflections.</DialogDescription>
+            </DialogHeader>
             <PanelContent />
           </DialogContent>
-        </Dialog>
-      </div>
+        </div>
+      </Dialog>
     </>
   );
 }

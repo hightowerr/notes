@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { reflectionSchema } from '@/lib/schemas/reflectionSchema';
+import { reflectionInputSchema } from '@/lib/schemas/reflectionSchema';
 import type { ReflectionWithWeight } from '@/lib/schemas/reflectionSchema';
 
 interface ReflectionInputProps {
@@ -36,7 +36,7 @@ export function ReflectionInput({ onReflectionAdded, onMobileClose, onMobileReop
     setValidationError(null);
 
     // Client-side validation with Zod
-    const validation = reflectionSchema.safeParse({ text });
+    const validation = reflectionInputSchema.safeParse({ text });
     if (!validation.success) {
       const error = validation.error.errors[0];
       setValidationError(error.message);

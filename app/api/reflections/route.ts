@@ -1,38 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
-import { reflectionSchema } from '@/lib/schemas/reflectionSchema';
+import { reflectionInputSchema } from '@/lib/schemas/reflectionSchema';
 import { createReflection, fetchRecentReflections } from '@/lib/services/reflectionService';
 import { debounceRecompute } from '@/lib/services/recomputeDebounce';
 import { triggerRecomputeJob } from '@/lib/services/recomputeService';
-
-/**
- * Get authenticated user ID from Supabase session
- * For P0: Returns a consistent anonymous user ID if no session exists
- */
-async function getAuthenticatedUserId(): Promise<string | null> {
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-
-    // If session exists, return user ID
-    if (session?.user?.id) {
-      return session.user.id;
-    }
-
-    // P0 fallback: Return anonymous user ID
-    // In production, this would require proper authentication
-    return 'anonymous-user-p0';
-  } catch (error) {
-    console.error('Auth error:', error);
-    return null;
-  }
-}
+import { getAuthenticatedUserId } from '@/app/api/reflections/utils';
+import { supabase } from '@/lib/supabase';
 
 /**
  * GET /api/reflections
  * Fetch recent reflections for the current user
  *
  * Query params:
- * - limit: number (default: 5, max: 10)
+ * - limit: number (default: 5, max: 50)
+ * - within_days: number (default: 30, max: 365)
+ * - active_only: boolean (optional)
  *
  * Returns: 200 with { reflections: ReflectionWithWeight[] }
  */
@@ -49,9 +30,24 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const limitParam = searchParams.get('limit');
-    const limit = Math.min(parseInt(limitParam || '5', 10), 10); // Max 10
+    const withinDaysParam = searchParams.get('within_days');
+    const activeOnlyParam = searchParams.get('active_only');
 
-    const reflections = await fetchRecentReflections(userId, limit);
+    const parsedLimit = Number.parseInt(limitParam ?? '5', 10);
+    const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 50) : 5;
+
+    const parsedWithinDays = Number.parseInt(withinDaysParam ?? '30', 10);
+    const withinDays = Number.isFinite(parsedWithinDays)
+      ? Math.min(Math.max(parsedWithinDays, 1), 365)
+      : 30;
+
+    const activeOnly = activeOnlyParam === 'true';
+
+    const reflections = await fetchRecentReflections(userId, {
+      limit,
+      withinDays,
+      activeOnly,
+    });
 
     return NextResponse.json({ reflections }, { status: 200 });
   } catch (error) {
@@ -99,7 +95,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
 
     // Server-side validation with Zod
-    const validation = reflectionSchema.safeParse(body);
+    const validation = reflectionInputSchema.safeParse(body);
     if (!validation.success) {
       const error = validation.error.errors[0];
 
@@ -128,6 +124,26 @@ export async function POST(request: NextRequest) {
     // Create reflection in database
     const reflection = await createReflection(userId, text);
 
+    let totalReflections: number | null = null;
+    try {
+      const { count } = await supabase
+        .from('reflections')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId);
+      if (typeof count === 'number') {
+        totalReflections = count;
+      }
+    } catch (countError) {
+      console.error(
+        JSON.stringify({
+          event: 'reflection_count_error',
+          user_id: userId,
+          timestamp: new Date().toISOString(),
+          error: countError instanceof Error ? countError.message : 'Unknown error'
+        })
+      );
+    }
+
     // Log successful creation (no reflection text for privacy)
     console.log(
       JSON.stringify({
@@ -135,7 +151,8 @@ export async function POST(request: NextRequest) {
         user_id: userId,
         timestamp: new Date().toISOString(),
         char_count: text.length,
-        reflection_id: reflection.id
+        reflection_id: reflection.id,
+        total_reflections: totalReflections,
       })
     );
 
