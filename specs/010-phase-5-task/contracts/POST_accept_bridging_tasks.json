@@ -1,0 +1,283 @@
+{
+  "endpoint": "POST /api/gaps/accept",
+  "description": "Accepts user-selected bridging tasks and inserts them into the task_embeddings table with dependency relationships. Validates for circular dependencies before insertion.",
+  "version": "1.0.0",
+  "request": {
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "type": "object",
+      "required": ["accepted_tasks"],
+      "properties": {
+        "accepted_tasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["task", "predecessor_id", "successor_id"],
+            "properties": {
+              "task": {
+                "type": "object",
+                "description": "BridgingTask object (including any user edits)",
+                "required": ["id", "gap_id", "task_text", "estimated_hours", "cognition_level", "confidence", "reasoning", "source", "requires_review", "created_at"],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "gap_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "task_text": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 500
+                  },
+                  "estimated_hours": {
+                    "type": "integer",
+                    "minimum": 8,
+                    "maximum": 160
+                  },
+                  "cognition_level": {
+                    "type": "string",
+                    "enum": ["low", "medium", "high"]
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "reasoning": {
+                    "type": "string",
+                    "minLength": 20,
+                    "maxLength": 1000
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": ["ai_generated"]
+                  },
+                  "requires_review": {
+                    "type": "boolean"
+                  },
+                  "created_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "edited_task_text": {
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 500,
+                    "description": "User-edited description (overrides task_text if present)"
+                  },
+                  "edited_estimated_hours": {
+                    "type": "integer",
+                    "minimum": 8,
+                    "maximum": 160,
+                    "description": "User-edited time estimate (overrides estimated_hours if present)"
+                  }
+                }
+              },
+              "predecessor_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Task before the gap (links to this bridging task)"
+              },
+              "successor_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Task after the gap (this bridging task links to it)"
+              }
+            }
+          },
+          "minItems": 1,
+          "maxItems": 9,
+          "description": "User-selected tasks to insert (max 3 gaps × 3 tasks = 9)"
+        }
+      },
+      "example": {
+        "accepted_tasks": [
+          {
+            "task": {
+              "id": "e5f6a7b8-c9d0-1234-ef56-7890abcdef12",
+              "gap_id": "d4e5f6a7-b8c9-0123-def4-567890abcdef",
+              "task_text": "Build app frontend with React Native components and navigation",
+              "estimated_hours": 80,
+              "cognition_level": "high",
+              "confidence": 0.85,
+              "reasoning": "The gap between 'Design app mockups' and 'Launch on app store' requires implementing the actual application.",
+              "source": "ai_generated",
+              "requires_review": true,
+              "created_at": "2025-10-28T14:35:00Z",
+              "edited_task_text": "Build mobile app frontend with React Native and navigation (edited by user)",
+              "edited_estimated_hours": 96
+            },
+            "predecessor_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "successor_id": "c3d4e5f6-a7b8-9012-cdef-123456789012"
+          }
+        ]
+      }
+    }
+  },
+  "response": {
+    "success": {
+      "status": 201,
+      "body": {
+        "type": "object",
+        "required": ["inserted_count", "task_ids"],
+        "properties": {
+          "inserted_count": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Number of tasks successfully inserted"
+          },
+          "task_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "UUIDs of newly inserted tasks (matches BridgingTask.id)"
+          },
+          "relationships_created": {
+            "type": "integer",
+            "minimum": 2,
+            "description": "Number of task_relationships rows created (2 per task)"
+          }
+        },
+        "example": {
+          "inserted_count": 1,
+          "task_ids": ["e5f6a7b8-c9d0-1234-ef56-7890abcdef12"],
+          "relationships_created": 2
+        }
+      }
+    },
+    "errors": {
+      "400": {
+        "description": "Invalid request (missing fields, invalid UUIDs, or validation errors)",
+        "body": {
+          "type": "object",
+          "properties": {
+            "error": {
+              "type": "string",
+              "example": "Invalid input: accepted_tasks is required"
+            },
+            "validation_errors": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "example": ["Task e5f6a7b8-c9d0-1234-ef56-7890abcdef12 has invalid estimated_hours"]
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "Predecessor or successor task not found",
+        "body": {
+          "type": "object",
+          "properties": {
+            "error": {
+              "type": "string",
+              "example": "Task not found: a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            }
+          }
+        }
+      },
+      "409": {
+        "description": "Circular dependency detected (insertion would create cycle)",
+        "body": {
+          "type": "object",
+          "properties": {
+            "error": {
+              "type": "string",
+              "example": "Circular dependency detected: cannot insert task"
+            },
+            "validation_errors": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "example": [
+                "Task e5f6a7b8-c9d0-1234-ef56-7890abcdef12 creates cycle: A → B → C → A"
+              ]
+            }
+          }
+        }
+      },
+      "422": {
+        "description": "Duplicate task detected (semantic similarity >0.9 with existing task)",
+        "body": {
+          "type": "object",
+          "properties": {
+            "error": {
+              "type": "string",
+              "example": "Duplicate task detected"
+            },
+            "validation_errors": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "example": [
+                "Task 'Build app frontend' duplicates existing task 'Create mobile app UI' (similarity: 0.94)"
+              ]
+            }
+          }
+        }
+      },
+      "500": {
+        "description": "Server error during insertion",
+        "body": {
+          "type": "object",
+          "properties": {
+            "error": {
+              "type": "string",
+              "example": "Task insertion failed"
+            }
+          }
+        }
+      }
+    }
+  },
+  "performance": {
+    "target_latency_p95": "500ms",
+    "max_latency": "2000ms"
+  },
+  "observability": {
+    "logs": [
+      "accepted_count",
+      "insertion_duration_ms",
+      "validation_errors",
+      "duplicate_count",
+      "cycle_detection_count"
+    ]
+  },
+  "database_operations": {
+    "task_embeddings": {
+      "operation": "INSERT",
+      "fields_mapping": {
+        "id": "task.id",
+        "text": "task.edited_task_text || task.task_text",
+        "estimated_hours": "task.edited_estimated_hours || task.estimated_hours",
+        "source": "'ai_generated'",
+        "metadata": "{ cognition_level, confidence, reasoning, original_gap_id }"
+      }
+    },
+    "task_relationships": {
+      "operation": "INSERT (2 rows per task)",
+      "rows": [
+        {
+          "predecessor_id": "predecessor_id",
+          "successor_id": "task.id",
+          "relationship_type": "'prerequisite'"
+        },
+        {
+          "predecessor_id": "task.id",
+          "successor_id": "successor_id",
+          "relationship_type": "'prerequisite'"
+        }
+      ]
+    }
+  }
+}

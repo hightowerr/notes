@@ -6,18 +6,24 @@ default_agent: slice-orchestrator
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-**See `AGENTS.md` for repository-wide contributor workflow (structure, commands, commit expectations).**
+## Table of Contents
+- [Quick Links](#quick-links)
+- [First Day Checklist](#first-day-checklist)
+- [Project Overview](#project-overview)
+- [Development Commands](#development-commands)
+- [Architecture](#architecture)
+- [Configuration](#configuration)
+- [Design Principles](#design-principles)
+- [Common Development Patterns](#common-development-patterns)
+- [Known Issues & Workarounds](#known-issues--workarounds)
+- [Agent Usage](#agent-usage)
+- [Quick Troubleshooting](#quick-troubleshooting)
 
-**See `.claude/standards.md` for universal standards that apply to all agents:**
-- TypeScript & code quality rules
-- TDD workflow (Red-Green-Refactor)
-- Design system & ShadCN conventions
-- Common development patterns
-- Error handling standards
-- Testing requirements
-- Known issues & workarounds
-
-**See `IMPLEMENTATION_STATUS.md` for detailed completion status of all features.**
+## Quick Links
+- **`AGENTS.md`** - Repository workflow, structure, commit expectations
+- **`.claude/standards.md`** - Universal standards for all agents (TypeScript, TDD, design system, error handling)
+- **`IMPLEMENTATION_STATUS.md`** - Detailed feature completion status
+- **`.claude/SYSTEM_RULES.md`** - Vertical slice development protocol (read before ANY coding)
 
 ## First Day Checklist
 
@@ -58,17 +64,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `pnpm lint` - Run ESLint
 
 ### Testing Commands
-- `pnpm test` - Run tests in watch mode
-- `pnpm test:ui` - Run tests with Vitest UI
-- `pnpm test:run` - Run tests once (CI mode)
-- `pnpm test:unit` - Run unit tests only
-- `pnpm test:contract` - Run contract tests only
-- `pnpm test:integration` - Run integration tests only
+```bash
+# Watch mode (recommended for development)
+pnpm test
+
+# Run all tests once (CI mode)
+pnpm test:run
+
+# Run specific test file
+pnpm test:run __tests__/contract/outcomes.test.ts
+
+# Run tests with UI dashboard
+pnpm test:ui
+
+# Run by category
+pnpm test:unit          # Unit tests only
+pnpm test:contract      # Contract tests only
+pnpm test:integration   # Integration tests only
+```
 
 **Current Test Status:** 27/44 tests passing (61% pass rate)
 - **Passing:** Component tests, database tests, schema validation, service logic
 - **Blocked:** Upload API contract tests (FormData serialization issue in test environment)
 - **Workaround:** Use manual testing guides (`T002_MANUAL_TEST.md`, `T004_MANUAL_TEST.md`, etc.)
+
+**Test Organization:**
+- **Unit:** `lib/services/__tests__/*.test.ts` - Pure logic, no external dependencies
+- **Component:** `app/components/__tests__/*.test.tsx` - React component behavior
+- **Integration:** `__tests__/integration/*.test.ts` - Multi-service workflows
+- **Contract:** `__tests__/contract/*.test.ts` - API endpoint contracts
 
 ### Utility Scripts
 - `npx tsx scripts/test-mastra.ts` - Validate Mastra tool registry and telemetry
@@ -76,13 +100,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `bash scripts/test-search-endpoint.sh` - Quick test of embedding search API
 
 ### Workflow Commands (.specify/)
-- `/plan` - Create implementation plan from feature spec
-- `/specify` - Create feature specification from description
-- `/tasks` - Generate **vertical slice** task list (UI + Backend + Data + Feedback per task)
-- `/clarify` - Identify underspecified areas in spec
-- `/implement` - Execute implementation plan using slice-orchestrator agent
 
-**Note:** All tasks MUST be vertical slices delivering complete user value (SEE → DO → VERIFY)
+**Feature Development Workflow:**
+```bash
+# 1. Create feature specification
+/specify "feature description"
+
+# 2. Generate implementation plan
+/plan
+
+# 3. Break down into vertical slice tasks
+/tasks
+
+# 4. Clarify ambiguities (optional)
+/clarify
+
+# 5. Execute implementation
+/implement
+```
+
+**Slash Command Details:**
+- `/specify` - Create feature specification from natural language description
+- `/plan` - Generate implementation plan from spec (design artifacts)
+- `/tasks` - Generate **vertical slice** task list (UI + Backend + Data + Feedback per task)
+- `/clarify` - Ask targeted questions to resolve underspecified areas
+- `/implement` - Execute implementation plan using slice-orchestrator agent
+- `/analyze` - Perform consistency analysis across spec, plan, and tasks
+
+**Important:** All tasks MUST be vertical slices delivering complete user value (SEE → DO → VERIFY). See `.claude/SYSTEM_RULES.md` for the mandatory vertical slice protocol.
 
 ## Architecture
 
@@ -195,23 +240,44 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Design System
 
-**See `.claude/standards.md` for complete design system documentation.**
-
-**Key Principles:**
+**Core Principles:**
 - **No borders** - Use color contrast and shadows instead
 - **Depth layers** - 4-layer system (`--bg-layer-1` through `--bg-layer-4`)
 - **Two-layer shadows** - `.shadow-2layer-sm/md/lg`
 - **Semantic colors** - Each has `*-bg`, `*-hover`, `*-text` variants
 - **WCAG AA compliance** - 4.5:1 minimum contrast ratio
 
+**Full design system reference:** `.claude/standards.md` lines 421-479
+
 ## Configuration
 
 ### Environment Variables
+
+**Required variables** (create `.env.local` in project root):
 ```env
+# Supabase (Database & Storage)
 NEXT_PUBLIC_SUPABASE_URL=https://emgvqqqqdbfpjwbouybj.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_key_here
-OPENAI_API_KEY=sk-proj-...
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_publishable_key_here
+
+# OpenAI (AI summarization & embeddings)
+OPENAI_API_KEY=sk-proj-your_key_here
 ```
+
+**Optional variables:**
+```env
+# Development
+NODE_ENV=development              # development | production | test
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+# Supabase (admin operations)
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key  # Only needed for admin operations
+```
+
+**Environment setup notes:**
+- Get Supabase credentials from your project dashboard at https://supabase.com
+- OpenAI API key required for `gpt-4o` model and `text-embedding-3-small`
+- Service role key is optional (only needed for RLS bypass in development)
+- Never commit `.env.local` to version control (already in `.gitignore`)
 
 ### TypeScript
 - Path alias: `@/*` → project root
@@ -258,9 +324,7 @@ OPENAI_API_KEY=sk-proj-...
 
 ## Common Development Patterns
 
-**See `.claude/standards.md` for complete development patterns.**
-
-**Quick Reference:**
+**Quick Reference** (full details in `.claude/standards.md` lines 871-1011):
 
 **Adding API Endpoint:**
 ```typescript
@@ -299,7 +363,7 @@ setTimeout(() => { const values = form.getValues(); }, 0);
 
 ## Known Issues & Workarounds
 
-**See `.claude/standards.md` for complete issue documentation.**
+**Full documentation:** `.claude/standards.md` lines 1026-1148
 
 ### pdf-parse Library
 - **Issue:** Debug mode causes test file errors

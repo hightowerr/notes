@@ -1,0 +1,189 @@
+{
+  "endpoint": "POST /api/gaps/detect",
+  "description": "Analyzes a list of tasks to detect logical gaps using 4 heuristics (time gap, action type jump, missing dependency, skill jump). Returns 0-3 gaps with highest confidence scores.",
+  "version": "1.0.0",
+  "request": {
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "type": "object",
+      "required": ["task_ids"],
+      "properties": {
+        "task_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "minItems": 2,
+          "maxItems": 100,
+          "description": "UUIDs of tasks to analyze (must exist in task_embeddings table)"
+        }
+      },
+      "example": {
+        "task_ids": [
+          "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+          "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+          "c3d4e5f6-a7b8-9012-cdef-123456789012"
+        ]
+      }
+    }
+  },
+  "response": {
+    "success": {
+      "status": 200,
+      "body": {
+        "type": "object",
+        "required": ["gaps", "metadata"],
+        "properties": {
+          "gaps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "predecessor_task_id", "successor_task_id", "indicators", "confidence", "detected_at"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "predecessor_task_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "successor_task_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "indicators": {
+                  "type": "object",
+                  "required": ["time_gap", "action_type_jump", "no_dependency", "skill_jump"],
+                  "properties": {
+                    "time_gap": {
+                      "type": "boolean",
+                      "description": ">1 week between tasks"
+                    },
+                    "action_type_jump": {
+                      "type": "boolean",
+                      "description": "Skips 2+ workflow stages"
+                    },
+                    "no_dependency": {
+                      "type": "boolean",
+                      "description": "Successor doesn't depend on predecessor"
+                    },
+                    "skill_jump": {
+                      "type": "boolean",
+                      "description": "Different skill domains"
+                    }
+                  }
+                },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0.75,
+                  "maximum": 1.0,
+                  "description": "Confidence score (0.75 for 3 indicators, 1.0 for 4 indicators)"
+                },
+                "detected_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            },
+            "maxItems": 3,
+            "description": "Top 3 gaps with highest confidence (may be empty if no gaps detected)"
+          },
+          "metadata": {
+            "type": "object",
+            "required": ["total_pairs_analyzed", "gaps_detected", "analysis_duration_ms"],
+            "properties": {
+              "total_pairs_analyzed": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "gaps_detected": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3
+              },
+              "analysis_duration_ms": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "example": {
+          "gaps": [
+            {
+              "id": "d4e5f6a7-b8c9-0123-def4-567890abcdef",
+              "predecessor_task_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+              "successor_task_id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+              "indicators": {
+                "time_gap": true,
+                "action_type_jump": true,
+                "no_dependency": true,
+                "skill_jump": false
+              },
+              "confidence": 0.75,
+              "detected_at": "2025-10-28T14:32:00Z"
+            }
+          ],
+          "metadata": {
+            "total_pairs_analyzed": 3,
+            "gaps_detected": 1,
+            "analysis_duration_ms": 42
+          }
+        }
+      }
+    },
+    "errors": {
+      "400": {
+        "description": "Invalid request (missing task_ids, invalid UUIDs, or <2 tasks provided)",
+        "body": {
+          "type": "object",
+          "properties": {
+            "error": {
+              "type": "string",
+              "example": "Invalid input: task_ids must contain at least 2 UUIDs"
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "One or more task_ids not found in task_embeddings table",
+        "body": {
+          "type": "object",
+          "properties": {
+            "error": {
+              "type": "string",
+              "example": "Tasks not found: a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+            }
+          }
+        }
+      },
+      "500": {
+        "description": "Server error during gap detection",
+        "body": {
+          "type": "object",
+          "properties": {
+            "error": {
+              "type": "string",
+              "example": "Gap detection failed"
+            }
+          }
+        }
+      }
+    }
+  },
+  "performance": {
+    "target_latency_p95": "100ms",
+    "max_latency": "500ms"
+  },
+  "observability": {
+    "logs": [
+      "gap_count",
+      "analysis_duration_ms",
+      "total_pairs_analyzed"
+    ]
+  }
+}
