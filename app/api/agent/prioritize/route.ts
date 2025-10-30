@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { z } from 'zod';
 
 import { orchestrateTaskPriorities } from '@/lib/mastra/services/agentOrchestration';
 
@@ -26,15 +27,22 @@ export async function POST(request: Request) {
   try {
     const payload = await request.json();
 
-    const outcomeId = payload?.outcome_id;
-    const userId = payload?.user_id;
+    const requestSchema = z.object({
+      outcome_id: z.string().uuid(),
+      user_id: z.string().min(1),
+      active_reflection_ids: z.array(z.string().uuid()).max(50).optional(),
+    });
 
-    if (!outcomeId || !userId) {
+    const parsed = requestSchema.safeParse(payload);
+    if (!parsed.success) {
       return NextResponse.json(
         { error: 'VALIDATION_ERROR', message: 'outcome_id and user_id are required' },
         { status: 400 }
       );
     }
+
+    const { outcome_id: outcomeId, user_id: userId } = parsed.data;
+    const activeReflectionIds = parsed.data.active_reflection_ids ?? [];
 
     if (userId !== DEFAULT_USER_ID) {
       return NextResponse.json(
@@ -101,6 +109,8 @@ export async function POST(request: Request) {
         outcome_id: outcomeId,
         status: 'running',
         prioritized_plan: null,
+        baseline_plan: null,
+        adjusted_plan: null,
         execution_metadata: defaultExecutionMetadata,
         created_at: now,
         updated_at: now,
@@ -121,6 +131,7 @@ export async function POST(request: Request) {
         sessionId: session.id,
         userId: DEFAULT_USER_ID,
         outcomeId,
+        activeReflectionIds,
       }).catch((error) => {
         console.error('[Agent Prioritize API] Background orchestration failed', error);
       });

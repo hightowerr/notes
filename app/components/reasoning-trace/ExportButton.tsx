@@ -4,12 +4,12 @@ import { useState } from 'react';
 import { Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import type { ReasoningTraceRecord, ReasoningStep } from '@/lib/types/agent';
+import type { ExecutionMetadata, ReasoningTraceRecord, ReasoningStep } from '@/lib/types/agent';
 
 type ExportButtonProps = {
   sessionId: string;
   traceData: ReasoningTraceRecord;
-  executionMetadata: unknown; // Added
+  executionMetadata?: ExecutionMetadata | null;
   disabled: boolean;
 };
 
@@ -29,7 +29,7 @@ export function ExportButton({ sessionId, traceData, executionMetadata, disabled
     const payload: ExportPayload = {
       session_id: sessionId,
       exported_at: new Date().toISOString(),
-      execution_metadata: executionMetadata, // Used from props
+      execution_metadata: executionMetadata ?? null,
       steps: traceData.steps,
     };
 
@@ -46,15 +46,19 @@ export function ExportButton({ sessionId, traceData, executionMetadata, disabled
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      toast.success('Trace exported successfully.');
+      toast.success('Trace exported successfully');
     } catch (error) {
       console.error('Export failed, falling back to clipboard', error);
       try {
-        await navigator.clipboard.writeText(json);
-        toast.info('Export failed, trace copied to clipboard.');
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(json);
+          toast.info('Export failed, trace copied to clipboard');
+        } else {
+          throw new Error('Clipboard API unavailable');
+        }
       } catch (clipboardError) {
         console.error('Failed to copy trace to clipboard', clipboardError);
-        toast.error('Failed to export or copy trace.');
+        toast.error('Failed to export or copy trace');
       }
     } finally {
       setIsExporting(false);

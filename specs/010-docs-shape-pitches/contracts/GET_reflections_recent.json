@@ -1,0 +1,126 @@
+{
+  "endpoint": "GET /api/reflections",
+  "description": "Fetch recent reflections with recency weighting for context card display. Extended to include is_active_for_prioritization and computed recency_weight.",
+  "request": {
+    "method": "GET",
+    "query_parameters": {
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 50,
+        "default": 5,
+        "description": "Number of reflections to return"
+      },
+      "within_days": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 365,
+        "default": 30,
+        "description": "Only include reflections created within this many days"
+      }
+    },
+    "example": "GET /api/reflections?limit=5&within_days=30"
+  },
+  "responses": {
+    "200": {
+      "description": "Reflections fetched successfully",
+      "body": {
+        "type": "object",
+        "required": ["reflections"],
+        "properties": {
+          "reflections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "user_id", "text", "created_at", "is_active_for_prioritization", "recency_weight"],
+              "properties": {
+                "id": {"type": "string", "format": "uuid"},
+                "user_id": {"type": "string", "format": "uuid"},
+                "text": {"type": "string", "minLength": 3, "maxLength": 500},
+                "created_at": {"type": "string", "format": "date-time"},
+                "is_active_for_prioritization": {
+                  "type": "boolean",
+                  "description": "Toggle state"
+                },
+                "recency_weight": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "Step function weight (1.0 for 0-7 days, 0.5 for 8-14 days, 0.25 for 14+ days)",
+                  "enum": [1.0, 0.5, 0.25]
+                },
+                "relative_time": {
+                  "type": "string",
+                  "description": "Human-readable time (e.g., '2 days ago')",
+                  "optional": true
+                }
+              }
+            }
+          }
+        },
+        "example": {
+          "reflections": [
+            {
+              "id": "750e8400-e29b-41d4-a716-446655440002",
+              "user_id": "user-123",
+              "text": "Client demo tomorrow",
+              "created_at": "2025-10-25T10:00:00Z",
+              "is_active_for_prioritization": true,
+              "recency_weight": 1.0,
+              "relative_time": "1 day ago"
+            },
+            {
+              "id": "750e8400-e29b-41d4-a716-446655440001",
+              "user_id": "user-123",
+              "text": "Still in design phase, no app yet",
+              "created_at": "2025-10-20T14:30:00Z",
+              "is_active_for_prioritization": true,
+              "recency_weight": 1.0,
+              "relative_time": "6 days ago"
+            },
+            {
+              "id": "750e8400-e29b-41d4-a716-446655440000",
+              "user_id": "user-123",
+              "text": "Burnt out after launch",
+              "created_at": "2025-10-15T09:15:00Z",
+              "is_active_for_prioritization": false,
+              "recency_weight": 0.5,
+              "relative_time": "11 days ago"
+            }
+          ]
+        }
+      }
+    },
+    "500": {
+      "description": "Server error fetching reflections",
+      "body": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {"type": "string"}
+        },
+        "example": {
+          "error": "Failed to fetch reflections"
+        }
+      }
+    }
+  },
+  "validation_rules": {
+    "ordering": "ORDER BY created_at DESC (most recent first)",
+    "recency_weight": "Computed server-side using step function from clarifications",
+    "relative_time": "Optional field for UI convenience (computed from created_at)"
+  },
+  "recency_weight_calculation": {
+    "description": "Step function based on days since creation",
+    "logic": {
+      "0-7_days": 1.0,
+      "8-14_days": 0.5,
+      "15+_days": 0.25
+    },
+    "implementation": "const daysDiff = Math.floor((Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24)); return daysDiff <= 7 ? 1.0 : daysDiff <= 14 ? 0.5 : 0.25;"
+  },
+  "performance_requirements": {
+    "query_time": "<50ms (indexed on user_id, created_at)",
+    "limit_constraint": "Max 50 reflections to prevent bloat"
+  }
+}

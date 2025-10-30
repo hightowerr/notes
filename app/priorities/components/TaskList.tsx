@@ -11,6 +11,7 @@ import type {
   TaskDependency,
   TaskRemoval,
 } from '@/lib/types/agent';
+import type { AdjustedPlan } from '@/lib/types/adjustment';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -61,6 +62,7 @@ type TaskListProps = {
   sessionId: string | null;
   planVersion: number;
   outcomeId: string | null;
+  adjustedPlan?: AdjustedPlan | null;
   onDiffSummary?: (summary: { hasChanges: boolean; isInitial: boolean }) => void;
   onToggleTrace?: () => void;
   isTraceExpanded?: boolean;
@@ -186,6 +188,7 @@ export function TaskList({
   sessionId,
   planVersion,
   outcomeId,
+  adjustedPlan,
   onDiffSummary,
   onToggleTrace,
   isTraceExpanded = false,
@@ -194,6 +197,19 @@ export function TaskList({
   const sanitizedTaskIds = useMemo(() => sanitizePlanOrder(plan), [plan]);
   const taskAnnotations = useMemo<TaskAnnotation[]>(() => plan.task_annotations ?? [], [plan.task_annotations]);
   const removedTasksFromPlan = useMemo<TaskRemoval[]>(() => plan.removed_tasks ?? [], [plan.removed_tasks]);
+
+  // Extract movement reasons from adjusted_plan.diff (T008 requirement)
+  const adjustmentReasons = useMemo(() => {
+    const reasonMap: Record<string, string> = {};
+    if (adjustedPlan?.diff?.moved) {
+      adjustedPlan.diff.moved.forEach((movement) => {
+        if (movement.task_id && movement.reason) {
+          reasonMap[movement.task_id] = movement.reason;
+        }
+      });
+    }
+    return reasonMap;
+  }, [adjustedPlan]);
   const annotationById = useMemo(() => {
     const map = new Map<string, TaskAnnotation>();
     taskAnnotations.forEach(annotation => {
@@ -718,14 +734,23 @@ export function TaskList({
       if (!node) {
         return null;
       }
+
+      // Merge adjustment reason into movement if available (T008 requirement)
+      let movement = node.movement ??
+        ((node.manualOverride ?? !sanitizedTaskIds.includes(taskId))
+          ? { type: 'manual' as const }
+          : undefined);
+
+      // Add reason from adjusted_plan.diff if movement exists and has up/down type
+      const adjustmentReason = adjustmentReasons[taskId];
+      if (movement && (movement.type === 'up' || movement.type === 'down') && adjustmentReason) {
+        movement = { ...movement, reason: adjustmentReason };
+      }
+
       return {
         id: taskId,
         title: node.title,
-        movement:
-          node.movement ??
-          ((node.manualOverride ?? !sanitizedTaskIds.includes(taskId))
-            ? { type: 'manual' as const }
-            : undefined),
+        movement,
         dependencyLinks: buildDependencyLinks(node.dependencies, priorityState.ranks),
         displayOrder: index + 1,
         checked: priorityState.statuses[taskId] === 'completed',

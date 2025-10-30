@@ -306,7 +306,7 @@ function getSupabaseClient() {
  * @param b - Second embedding vector
  * @returns Similarity score (0-1, where 1 = identical)
  */
-function cosineSimilarity(a: number[], b: number[]): number {
+export function calculateCosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length) {
     throw new Error('Vectors must have the same length');
   }
@@ -378,7 +378,7 @@ export async function scoreActionsWithSemanticSimilarity(
           value: action.text,
         });
 
-        const relevanceScore = cosineSimilarity(outcomeEmbedding, actionEmbedding);
+        const relevanceScore = calculateCosineSimilarity(outcomeEmbedding, actionEmbedding);
 
         return {
           ...action,

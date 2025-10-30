@@ -1,14 +1,13 @@
 import { z } from 'zod';
 
 /**
- * Zod schema for reflection input validation
- * Feature: 004-reflection-capture-quick
+ * Zod schema for reflection input validation.
  *
  * Enforces:
  * - Text length: 10-500 characters
  * - Automatic trimming of whitespace
  */
-export const reflectionSchema = z.object({
+export const reflectionInputSchema = z.object({
   text: z.string()
     .min(10, 'Reflection must be at least 10 characters')
     .max(500, 'Reflection must be at most 500 characters')
@@ -16,26 +15,30 @@ export const reflectionSchema = z.object({
 });
 
 /**
- * TypeScript type for reflection input (client-side)
+ * Reflection entity schema for persisted rows.
+ * Adds toggle state and optional recency weight returned by APIs.
  */
-export type ReflectionInput = z.infer<typeof reflectionSchema>;
+export const reflectionSchema = reflectionInputSchema.extend({
+  id: z.string().uuid(),
+  user_id: z.string().min(1),
+  created_at: z
+    .string()
+    .refine(value => !Number.isNaN(Date.parse(value)), {
+      message: 'Invalid datetime',
+    }),
+  is_active_for_prioritization: z.boolean().default(true),
+  recency_weight: z.number().min(0).max(1).optional()
+});
 
 /**
- * TypeScript type for reflection entity (database)
- * Note: user_id is TEXT (not UUID) to support anonymous users in P0
+ * Schema for reflections returned to the client with computed metadata.
+ * `weight` retained for backward compatibility until recency_weight rollout completes.
  */
-export interface Reflection {
-  id: string;
-  user_id: string;  // TEXT field - can be UUID string or 'anonymous-user-p0'
-  text: string;
-  created_at: string; // ISO timestamp
-}
+export const reflectionWithWeightSchema = reflectionSchema.extend({
+  weight: z.number().min(0).max(1),
+  relative_time: z.string().min(1)
+});
 
-/**
- * TypeScript type for reflection with calculated fields
- * Used in API responses and UI components
- */
-export interface ReflectionWithWeight extends Reflection {
-  weight: number;        // Calculated: 0.5^(age_in_days/7)
-  relative_time: string; // Calculated: "Just now", "3h ago", "2 days ago"
-}
+export type ReflectionInput = z.infer<typeof reflectionInputSchema>;
+export type Reflection = z.infer<typeof reflectionSchema>;
+export type ReflectionWithWeight = z.infer<typeof reflectionWithWeightSchema>;

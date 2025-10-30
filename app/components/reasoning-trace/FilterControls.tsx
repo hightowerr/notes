@@ -19,28 +19,35 @@ const ALL_TOOLS = [
   'cluster-by-similarity',
 ];
 
+type StatusFilters = { success: boolean; failed: boolean; skipped: boolean };
+
 type FilterControlsProps = {
   filterState: {
     toolType: string;
-    statusFilters: { success: boolean; failed: boolean; skipped: boolean };
+    statusFilters: StatusFilters;
     showOnlyFailed: boolean;
   };
-  onFilterChange: (newFilters: Partial<FilterControlsProps['filterState']>) => void;
   availableTools: string[];
+  onToolChange: (toolType: string) => void;
+  onStatusChange: (status: keyof StatusFilters, checked: boolean) => void;
+  onShowOnlyFailedChange: (checked: boolean) => void;
 };
 
 export function FilterControls({
   filterState,
-  onFilterChange,
   availableTools,
+  onToolChange,
+  onStatusChange,
+  onShowOnlyFailedChange,
 }: FilterControlsProps) {
-  const handleStatusChange = (status: keyof typeof filterState.statusFilters, checked: boolean) => {
-    const newStatusFilters = { ...filterState.statusFilters, [status]: checked };
-    // Enforce at least one status is checked
-    if (Object.values(newStatusFilters).every(v => !v)) {
-      return;
+  const handleStatusChange = (status: keyof StatusFilters, checked: boolean) => {
+    if (!checked) {
+      const nextStatus = { ...filterState.statusFilters, [status]: checked };
+      if (Object.values(nextStatus).every(value => !value)) {
+        return;
+      }
     }
-    onFilterChange({ statusFilters: newStatusFilters });
+    onStatusChange(status, checked);
   };
 
   return (
@@ -49,7 +56,7 @@ export function FilterControls({
         <Label htmlFor="tool-filter">Tool</Label>
         <Select
           value={filterState.toolType}
-          onValueChange={(value) => onFilterChange({ toolType: value })}
+          onValueChange={(value) => onToolChange(value)}
         >
           <SelectTrigger id="tool-filter" className="w-[180px]">
             <SelectValue placeholder="Filter by tool" />
@@ -104,7 +111,7 @@ export function FilterControls({
         <Switch
           id="show-only-failed"
           checked={filterState.showOnlyFailed}
-          onCheckedChange={(checked) => onFilterChange({ showOnlyFailed: checked })}
+          onCheckedChange={(checked) => onShowOnlyFailedChange(checked === true)}
         />
         <Label htmlFor="show-only-failed">Show only failed steps</Label>
       </div>

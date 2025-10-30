@@ -3,27 +3,26 @@ import { supabase } from '@/lib/supabase';
 import type { Reflection, ReflectionWithWeight } from '@/lib/schemas/reflectionSchema';
 
 /**
- * Calculate recency weight for a reflection using exponential decay
+ * Step-function recency weighting used by context-aware prioritization.
  *
- * Formula: weight = 0.5^(age_in_days / 7)
- * - Today: weight = 1.0
- * - 7 days old: weight = 0.5
- * - 14 days old: weight = 0.25
- * - 30 days old: weight ≈ 0.06 (floored to 0)
- *
- * @param createdAt - Date when reflection was created
- * @returns Weight value between 0 and 1
+ * - 0-7 days old    → 1.0
+ * - 8-14 days old   → 0.5
+ * - 15+ days old    → 0.25
  */
 export function calculateRecencyWeight(createdAt: Date): number {
-  const now = new Date();
-  const ageInMs = now.getTime() - createdAt.getTime();
-  const ageInDays = ageInMs / (1000 * 60 * 60 * 24);
-  const halfLife = 7; // days
+  const ageInDays = Math.floor(
+    (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24),
+  );
 
-  const weight = Math.pow(0.5, ageInDays / halfLife);
+  if (ageInDays <= 7) {
+    return 1.0;
+  }
 
-  // Floor at 0.06 (30 days old, effectively zero)
-  return weight < 0.06 ? 0 : weight;
+  if (ageInDays <= 14) {
+    return 0.5;
+  }
+
+  return 0.25;
 }
 
 /**
@@ -56,21 +55,47 @@ export function formatRelativeTime(createdAt: Date): string {
  * @param limit - Maximum number of reflections to fetch (default: 5)
  * @returns Array of reflections with weights and relative times
  */
+type FetchReflectionsOptions = {
+  limit?: number;
+  withinDays?: number;
+  activeOnly?: boolean;
+};
+
+export function enrichReflection(reflection: Reflection): ReflectionWithWeight {
+  const createdAt = new Date(reflection.created_at);
+  const weight = calculateRecencyWeight(createdAt);
+
+  return {
+    ...reflection,
+    recency_weight: weight,
+    weight,
+    relative_time: formatRelativeTime(createdAt),
+  };
+}
+
 export async function fetchRecentReflections(
   userId: string,
-  limit: number = 5
+  options: FetchReflectionsOptions = {},
 ): Promise<ReflectionWithWeight[]> {
+  const { limit = 5, withinDays = 30, activeOnly = false } = options;
 
-  // Filter out reflections older than 30 days (weight approaches 0)
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
-  const { data, error } = await supabase
+  let query = supabase
     .from('reflections')
     .select('*')
     .eq('user_id', userId)
-    .gte('created_at', thirtyDaysAgo.toISOString())
     .order('created_at', { ascending: false })
     .limit(limit);
+
+  if (withinDays > 0) {
+    const cutoff = new Date(Date.now() - withinDays * 24 * 60 * 60 * 1000);
+    query = query.gte('created_at', cutoff.toISOString());
+  }
+
+  if (activeOnly) {
+    query = query.eq('is_active_for_prioritization', true);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error('Error fetching reflections:', error);
@@ -81,12 +106,7 @@ export async function fetchRecentReflections(
     return [];
   }
 
-  // Calculate weights and relative times for each reflection
-  return data.map((reflection: Reflection) => ({
-    ...reflection,
-    weight: calculateRecencyWeight(new Date(reflection.created_at)),
-    relative_time: formatRelativeTime(new Date(reflection.created_at))
-  }));
+  return data.map((reflection: Reflection) => enrichReflection(reflection));
 }
 
 /**
@@ -120,9 +140,5 @@ export async function createReflection(
     throw new Error('No data returned from reflection creation');
   }
 
-  return {
-    ...data,
-    weight: calculateRecencyWeight(new Date(data.created_at)),
-    relative_time: formatRelativeTime(new Date(data.created_at))
-  };
+  return enrichReflection(data as Reflection);
 }
