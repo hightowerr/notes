@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { getDocumentsByTaskIds } from '@/lib/services/documentService';
+import { getTaskRecordsByIds } from '@/lib/services/taskRepository';
 import { DependencyAnalysisResult } from '@/lib/types/mastra';
 import { openai } from '@ai-sdk/openai';
 import { generateObject } from 'ai';
@@ -21,22 +22,15 @@ export async function analyzeTaskDependencies(
   task_ids: string[],
   options: { includeContext: boolean }
 ): Promise<DependencyAnalysisResult> {
-  const { data: tasks, error: tasksError } = await supabase
-    .from('task_embeddings')
-    .select('task_id, task_text')
-    .in('task_id', task_ids);
+  const { tasks, missingIds } = await getTaskRecordsByIds(task_ids, {
+    recoverMissing: true,
+  });
 
-  if (tasksError) {
-    throw new Error(`Failed to fetch tasks: ${tasksError.message}`);
-  }
-
-  if (!tasks || tasks.length === 0) {
+  if (tasks.length === 0) {
     throw new Error('No tasks found for provided task IDs');
   }
 
-  if (tasks.length !== task_ids.length) {
-    const foundIds = new Set(tasks.map((task) => task.task_id));
-    const missingIds = task_ids.filter((id) => !foundIds.has(id));
+  if (tasks.length !== task_ids.length || missingIds.length > 0) {
     throw new Error(`Missing task embeddings for IDs: ${missingIds.join(', ')}`);
   }
 

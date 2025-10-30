@@ -1,15 +1,15 @@
 <!--
 SYNC IMPACT REPORT
 ===================
-Version Change: 1.1.4 → 1.1.5
-Rationale: PATCH version bump - Updated plan-template.md version references from v1.1.3
-to v1.1.4 to maintain consistency across all templates. The constitution was already at
-v1.1.4, but the plan template contained stale references (lines 50 and 228). This is a
-non-semantic consistency fix to ensure all templates reference the current constitution
-version.
+Version Change: 1.1.5 → 1.1.6
+Rationale: PATCH version bump - Clarified governance and versioning policy, improved
+formatting consistency, and validated alignment with all templates. No principle changes
+or structural modifications. Added explicit guidance on version references in templates
+and improved amendment procedure clarity. This is a non-semantic refinement to enhance
+usability and reduce ambiguity in constitution maintenance.
 
 Modified Principles:
-  - None (version reference updates only)
+  - None (clarification and formatting improvements only)
 
 Added Sections:
   - None
@@ -18,14 +18,19 @@ Removed Sections:
   - None
 
 Templates Requiring Updates:
-  ✅ .specify/templates/plan-template.md - Updated version references (v1.1.3 → v1.1.4)
-  ✅ .specify/templates/tasks-template.md - No changes needed (no version references found)
-  ✅ .specify/templates/spec-template.md - No changes needed (no version references)
-  ✅ CLAUDE.md - No changes needed (documents principles, not version)
-  ✅ .claude/SYSTEM_RULES.md - No changes needed (implementation protocol, not version-dependent)
+  ✅ .specify/templates/plan-template.md - Version reference current (v1.1.4 references updated in previous version)
+  ✅ .specify/templates/tasks-template.md - No version references, slice principles aligned
+  ✅ .specify/templates/spec-template.md - No version references, requirement principles aligned
+  ✅ .specify/templates/agent-file-template.md - Template structure verified
+  ✅ .specify/templates/checklist-template.md - Validation rules aligned
+  ✅ CLAUDE.md - Documents principles correctly, references constitution
+  ✅ .claude/SYSTEM_RULES.md - Vertical slice protocol matches Principle VI
+  ✅ AGENTS.md - Repository workflow aligned with governance
+  ✅ README.md - No constitution-specific content requiring updates
 
 Follow-up TODOs:
-  - None (consistency maintenance only)
+  - Next MINOR version: Consider adding principle for AI safety/security patterns
+  - Next constitution review: Validate Test-First Development exception status (automated testing resolution)
 -->
 
 # AI Note Synthesiser Constitution
@@ -163,15 +168,31 @@ All changes must verify:
 ### Amendment Procedure
 Constitution changes require:
 1. Proposal documenting: rationale, affected principles, migration impact
-2. Version bump following semantic versioning (see below)
+2. Version bump following semantic versioning (see Versioning Policy below)
 3. Update of dependent templates (plan-template.md, spec-template.md, tasks-template.md)
-4. Sync Impact Report prepended to this file
+4. Sync Impact Report prepended to this file as HTML comment
 5. Commit message format: `docs: amend constitution to vX.Y.Z (summary of changes)`
 
+When templates reference constitution version numbers, they should be updated to
+match the current version. However, version drift in templates is non-critical
+and can be addressed in batch updates.
+
 ### Versioning Policy
-- **MAJOR**: Backward-incompatible changes (principle removal/redefinition requiring code changes)
-- **MINOR**: New principles or materially expanded guidance (additive changes)
-- **PATCH**: Clarifications, wording improvements, typo fixes (non-semantic refinements)
+- **MAJOR (X.0.0)**: Backward-incompatible changes requiring code modifications
+  - Examples: Principle removal, principle redefinition that invalidates existing code,
+    new mandatory requirements that existing features don't meet
+- **MINOR (x.Y.0)**: Additive changes that don't invalidate existing implementations
+  - Examples: New principle added, materially expanded guidance for existing principle,
+    new quality standard or development workflow step
+- **PATCH (x.y.Z)**: Non-semantic refinements with zero behavioral impact
+  - Examples: Clarifications, wording improvements, typo fixes, formatting changes,
+    template consistency updates, rationale enhancements
+
+**Version Determination Guidelines**:
+- If existing code would need changes to comply: MAJOR
+- If new code must follow new guidance but existing code is grandfathered: MINOR
+- If only documentation readability improves: PATCH
+- When uncertain, propose reasoning before finalizing version bump
 
 ### Compliance Review
 The /plan command Constitution Check section enforces these principles before design
@@ -182,7 +203,7 @@ The /tasks command validates slice compliance before generating tasks.md. Any
 task failing the Three Laws (SEE, DO, VERIFY) is rejected and restructured.
 
 **Runtime Guidance**: See `CLAUDE.md` and `.claude/SYSTEM_RULES.md` in repository
-root for agent-specific development instructions and slice enforcement protocol
+root for agent-specific development instructions and slice enforcement protocol.
 
 ---
-**Version**: 1.1.5 | **Ratified**: 2025-10-05 | **Last Amended**: 2025-10-16
+**Version**: 1.1.6 | **Ratified**: 2025-10-05 | **Last Amended**: 2025-10-28
