@@ -19,7 +19,7 @@ type CloudConnectionRow = {
   token_expires_at: string | null;
   folder_id: string | null;
   webhook_id: string | null;
-  updated_at: string;
+  webhook_registered_at: string | null;
   status?: 'active' | 'error';
   last_error_code?: string | null;
   last_error_message?: string | null;
@@ -39,7 +39,7 @@ const syncEvents: SyncEventRow[] = [];
 
 function insertConnection(row: Partial<CloudConnectionRow>) {
   const id = row.id ?? randomUUID();
-  const updated = row.updated_at ?? new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+  const registered = row.webhook_registered_at ?? new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
 
   connections.set(id, {
     id,
@@ -50,7 +50,7 @@ function insertConnection(row: Partial<CloudConnectionRow>) {
     token_expires_at: row.token_expires_at ?? new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     folder_id: row.folder_id ?? 'drive-folder',
     webhook_id: row.webhook_id ?? 'channel-old',
-    updated_at: updated,
+    webhook_registered_at: registered,
     status: row.status ?? 'active',
     last_error_code: row.last_error_code ?? null,
     last_error_message: row.last_error_message ?? null,
@@ -133,7 +133,7 @@ function buildCloudConnectionsUpdate(patch: Partial<CloudConnectionRow>) {
       );
 
       for (const row of rows) {
-        const next = { ...row, ...patch, updated_at: new Date().toISOString() };
+        const next = { ...row, ...patch };
         connections.set(row.id, next);
       }
 
@@ -225,6 +225,7 @@ describe('Google Drive webhook renewal cron', () => {
 
     const updatedConnection = connections.get(connectionId);
     expect(updatedConnection?.webhook_id).toMatch(/^channel-/);
+    expect(updatedConnection?.webhook_registered_at).toBeDefined();
     expect(updatedConnection?.status).toBe('active');
     expect(syncEvents).toHaveLength(1);
     expect(syncEvents[0]).toMatchObject({

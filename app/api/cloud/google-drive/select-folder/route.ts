@@ -110,6 +110,7 @@ export async function POST(request: Request) {
         folder_id: payload.folderId,
         folder_name: payload.folderName ?? null,
         webhook_id: webhookResult.channelId,
+        webhook_registered_at: new Date().toISOString(),
         last_sync: new Date().toISOString(),
         status: 'active',
         last_error_code: null,
