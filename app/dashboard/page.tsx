@@ -5,7 +5,7 @@
  * Implements T003: User views dashboard with all processed notes
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,7 +14,7 @@ import { Alert } from '@/components/ui/alert';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Download, Package, Target } from 'lucide-react';
+import { CheckCircle2, Download, FileText, Loader2, Package, Target, Trash2, Upload } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { MainNav } from '@/components/main-nav';
 import { OutcomeDisplay } from '@/app/components/OutcomeDisplay';
@@ -44,11 +44,89 @@ interface Document {
   size: number;
   mimeType: string;
   uploadedAt: string;
+  updatedAt?: string | null;
   status: DocumentStatus;
+  source?: 'manual_upload' | 'google_drive' | 'text_input';
+  syncEnabled?: boolean;
+  externalId?: string | null;
   confidence?: number;
   processingDuration?: number;
   summary?: DocumentSummary;
 }
+
+const SOURCE_LABELS: Record<NonNullable<Document['source']>, string> = {
+  manual_upload: 'Uploaded',
+  google_drive: 'Google Drive',
+  text_input: 'Text Input',
+};
+
+function GoogleDriveGlyph(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 48 48" role="img" aria-hidden="true" {...props}>
+      <path fill="#0F9D58" d="M20.79 7.04h7.52l12.9 21.96-3.76 6.5z" />
+      <path fill="#4285F4" d="M12.55 40.96h21.54l3.86-6.54H16.41z" />
+      <path fill="#F4B400" d="M7.79 29l8.62-14.9 3.91 6.6-8.7 14.9z" />
+    </svg>
+  );
+}
+
+function SourceBadge({
+  source,
+  syncEnabled,
+  status,
+}: {
+  source?: Document['source'];
+  syncEnabled?: boolean;
+  status?: DocumentStatus;
+}) {
+  if (!source) {
+    return null;
+  }
+
+  const baseClasses = 'inline-flex items-center gap-1 rounded-full border px-2 py-[2px] text-xs font-medium';
+
+  if (source === 'google_drive') {
+    const isSynced = syncEnabled && status === 'completed';
+    const isSyncing = syncEnabled && status && status !== 'completed';
+
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`${baseClasses} border-emerald-200 bg-emerald-50 text-emerald-700`}>
+          <GoogleDriveGlyph className="h-3.5 w-3.5" />
+          {SOURCE_LABELS.google_drive}
+        </span>
+        {syncEnabled ? (
+          <span
+            className={[
+              'inline-flex items-center gap-1 rounded-full border px-2 py-[2px] text-[10px] font-semibold uppercase tracking-wide',
+              isSynced
+                ? 'border-emerald-300 bg-emerald-600/10 text-emerald-700'
+                : 'border-amber-300 bg-amber-100/80 text-amber-800',
+            ].join(' ')}
+          >
+            {isSynced ? (
+              <CheckCircle2 className="h-3 w-3" aria-hidden />
+            ) : (
+              <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+            )}
+            {isSynced ? 'Synced' : 'Syncing'}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+
+  const icon = source === 'text_input' ? <FileText className="h-3 w-3" aria-hidden /> : <Upload className="h-3 w-3" aria-hidden />;
+
+  return (
+    <span className={`${baseClasses} border-muted-foreground/20 bg-muted/60 text-muted-foreground`}>
+      {icon}
+      {SOURCE_LABELS[source]}
+    </span>
+  );
+}
+
+const POLL_INTERVAL_MS = 8000;
 
 export default function DashboardPage() {
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -62,41 +140,209 @@ export default function DashboardPage() {
   const [exporting, setExporting] = useState(false);
   const [outcomeModalOpen, setOutcomeModalOpen] = useState(false);
   const [editingOutcome, setEditingOutcome] = useState<any>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // Fetch documents from API
-  const fetchDocuments = async () => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const params = new URLSearchParams();
-      if (statusFilter !== 'all') {
-        params.append('status', statusFilter);
+  const fetchDocuments = useCallback(
+    async ({
+      showLoading = true,
+      status = statusFilter,
+      sort = sortField,
+      order = sortOrder,
+    }: {
+      showLoading?: boolean;
+      status?: DocumentStatus;
+      sort?: SortField;
+      order?: SortOrder;
+    } = {}) => {
+      if (showLoading) {
+        setLoading(true);
+        setError(null);
+      } else {
+        setRefreshing(true);
       }
-      params.append('sort', sortField);
-      params.append('order', sortOrder);
 
-      const response = await fetch(`/api/documents?${params.toString()}`);
-      const data = await response.json();
+      try {
+        const params = new URLSearchParams();
+        if (status !== 'all') {
+          params.append('status', status);
+        }
+        params.append('sort', sort);
+        params.append('order', order);
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to fetch documents');
+        const response = await fetch(`/api/documents?${params.toString()}`);
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Failed to fetch documents');
+        }
+
+        setDocuments(data.documents);
+        setError(null);
+      } catch (err) {
+        console.error('[Dashboard] Error fetching documents:', err);
+        const message = err instanceof Error ? err.message : 'An error occurred';
+
+        if (showLoading) {
+          setError(message);
+        } else {
+          toast.error(`Unable to refresh documents: ${message}`);
+        }
+      } finally {
+        if (showLoading) {
+          setLoading(false);
+        } else {
+          setRefreshing(false);
+        }
       }
-
-      setDocuments(data.documents);
-    } catch (err) {
-      console.error('[Dashboard] Error fetching documents:', err);
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setLoading(false);
-    }
-  };
+    },
+    [sortField, sortOrder, statusFilter]
+  );
 
   // Fetch on mount and when filters change
   useEffect(() => {
     fetchDocuments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter, sortField, sortOrder]);
+  }, []);
+
+  // Background polling to keep list in sync
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      fetchDocuments({ showLoading: false });
+    }, POLL_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [fetchDocuments]);
+
+  const handleStatusChange = (value: DocumentStatus) => {
+    setStatusFilter(value);
+    fetchDocuments({ status: value });
+  };
+
+  const handleSortFieldChange = (value: SortField) => {
+    setSortField(value);
+    fetchDocuments({ sort: value });
+  };
+
+  const handleSortOrderToggle = () => {
+    const nextOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+    setSortOrder(nextOrder);
+    fetchDocuments({ order: nextOrder });
+  };
+
+  const removeDocumentsFromState = (ids: string[]) => {
+    if (ids.length === 0) {
+      return;
+    }
+
+    const idSet = new Set(ids);
+
+    setDocuments(prev => prev.filter(doc => !idSet.has(doc.id)));
+
+    setSelectedDocuments(prev => {
+      if (prev.size === 0) {
+        return prev;
+      }
+      const next = new Set(prev);
+      ids.forEach(id => next.delete(id));
+      return next;
+    });
+
+    setExpandedCards(prev => {
+      if (prev.size === 0) {
+        return prev;
+      }
+      const next = new Set(prev);
+      ids.forEach(id => next.delete(id));
+      return next;
+    });
+  };
+
+  const handleDeleteDocuments = async (ids: string[]) => {
+    if (ids.length === 0) {
+      toast.error('Please select at least one document to delete');
+      return;
+    }
+
+    const docsToDelete = documents.filter(doc => ids.includes(doc.id));
+    const nameLookup = new Map(docsToDelete.map(doc => [doc.id, doc.name]));
+
+    const label =
+      docsToDelete.length === 1
+        ? `"${docsToDelete[0]?.name ?? 'this document'}"`
+        : `${docsToDelete.length} documents`;
+
+    const confirmed = window.confirm(`Delete ${label}? This action cannot be undone.`);
+    if (!confirmed) {
+      return;
+    }
+
+    setDeleting(true);
+
+    try {
+      const results = await Promise.allSettled(
+        ids.map(async (docId) => {
+          const response = await fetch(`/api/documents/${docId}`, {
+            method: 'DELETE',
+          });
+
+          if (!response.ok) {
+            if (response.status === 404) {
+              return docId;
+            }
+
+            let message = 'Failed to delete document';
+            try {
+              const data = await response.json();
+              if (data?.error) {
+                message = data.error;
+              }
+            } catch {
+              // Ignore JSON parsing errors
+            }
+
+            throw new Error(message);
+          }
+
+          return docId;
+        })
+      );
+
+      const deletedIds: string[] = [];
+      const failedMessages: string[] = [];
+
+      results.forEach((result, index) => {
+        const docId = ids[index];
+        const docName = nameLookup.get(docId) ?? 'Document';
+
+        if (result.status === 'fulfilled') {
+          deletedIds.push(result.value ?? docId);
+        } else {
+          const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+          failedMessages.push(`${docName}: ${reason}`);
+        }
+      });
+
+      if (deletedIds.length > 0) {
+        removeDocumentsFromState(deletedIds);
+        toast.success(
+          deletedIds.length === 1
+            ? 'Document deleted successfully'
+            : `${deletedIds.length} documents deleted successfully`
+        );
+        await fetchDocuments({ showLoading: false });
+      }
+
+      if (failedMessages.length > 0) {
+        toast.error(failedMessages.join(' '));
+      }
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   // Clear selection when filters change (prevents selecting documents that are no longer visible)
   useEffect(() => {
@@ -131,6 +377,40 @@ export default function DashboardPage() {
       hour: '2-digit',
       minute: '2-digit',
     });
+  };
+
+  const formatRelativeUpdated = (dateString: string): string => {
+    const updated = new Date(dateString);
+    const timestamp = updated.getTime();
+    if (!Number.isFinite(timestamp)) {
+      return 'recently';
+    }
+
+    const diffMs = Date.now() - timestamp;
+    if (diffMs < 0) {
+      return 'just now';
+    }
+
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+
+    if (diffMs < minute) {
+      return 'just now';
+    }
+
+    if (diffMs < hour) {
+      const minutes = Math.round(diffMs / minute);
+      return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+    }
+
+    if (diffMs < day) {
+      const hours = Math.round(diffMs / hour);
+      return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+    }
+
+    const days = Math.round(diffMs / day);
+    return `${days} day${days === 1 ? '' : 's'} ago`;
   };
 
   // Get status badge variant
@@ -324,7 +604,7 @@ export default function DashboardPage() {
               variant="outline"
               size="sm"
               onClick={() => handleBulkExport('json')}
-              disabled={exporting}
+              disabled={exporting || deleting}
               className="flex items-center gap-1.5"
             >
               <Download className="h-4 w-4" />
@@ -334,17 +614,27 @@ export default function DashboardPage() {
               variant="outline"
               size="sm"
               onClick={() => handleBulkExport('markdown')}
-              disabled={exporting}
+              disabled={exporting || deleting}
               className="flex items-center gap-1.5"
             >
               <Download className="h-4 w-4" />
               {exporting ? 'Exporting...' : 'Export Markdown'}
             </Button>
             <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => handleDeleteDocuments(Array.from(selectedDocuments))}
+              disabled={deleting || exporting}
+              className="flex items-center gap-1.5"
+            >
+              <Trash2 className="h-4 w-4" />
+              {deleting ? 'Deleting...' : 'Delete'}
+            </Button>
+            <Button
               variant="ghost"
               size="sm"
               onClick={deselectAll}
-              disabled={exporting}
+              disabled={exporting || deleting}
             >
               Clear Selection
             </Button>
@@ -355,7 +645,7 @@ export default function DashboardPage() {
       {/* Filters and Sort Controls */}
       <div className="flex flex-col sm:flex-row gap-4 mb-6">
         {/* Status Filter Tabs */}
-        <Tabs value={statusFilter} onValueChange={(value) => setStatusFilter(value as DocumentStatus)}>
+        <Tabs value={statusFilter} onValueChange={(value) => handleStatusChange(value as DocumentStatus)}>
           <TabsList>
             <TabsTrigger value="all">All</TabsTrigger>
             <TabsTrigger value="completed">Completed</TabsTrigger>
@@ -369,7 +659,7 @@ export default function DashboardPage() {
         <div className="flex gap-2">
           <select
             value={sortField}
-            onChange={(e) => setSortField(e.target.value as SortField)}
+            onChange={(e) => handleSortFieldChange(e.target.value as SortField)}
             className="px-3 py-2 border rounded-md bg-background"
             aria-label="Sort documents by"
           >
@@ -382,7 +672,7 @@ export default function DashboardPage() {
           <Button
             variant="outline"
             size="icon"
-            onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+            onClick={handleSortOrderToggle}
             aria-label={`Sort order: ${sortOrder === 'asc' ? 'ascending' : 'descending'}`}
           >
             {sortOrder === 'asc' ? '↑' : '↓'}
@@ -405,6 +695,9 @@ export default function DashboardPage() {
       {/* Document Count */}
       <p className="text-sm text-muted-foreground mb-4" aria-live="polite">
         Showing {documents.length} document{documents.length !== 1 ? 's' : ''}
+        {refreshing && (
+          <span className="ml-2 text-xs text-muted-foreground">Updating...</span>
+        )}
       </p>
 
       {/* Loading State */}
@@ -457,11 +750,28 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {documents.map((doc) => {
             const isExpanded = expandedCards.has(doc.id);
+            const updatedDisplay = (() => {
+              if (!doc.updatedAt) {
+                return null;
+              }
+              const updatedMs = new Date(doc.updatedAt).getTime();
+              const uploadedMs = new Date(doc.uploadedAt).getTime();
+
+              if (!Number.isFinite(updatedMs) || !Number.isFinite(uploadedMs)) {
+                return null;
+              }
+
+              if (Math.abs(updatedMs - uploadedMs) <= 60_000) {
+                return null;
+              }
+
+              return formatRelativeUpdated(doc.updatedAt);
+            })();
 
             return (
               <Card key={doc.id} className="flex flex-col">
                 <CardHeader>
-                  <div className="flex items-start gap-3">
+                  <div className="flex w-full items-start gap-3">
                     {/* Checkbox for bulk export (only for completed documents) */}
                     {(doc.status === 'completed' || doc.status === 'review_required') && doc.summary && (
                       <Checkbox
@@ -477,7 +787,17 @@ export default function DashboardPage() {
                       </CardTitle>
                       <CardDescription>
                         {formatSize(doc.size)} • {formatDate(doc.uploadedAt)}
+                        {updatedDisplay ? (
+                          <span className="mt-1 block text-xs text-muted-foreground">
+                            Updated {updatedDisplay}
+                          </span>
+                        ) : null}
                       </CardDescription>
+                      {doc.source ? (
+                        <div className="mt-2">
+                          <SourceBadge source={doc.source} syncEnabled={doc.syncEnabled} status={doc.status} />
+                        </div>
+                      ) : null}
                       <div className="flex gap-2 mt-2">
                         <Badge variant={getStatusBadgeVariant(doc.status)}>{doc.status.replace('_', ' ')}</Badge>
                         {doc.confidence !== undefined && (
@@ -487,6 +807,16 @@ export default function DashboardPage() {
                         )}
                       </div>
                     </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleDeleteDocuments([doc.id])}
+                      disabled={deleting}
+                      aria-label={`Delete ${doc.name}`}
+                      className="ml-auto text-muted-foreground hover:text-destructive"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
                 </CardHeader>
 

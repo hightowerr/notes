@@ -49,5 +49,17 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 *Zone.Identifier
-*Zone.Identifier
 *dropbox.attrs
+
+# OAuth & API credentials (NEVER COMMIT THESE)
+client_secret*.json
+*_secret*.json
+service-account*.json
+credentials.json
+
+# Temporary documentation (remove if these should be tracked)
+# OCR_IMPLEMENTATION_GUIDE.md
+# WEBHOOK_FIX_GUIDE.md
+# WEBHOOK_FIX_SUMMARY.md
+# WEBHOOK_TEST_GUIDE.md
+# T006_MANUAL_TEST.md

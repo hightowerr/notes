@@ -249,6 +249,10 @@ export async function POST(request: Request) {
     // Trigger automatic processing only if not queued (FR-001 + T005)
     if (queueResult.immediate) {
       const processUrl = new URL('/api/process', request.url);
+      if (processUrl.hostname === 'localhost' || processUrl.hostname === '127.0.0.1') {
+        processUrl.protocol = 'http:';
+      }
+
       fetch(processUrl.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

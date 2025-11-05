@@ -5,6 +5,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import DashboardPage from '../page';
 
@@ -14,7 +15,14 @@ global.fetch = vi.fn();
 describe('Dashboard Page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (global.fetch as any).mockImplementation((url: string) => {
+    (global.fetch as any).mockImplementation((url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/documents') && init?.method === 'DELETE') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        });
+      }
+
       if (url.startsWith('/api/documents')) {
         return Promise.resolve({
           ok: true,
@@ -102,11 +110,97 @@ describe('Dashboard Page', () => {
   it('should filter documents by status', async () => {
     render(<DashboardPage />);
 
-    fireEvent.click(screen.getByText('Completed'));
+    const fetchMock = vi.mocked(global.fetch);
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('status=completed'));
+      expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/documents'));
     });
+
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('tab', { name: 'Completed' }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url]) => typeof url === 'string' && url.includes('status=completed')
+        )
+      ).toBe(true);
+    });
+  });
+
+  it('should delete a document from the dashboard', async () => {
+    const mockDocuments = [
+      {
+        id: '1',
+        name: 'removable.pdf',
+        size: 2048,
+        mimeType: 'application/pdf',
+        uploadedAt: '2025-10-08T10:00:00Z',
+        status: 'completed',
+        confidence: 0.9,
+        summary: {
+          topics: ['Topic'],
+          decisions: ['Decision'],
+          actions: ['Action'],
+          lno_tasks: {
+            leverage: [],
+            neutral: [],
+            overhead: [],
+          },
+        },
+      },
+    ];
+
+    let documentsResponse = mockDocuments.slice();
+
+    (global.fetch as any).mockImplementation((url: string, init?: RequestInit) => {
+      if (url.startsWith('/api/documents') && init?.method === 'DELETE') {
+        documentsResponse = [];
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        });
+      }
+
+      if (url.startsWith('/api/documents')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ documents: documentsResponse }),
+        });
+      }
+
+      if (url.startsWith('/api/outcomes')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ outcomes: [] }),
+        });
+      }
+
+      return Promise.resolve({ ok: false, json: () => Promise.resolve({ error: 'not found' }) });
+    });
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const user = userEvent.setup();
+
+    render(<DashboardPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('removable.pdf')).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole('button', { name: /Delete removable.pdf/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('removable.pdf')).not.toBeInTheDocument();
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/documents/1',
+      expect.objectContaining({ method: 'DELETE' })
+    );
+
+    confirmSpy.mockRestore();
   });
 
   it('should sort documents by confidence', async () => {

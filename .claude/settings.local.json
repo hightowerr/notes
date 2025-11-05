@@ -35,7 +35,10 @@
       "Bash(npm run test:contract:*)",
       "Bash(npx vitest run:*)",
       "Bash(chmod:*)",
-      "Bash(bash:*)"
+      "Bash(bash:*)",
+      "Bash(git checkout:*)",
+      "Bash(pnpm test:run:*)",
+      "Bash(pnpm add:*)"
     ],
     "deny": [],
     "ask": []

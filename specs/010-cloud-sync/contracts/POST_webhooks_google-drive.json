@@ -1,0 +1,128 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Google Drive Webhook API",
+    "version": "1.0.0",
+    "description": "Receives push notifications from Google Drive when monitored files change"
+  },
+  "paths": {
+    "/api/webhooks/google-drive": {
+      "post": {
+        "summary": "Receive Drive change notification",
+        "description": "Google Drive Push Notification webhook endpoint. Must respond within 200ms.",
+        "operationId": "handleDriveWebhook",
+        "tags": ["Webhooks"],
+        "parameters": [
+          {
+            "name": "x-goog-channel-id",
+            "in": "header",
+            "required": true,
+            "description": "Webhook channel ID from registration",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "x-goog-resource-state",
+            "in": "header",
+            "required": true,
+            "description": "Event type: sync, add, remove, update, trash, untrash, change",
+            "schema": {
+              "type": "string",
+              "enum": ["sync", "add", "remove", "update", "trash", "untrash", "change"]
+            }
+          },
+          {
+            "name": "x-goog-channel-token",
+            "in": "header",
+            "required": true,
+            "description": "Verification token to authenticate webhook",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-goog-resource-id",
+            "in": "header",
+            "required": false,
+            "description": "Google Drive resource ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-goog-changed",
+            "in": "header",
+            "required": false,
+            "description": "Comma-separated list of changed properties",
+            "schema": {
+              "type": "string",
+              "example": "content,properties"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "description": "Webhook body (typically empty for Drive notifications)"
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook acknowledged (processing queued in background)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["received"],
+                  "properties": {
+                    "received": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Invalid webhook token (authentication failed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Invalid token"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Webhook processing error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error message"
+          }
+        }
+      }
+    }
+  }
+}

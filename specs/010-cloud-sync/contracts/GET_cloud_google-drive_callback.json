@@ -1,0 +1,92 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Google Drive OAuth Callback API",
+    "version": "1.0.0",
+    "description": "Handles OAuth callback and stores connection credentials"
+  },
+  "paths": {
+    "/api/cloud/google-drive/callback": {
+      "get": {
+        "summary": "OAuth callback handler",
+        "description": "Receives authorization code from Google OAuth, exchanges for tokens, stores encrypted credentials",
+        "operationId": "handleOAuthCallback",
+        "tags": ["Cloud Storage"],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": true,
+            "description": "OAuth authorization code from Google",
+            "schema": {
+              "type": "string",
+              "minLength": 10
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "description": "CSRF protection state parameter",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to cloud settings page after successful connection",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string",
+                  "example": "/settings/cloud"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or invalid authorization code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Missing auth code"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Token exchange or storage failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Failed to exchange authorization code"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error message"
+          }
+        }
+      }
+    }
+  }
+}
