@@ -16,6 +16,7 @@ export const cloudConnectionSchema = z.object({
   folder_id: z.string().min(1).nullable(),
   folder_name: z.string().min(1).nullable(),
   webhook_id: z.string().min(1).nullable(),
+  webhook_registered_at: z.string().datetime().nullable(),
   status: z.enum(['active', 'error']),
   last_error_code: z.string().nullable(),
   last_error_message: z.string().nullable(),

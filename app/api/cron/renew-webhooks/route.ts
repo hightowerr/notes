@@ -20,7 +20,7 @@ type CloudConnectionRow = {
   token_expires_at: string | null;
   folder_id: string | null;
   webhook_id: string | null;
-  updated_at: string;
+  webhook_registered_at: string | null;
 };
 
 type RenewalResult = {
@@ -78,12 +78,12 @@ export async function GET(request: Request) {
   const { data, error } = await supabase
     .from('cloud_connections')
     .select(
-      'id, user_id, access_token, refresh_token, token_expires_at, folder_id, webhook_id, updated_at'
+      'id, user_id, access_token, refresh_token, token_expires_at, folder_id, webhook_id, webhook_registered_at'
     )
     .eq('provider', 'google_drive')
     .not('folder_id', 'is', null)
     .not('webhook_id', 'is', null)
-    .lt('updated_at', thresholdIso);
+    .lt('webhook_registered_at', thresholdIso);
 
   if (error) {
     console.error('[Webhook Renewal] Failed to load connections', error);
@@ -152,6 +152,7 @@ export async function GET(request: Request) {
         .from('cloud_connections')
         .update({
           webhook_id: registration.channelId,
+          webhook_registered_at: new Date().toISOString(),
           status: 'active',
           last_error_code: null,
           last_error_message: null,

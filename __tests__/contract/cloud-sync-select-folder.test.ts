@@ -235,6 +235,7 @@ describe('Google Drive folder selection', () => {
     expect(connection.folder_id).toBe('folder-abc');
     expect(connection.folder_name).toBe('Project Docs');
     expect(connection.webhook_id).toBe('channel-123');
+    expect(connection.webhook_registered_at).toBeDefined();
     expect(connection.status).toBe('active');
     expect(connection.last_error_code).toBeNull();
     expect(connection.last_error_message).toBeNull();
