@@ -162,6 +162,36 @@ Each pitch has a **fixed appetite** (time budget). We shape the solution to fit 
 
 ---
 
+### Phase 6: Document-Level Reprocessing
+**Appetite:** 1-2 days (small batch)
+
+**Problem:** Cannot re-analyze documents after OCR/AI improvements without manual deletion
+
+**Solution:** "Reprocess" button on each document card
+
+**Components:**
+- API endpoint: `POST /api/documents/[id]/reprocess`
+- Google Drive files: Download latest version from Drive
+- Manual uploads: Reprocess existing file with new OCR
+- Cascade delete old data (embeddings/relationships)
+- Trigger complete pipeline (convert → AI → embeddings)
+
+**Key unlock:** Users apply system improvements to existing documents
+
+**Features:**
+- ✅ Single-click reprocessing per document
+- ✅ Google Drive re-download (latest version)
+- ✅ Automatic cascade cleanup
+- ✅ Loading states + error handling
+- ❌ No batch operations (Phase 2 if needed)
+- ❌ No diff view (just updated result)
+
+**Time Saved:** 50 hours manual work → 15 seconds per document
+
+[Read Full Pitch →](./phase-6-document-reprocessing.md)
+
+---
+
 ## Total Timeline: 5-6 Weeks (vs 6+ weeks custom)
 
 Each phase is:
@@ -171,6 +201,7 @@ Each phase is:
 
 **Overall Time Savings with Mastra:** 25-40% reduction (1-2 weeks saved)
 **Phase 5 adds:** Autonomous cloud sync capability
+**Phase 6 adds:** Document reprocessing capability (1-2 days)
 
 ---
 
@@ -312,6 +343,6 @@ const trace = await taskOrchestratorAgent.getExecutionTrace(executionId);
 
 ---
 
-**Last Updated:** 2025-10-24
-**Status:** Updated with Phase 5 (Context-Aware Re-Prioritization)
+**Last Updated:** 2025-11-05
+**Status:** Updated with Phase 6 (Document-Level Reprocessing)
 **Framework:** Mastra AI (TypeScript-first, YC-backed)

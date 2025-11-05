@@ -1,0 +1,118 @@
+openapi: 3.0.3
+info:
+  title: Document Reprocessing API
+  description: API endpoint for re-analyzing existing documents with latest OCR and AI improvements
+  version: 1.0.0
+
+paths:
+  /api/documents/{id}/reprocess:
+    post:
+      summary: Reprocess document
+      description: |
+        Re-analyze an existing document using the latest OCR and AI extraction logic.
+        For Google Drive documents, downloads the latest version from Drive.
+        For manually uploaded documents, uses the stored file.
+        Text input documents cannot be reprocessed (no file stored).
+
+      operationId: reprocessDocument
+      tags:
+        - documents
+
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Document UUID
+          schema:
+            type: string
+            format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+
+      responses:
+        '200':
+          description: Document successfully queued for reprocessing
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - status
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  status:
+                    type: string
+                    enum: [processing, queued]
+                    description: |
+                      - processing: Reprocessing started immediately
+                      - queued: Added to queue (when 3+ documents already processing)
+                  message:
+                    type: string
+                    example: "Document queued for reprocessing"
+                  queue_position:
+                    type: integer
+                    description: Position in queue (only present when status=queued)
+                    example: 4
+
+        '400':
+          description: Bad request (text input document)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Cannot reprocess text input documents - no file stored"
+
+        '401':
+          description: Unauthorized (Google Drive token expired)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Google Drive authentication expired. Please reconnect your account."
+
+        '404':
+          description: Not found (document or Drive file deleted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                documentNotFound:
+                  value:
+                    error: "Document not found"
+                driveFileDeleted:
+                  value:
+                    error: "File no longer available in Google Drive"
+
+        '409':
+          description: Conflict (document already being processed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Document is already being processed. Please wait for current operation to complete."
+
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Reprocessing failed. Please try again."
+
+components:
+  schemas:
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
