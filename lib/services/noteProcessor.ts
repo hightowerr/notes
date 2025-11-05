@@ -5,6 +5,8 @@
  */
 
 import mammoth from 'mammoth';
+import { createWorker } from 'tesseract.js';
+import { pdfToPng } from 'pdf-to-png-converter';
 import { generateContentHash } from '@/lib/schemas';
 
 // Type definition for pdf-parse module
@@ -238,29 +240,116 @@ async function convertTxtToMarkdown(buffer: Buffer): Promise<string> {
 
 /**
  * OCR fallback for unreadable PDFs (FR-009)
- * Currently logs and returns placeholder - full OCR requires Tesseract.js
+ * Uses Tesseract.js to extract text from scanned images
  * @param buffer - PDF file buffer
- * @returns Markdown string (placeholder implementation)
+ * @returns Markdown string with extracted text
  */
 async function applyOcrFallback(buffer: Buffer): Promise<string> {
-  console.log('[OCR FALLBACK] Applying OCR to scanned PDF...');
+  console.log('[OCR FALLBACK] Starting OCR processing for scanned PDF...');
+  const startTime = Date.now();
 
-  // TODO: Implement full OCR with Tesseract.js if needed
-  // For P0, we'll return a placeholder to indicate OCR was attempted
+  let worker: Awaited<ReturnType<typeof createWorker>> | null = null;
 
-  const placeholder = `# Document Processing Notice
+  try {
+    // Convert PDF pages to PNG images
+    console.log('[OCR] Converting PDF to images...');
+    const pngPages = await pdfToPng(buffer, {
+      viewportScale: 2.0, // Higher resolution for better OCR
+      outputFolder: undefined, // Return buffers instead of writing to disk
+      strictPagesToProcess: false,
+      pagesToProcess: [1, 2, 3, 4, 5], // Process first 5 pages max (performance)
+    });
 
-This document appears to be a scanned image or contains minimal extractable text content.
+    if (!pngPages || pngPages.length === 0) {
+      throw new Error('Failed to convert PDF pages to images');
+    }
+
+    console.log(`[OCR] Converted ${pngPages.length} pages to images`);
+
+    // Initialize Tesseract worker with explicit paths for Next.js
+    console.log('[OCR] Initializing Tesseract worker...');
+    worker = await createWorker('eng', 1, {
+      logger: () => {}, // Suppress verbose Tesseract logs
+      // Use CDN paths that work in Next.js environment
+      workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/worker.min.js',
+      langPath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@v6.0.0/lang-data',
+      corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@v6.0.0',
+    });
+
+    // Extract text from each page
+    const pageTexts: string[] = [];
+    for (let i = 0; i < pngPages.length; i++) {
+      console.log(`[OCR] Processing page ${i + 1}/${pngPages.length}...`);
+
+      const page = pngPages[i];
+      if (!page || !page.content) {
+        console.warn(`[OCR] Skipping page ${i + 1} - no content`);
+        continue;
+      }
+
+      try {
+        const { data } = await worker.recognize(page.content);
+        const text = data.text.trim();
+
+        if (text.length > 0) {
+          pageTexts.push(`## Page ${i + 1}\n\n${text}`);
+          console.log(`[OCR] Extracted ${text.length} characters from page ${i + 1}`);
+        } else {
+          console.warn(`[OCR] No text extracted from page ${i + 1}`);
+        }
+      } catch (error) {
+        console.error(`[OCR] Failed to process page ${i + 1}:`, error);
+        pageTexts.push(`## Page ${i + 1}\n\n[OCR processing failed for this page]`);
+      }
+    }
+
+    // Terminate worker
+    await worker.terminate();
+    worker = null;
+
+    // Combine all page texts
+    const markdown = pageTexts.length > 0
+      ? `# Document (OCR Extracted)\n\n${pageTexts.join('\n\n')}`
+      : `# Document Processing Notice\n\nUnable to extract readable text from this PDF using OCR.`;
+
+    const duration = Date.now() - startTime;
+    console.log('[OCR FALLBACK] Complete', {
+      duration,
+      pagesProcessed: pngPages.length,
+      totalLength: markdown.length,
+      avgCharsPerPage: Math.round(markdown.length / pngPages.length),
+    });
+
+    return markdown;
+
+  } catch (error) {
+    // Ensure worker is terminated even on error
+    if (worker) {
+      try {
+        await worker.terminate();
+      } catch (terminateError) {
+        console.error('[OCR] Failed to terminate worker:', terminateError);
+      }
+    }
+
+    const duration = Date.now() - startTime;
+    console.error('[OCR FALLBACK] Failed', {
+      duration,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    // Return fallback message if OCR completely fails
+    return `# Document Processing Notice
+
+This document appears to be a scanned image or presentation slides.
 
 **File Size:** ${(buffer.length / 1024).toFixed(2)} KB
 
-**Status:** Unable to extract text content for AI summarization.
+**OCR Status:** Processing failed - ${error instanceof Error ? error.message : 'Unknown error'}
 
-**Next Steps:** This document requires manual review or additional processing with OCR tools.
+**Next Steps:** This document may require manual review or alternative processing methods.
 `;
-
-  console.log('[OCR FALLBACK] Returning placeholder content for testing');
-  return placeholder;
+  }
 }
 
 /**

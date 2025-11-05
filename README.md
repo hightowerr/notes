@@ -99,7 +99,9 @@ An autonomous document intelligence workspace that ingests meeting notes and res
    NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_supabase_anon_key
    OPENAI_API_KEY=your_openai_api_key
+   ENCRYPTION_KEY=32_byte_random_secret
    ```
+   Generate the encryption key with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` and store it securely.
 
 3. Apply database migrations using the Supabase CLI (≥1.188).
    ```bash

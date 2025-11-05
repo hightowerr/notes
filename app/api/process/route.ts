@@ -74,33 +74,65 @@ export async function POST(request: NextRequest) {
       .eq('id', fileId);
     console.log('[PROCESS LOG] Updated status to processing');
 
-    // 4. Download file from Supabase storage
-    const { data: fileData, error: downloadError } = await supabase
-      .storage
-      .from('notes')
-      .download(file.storage_path);
-    console.log('[PROCESS LOG] Downloaded file from storage');
+    const isTextInput = file.source === 'text_input';
+    let markdown: string;
+    let contentHash = file.content_hash;
 
-    if (downloadError || !fileData) {
-      throw new Error(`Failed to download file from storage: ${downloadError?.message}`);
+    if (isTextInput) {
+      const inlineContent = typeof body.rawContent === 'string' ? body.rawContent : '';
+
+      if (!inlineContent.trim()) {
+        console.error('[PROCESS ERROR] Missing raw content for text input:', { fileId });
+        return Response.json(
+          {
+            success: false,
+            error: 'Missing raw content for text input document',
+            code: 'INVALID_REQUEST',
+          },
+          { status: 400 }
+        );
+      }
+
+      await logOperation(fileId, 'convert', 'started');
+      const convertStartTime = Date.now();
+      markdown = inlineContent;
+      const convertDuration = Date.now() - convertStartTime;
+      await logOperation(fileId, 'convert', 'completed', convertDuration);
+
+      if (typeof body.contentHash === 'string' && body.contentHash.length === 64) {
+        contentHash = body.contentHash;
+      }
+    } else {
+      // 4. Download file from Supabase storage
+      const { data: fileData, error: downloadError } = await supabase
+        .storage
+        .from('notes')
+        .download(file.storage_path);
+      console.log('[PROCESS LOG] Downloaded file from storage');
+
+      if (downloadError || !fileData) {
+        throw new Error(`Failed to download file from storage: ${downloadError?.message}`);
+      }
+
+      const fileBuffer = Buffer.from(await fileData.arrayBuffer());
+      console.log('[PROCESS LOG] Created file buffer');
+
+      // 5. Convert to Markdown (log operation)
+      await logOperation(fileId, 'convert', 'started');
+      const convertStartTime = Date.now();
+
+      const conversion = await convertToMarkdown(
+        fileBuffer,
+        file.mime_type,
+        file.name
+      );
+      markdown = conversion.markdown;
+      contentHash = conversion.contentHash;
+      console.log('[PROCESS LOG] Converted to markdown');
+
+      const convertDuration = Date.now() - convertStartTime;
+      await logOperation(fileId, 'convert', 'completed', convertDuration);
     }
-
-    const fileBuffer = Buffer.from(await fileData.arrayBuffer());
-    console.log('[PROCESS LOG] Created file buffer');
-
-    // 5. Convert to Markdown (log operation)
-    await logOperation(fileId, 'convert', 'started');
-    const convertStartTime = Date.now();
-
-    const { markdown, contentHash } = await convertToMarkdown(
-      fileBuffer,
-      file.mime_type,
-      file.name
-    );
-    console.log('[PROCESS LOG] Converted to markdown');
-
-    const convertDuration = Date.now() - convertStartTime;
-    await logOperation(fileId, 'convert', 'completed', convertDuration);
 
     // 6. Extract structured data with AI (log operation)
     await logOperation(fileId, 'summarize', 'started');
@@ -324,15 +356,23 @@ export async function POST(request: NextRequest) {
     });
 
     // 11. Mark job as complete and process next queued job (T005)
-    const nextFileId = await processingQueue.complete(fileId);
-    if (nextFileId) {
+    const nextJob = await processingQueue.complete(fileId);
+    if (nextJob) {
       // Trigger processing for next queued file
-      console.log('[PROCESS] Triggering processing for next queued file:', nextFileId);
+      console.log('[PROCESS] Triggering processing for next queued file:', nextJob.fileId);
       const processUrl = new URL('/api/process', request.url);
+      if (processUrl.hostname === 'localhost' || processUrl.hostname === '127.0.0.1') {
+        processUrl.protocol = 'http:';
+      }
+
       fetch(processUrl.toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fileId: nextFileId }),
+        body: JSON.stringify({
+          fileId: nextJob.fileId,
+          rawContent: nextJob.payload?.inlineContent,
+          contentHash: nextJob.payload?.contentHash,
+        }),
       }).catch(error => {
         console.error('[PROCESS] Failed to trigger processing for next queued file:', error);
       });
@@ -379,14 +419,22 @@ export async function POST(request: NextRequest) {
 
     // Mark job as complete (even on failure) and process next queued job (T005)
     if (fileId) {
-      const nextFileId = await processingQueue.complete(fileId);
-      if (nextFileId) {
-        console.log('[PROCESS] Triggering processing for next queued file after failure:', nextFileId);
+      const nextJob = await processingQueue.complete(fileId);
+      if (nextJob) {
+        console.log('[PROCESS] Triggering processing for next queued file after failure:', nextJob.fileId);
         const processUrl = new URL('/api/process', request.url);
+        if (processUrl.hostname === 'localhost' || processUrl.hostname === '127.0.0.1') {
+          processUrl.protocol = 'http:';
+        }
+
         fetch(processUrl.toString(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fileId: nextFileId }),
+          body: JSON.stringify({
+            fileId: nextJob.fileId,
+            rawContent: nextJob.payload?.inlineContent,
+            contentHash: nextJob.payload?.contentHash,
+          }),
         }).catch(error => {
           console.error('[PROCESS] Failed to trigger processing for next queued file:', error);
         });

@@ -1,0 +1,130 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Text Input API",
+    "version": "1.0.0",
+    "description": "Processes direct text/markdown input without file upload"
+  },
+  "paths": {
+    "/api/text-input": {
+      "post": {
+        "summary": "Process text content directly",
+        "description": "Creates virtual document from text input and triggers AI processing",
+        "operationId": "processTextInput",
+        "tags": ["Documents"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["content"],
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100000,
+                    "description": "Text or markdown content to process",
+                    "example": "# Meeting Notes\n\n## Decisions\n- Approved budget increase"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "Optional document title",
+                    "example": "Weekly Team Sync"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Text input accepted and processing started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["fileId", "status"],
+                  "properties": {
+                    "fileId": {
+                      "type": "string",
+                      "format": "uuid",
+                      "description": "Virtual document ID (uploaded_files record)",
+                      "example": "550e8400-e29b-41d4-a716-446655440000"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["processing"],
+                      "description": "Processing status"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (empty content, validation error)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "examples": {
+                  "emptyContent": {
+                    "value": {
+                      "error": "Content is required"
+                    }
+                  },
+                  "whitespaceOnly": {
+                    "value": {
+                      "error": "Content cannot be empty"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Content exceeds 100KB limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": "Content exceeds 100KB limit"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Processing failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error message"
+          }
+        }
+      }
+    }
+  }
+}

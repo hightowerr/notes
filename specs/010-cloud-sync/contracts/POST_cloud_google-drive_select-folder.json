@@ -1,0 +1,164 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Google Drive Folder Selection API",
+    "version": "1.0.0",
+    "description": "Endpoint for selecting a Google Drive folder to monitor for document sync"
+  },
+  "paths": {
+    "/api/cloud/google-drive/select-folder": {
+      "post": {
+        "summary": "Select Drive folder to monitor",
+        "description": "Updates cloud connection with folder ID, lists existing files, registers webhook for folder changes, and initiates initial sync",
+        "tags": ["Google Drive"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "folderId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Google Drive folder ID to monitor",
+                    "example": "1a2b3c4d5e6f7g8h9i0j"
+                  },
+                  "folderName": {
+                    "type": "string",
+                    "description": "Human-readable folder name for display purposes",
+                    "example": "Meeting Notes"
+                  }
+                },
+                "required": ["folderId"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Folder selected successfully, initial sync started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "folderName": {
+                      "type": "string",
+                      "description": "Name of the selected folder",
+                      "example": "Meeting Notes"
+                    },
+                    "folderId": {
+                      "type": "string",
+                      "description": "Google Drive folder ID",
+                      "example": "1a2b3c4d5e6f7g8h9i0j"
+                    },
+                    "syncedFiles": {
+                      "type": "integer",
+                      "description": "Number of files synced from folder during initial sync",
+                      "example": 3
+                    },
+                    "webhookId": {
+                      "type": "string",
+                      "description": "Google Drive webhook channel ID",
+                      "example": "channel-abc123"
+                    }
+                  },
+                  "required": ["success", "folderName", "folderId", "syncedFiles"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (missing folderId or malformed payload)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "folderId is required"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No active Google Drive connection found or OAuth token invalid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "No Google Drive connection found. Please connect first."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient permissions to access folder (Drive API returns 403)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Access denied to folder. Check folder sharing settings."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error during folder selection, initial sync, or webhook registration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string",
+                      "example": "Failed to register webhook"
+                    },
+                    "details": {
+                      "type": "string",
+                      "description": "Additional error details for debugging",
+                      "example": "Google Drive API quota exceeded"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "session",
+        "description": "Session cookie for user authentication (placeholder for P0, will use real auth in future)"
+      }
+    }
+  }
+}

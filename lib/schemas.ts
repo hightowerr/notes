@@ -5,27 +5,20 @@
 
 import { z } from 'zod';
 
-// File upload validation constants
-export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
-export const ALLOWED_MIME_TYPES = [
-  'application/pdf',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // DOCX
-  'text/plain',
-  'text/markdown',
-] as const;
+import {
+  MAX_FILE_SIZE,
+  ALLOWED_MIME_TYPES,
+  ALLOWED_FILE_EXTENSIONS,
+  uploadedFileStatusEnum,
+  type UploadedFileStatus,
+  uploadedFileSchema,
+  type UploadedFileRecord
+} from '@/lib/schemas/uploadedFileSchema';
 
-export const ALLOWED_FILE_EXTENSIONS = ['.pdf', '.docx', '.txt', '.md'] as const;
+export { MAX_FILE_SIZE, ALLOWED_MIME_TYPES, ALLOWED_FILE_EXTENSIONS };
 
-// Upload file status enum
-export const FileStatus = z.enum([
-  'pending',
-  'processing',
-  'completed',
-  'failed',
-  'review_required',
-]);
-
-export type FileStatusType = z.infer<typeof FileStatus>;
+export const FileStatus = uploadedFileStatusEnum;
+export type FileStatusType = UploadedFileStatus;
 
 // Error codes for API responses
 export const ErrorCode = z.enum([
@@ -44,18 +37,8 @@ export const ErrorCode = z.enum([
 export type ErrorCodeType = z.infer<typeof ErrorCode>;
 
 // UploadedFile entity schema (matches data-model.md)
-export const UploadedFileSchema = z.object({
-  id: z.string().uuid(),
-  name: z.string().min(1).max(255),
-  size: z.number().int().positive().max(MAX_FILE_SIZE),
-  mimeType: z.enum(ALLOWED_MIME_TYPES),
-  contentHash: z.string().regex(/^[a-f0-9]{64}$/), // SHA-256 hash
-  uploadedAt: z.date(),
-  storagePath: z.string().min(1),
-  status: FileStatus,
-});
-
-export type UploadedFile = z.infer<typeof UploadedFileSchema>;
+export const UploadedFileSchema = uploadedFileSchema;
+export type UploadedFile = UploadedFileRecord;
 
 // Action item schema with metadata (T017)
 export const ActionSchema = z.object({

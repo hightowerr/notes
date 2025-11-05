@@ -105,6 +105,35 @@ Each pitch has a **fixed appetite** (time budget). We shape the solution to fit 
 
 ---
 
+### Phase 5: Cloud Service Provider Sync
+**Appetite:** 1.5 weeks
+
+**Problem:** Users must manually upload files instead of auto-syncing from cloud storage
+
+**Solution:** Google Drive integration + direct text input field
+
+**Components:**
+- OAuth connection to Google Drive
+- Webhook monitoring for file changes
+- Auto-download and process new/updated files
+- Quick capture modal for raw text/markdown input
+
+**Key unlock:** Autonomous sync - "write once, sync everywhere"
+
+**Features:**
+- ✅ Read-only Drive integration (no write permissions)
+- ✅ Folder selection and monitoring
+- ✅ Automatic deduplication via content hash
+- ✅ Direct markdown input without file upload
+- ✅ Draft auto-save to localStorage
+
+**Time Saved:** Manual upload friction eliminated
+
+[Read Full Pitch →](./phase-5-cloud-sync.md)
+
+---
+
+## Total Timeline: 4.5-5.5 Weeks (vs 6+ weeks custom)
 ### Phase 5: Context-Aware Dynamic Re-Prioritization
 **Appetite:** 2 weeks
 
@@ -138,9 +167,10 @@ Each pitch has a **fixed appetite** (time budget). We shape the solution to fit 
 Each phase is:
 - **Independently shippable** (can ship Phase 1 without Phase 2)
 - **Fixed scope** (rabbit holes explicitly cut)
-- **Time-boxed** (1 week appetite, no extensions)
+- **Time-boxed** (1-1.5 week appetite, no extensions)
 
 **Overall Time Savings with Mastra:** 25-40% reduction (1-2 weeks saved)
+**Phase 5 adds:** Autonomous cloud sync capability
 
 ---
 
@@ -199,6 +229,9 @@ Phase 3: Agent Runtime (Mastra createAgent)
   ↓
 Phase 4: UI Integration (Mastra Telemetry)
   ↓
+Phase 5: Cloud Sync (Google Drive + Text Input)
+  ↓
+Result: Full Agentic RAG System with Autonomous Sync
 Phase 5: Context-Aware Re-Prioritization (Custom)
   ↓
 Result: Full Agentic RAG System with Context Adaptation
@@ -206,6 +239,7 @@ Result: Full Agentic RAG System with Context Adaptation
 
 Each phase builds on the previous, but can be deployed independently.
 
+**Note:** Phase 5 is parallel to Phases 1-4. It enhances input sources but doesn't depend on agent features.
 **Phase 5 Note:** Unlike Phases 2-4, Phase 5 does not use Mastra. It's a lightweight custom service that complements the agent runtime with instant context-based adjustments.
 
 ---

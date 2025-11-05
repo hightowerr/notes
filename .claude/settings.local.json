@@ -36,6 +36,9 @@
       "Bash(npx vitest run:*)",
       "Bash(chmod:*)",
       "Bash(bash:*)",
+      "Bash(git checkout:*)",
+      "Bash(pnpm test:run:*)",
+      "Bash(pnpm add:*)"
       "Bash(pnpm dev:*)",
       "mcp__shadcn__get_project_registries",
       "mcp__shadcn__search_items_in_registries",

@@ -43,12 +43,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**AI Note Synthesiser** — An autonomous agent that converts uploaded documents (PDF/DOCX/TXT) to Markdown, extracts structured insights using GPT-4o, generates vector embeddings for semantic search, and provides intelligent task prioritization through Mastra-powered agents.
+**AI Note Synthesiser** — An autonomous agent that converts documents (PDF/DOCX/TXT) to Markdown, extracts structured insights using GPT-4o, generates vector embeddings for semantic search, and provides intelligent task prioritization through Mastra-powered agents.
 
-**Tech Stack:** Next.js 15, React 19, TypeScript, Vercel AI SDK (OpenAI GPT-4o), Supabase (pgvector), Tailwind CSS v4, Mastra
+**Input Methods:**
+- Manual file upload (drag-and-drop or file picker)
+- Google Drive sync (automatic detection of new/updated files in monitored folder)
+- Direct text input (Quick Capture modal for markdown/plaintext)
+
+**Tech Stack:** Next.js 15, React 19, TypeScript, Vercel AI SDK (OpenAI GPT-4o), Supabase (pgvector), Tailwind CSS v4, Mastra, Google Drive API
 
 **Core Pattern:** Sense → Reason → Act → Learn
-- **Sense:** File upload detection
+- **Sense:** File upload detection, Drive webhooks, text input
 - **Reason:** Convert to Markdown → AI summarization → Extract structured data
 - **Act:** Store outputs, generate embeddings, prioritize tasks
 - **Learn:** Log metrics, confidence scores, agent reasoning traces
@@ -174,10 +179,18 @@ pnpm test:integration   # Integration tests only
 - `lib/services/recomputeService.ts` - Background recompute jobs
 - `lib/jobs/cleanupExpiredFiles.ts` - Automatic file cleanup (30-day retention)
 
+**Cloud Sync Services (Phase 5):**
+- `lib/services/googleDriveService.ts` - Drive API client, OAuth token management
+- `lib/services/googleDriveFolderSync.ts` - Folder monitoring, file download
+- `lib/services/tokenEncryption.ts` - AES-256 encryption for OAuth tokens
+- `lib/services/webhookVerification.ts` - Webhook signature validation
+- `lib/services/webhookRetry.ts` - Retry logic with exponential backoff
+- `lib/services/textInputService.ts` - In-memory text processing (no file storage)
+
 ### Database Schema (Supabase)
 
 **Core Tables:**
-- `uploaded_files` - File metadata, status tracking, queue_position
+- `uploaded_files` - File metadata, status tracking, queue_position, source (upload/drive/text_input)
 - `processed_documents` - AI outputs, Markdown content, 30-day auto-expiry
 - `task_embeddings` - Vector embeddings (1536-dim) with pgvector IVFFlat index
 - `user_outcomes` - User-defined outcome statements
@@ -185,12 +198,14 @@ pnpm test:integration   # Integration tests only
 - `task_relationships` - Task dependencies (prerequisite/blocking/related)
 - `agent_sessions` - Agent execution traces and reasoning steps
 - `processing_logs` - Metrics, errors, retry attempts
+- `cloud_connections` - OAuth tokens, folder selection, webhook state (Phase 5)
+- `sync_events` - Audit log for cloud sync operations (Phase 5)
 
 **Storage Buckets:**
 - `notes/` - Original uploaded files (hash-based naming)
 - `notes/processed/` - Generated Markdown and JSON files
 
-**Migrations:** `supabase/migrations/` (001-014) - Apply manually via Supabase Dashboard → SQL Editor
+**Migrations:** `supabase/migrations/` (001-018+) - Apply manually via Supabase Dashboard → SQL Editor or `supabase db push`
 
 ### API Endpoints
 
@@ -218,6 +233,14 @@ pnpm test:integration   # Integration tests only
 - `POST /api/agent/prioritize` - Trigger task prioritization agent
 - `GET /api/agent/sessions/[sessionId]` - Get agent session details
 - `GET /api/agent/sessions/latest` - Get latest agent session
+
+**Cloud Sync (Phase 5):**
+- `POST /api/cloud/google-drive/connect` - Initiate Google Drive OAuth flow
+- `GET /api/cloud/google-drive/callback` - OAuth callback handler
+- `POST /api/cloud/google-drive/select-folder` - Choose Drive folder to monitor
+- `POST /api/webhooks/google-drive` - Webhook for Drive change notifications
+- `POST /api/text-input` - Direct text input (Quick Capture)
+- `GET /api/cloud-connections` - List user's cloud connections
 
 **Maintenance:**
 - `POST /api/cleanup?dryRun=true` - Manual cleanup trigger (deletes expired documents)
@@ -257,10 +280,9 @@ pnpm test:integration   # Integration tests only
 ```env
 # Supabase (Database & Storage)
 NEXT_PUBLIC_SUPABASE_URL=https://emgvqqqqdbfpjwbouybj.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_publishable_key_here
-
-# OpenAI (AI summarization & embeddings)
-OPENAI_API_KEY=sk-proj-your_key_here
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_key_here
+OPENAI_API_KEY=sk-proj-...
+ENCRYPTION_KEY=32_byte_random_secret  # Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
 **Optional variables:**

@@ -10,10 +10,16 @@
  * Design Pattern: Singleton for shared state across API routes
  */
 
+export interface QueueJobPayload {
+  inlineContent?: string;
+  contentHash?: string;
+}
+
 export interface QueueJob {
   fileId: string;
   filename: string;
   addedAt: number;
+  payload?: QueueJobPayload;
 }
 
 export interface EnqueueResult {
@@ -47,7 +53,7 @@ export class ProcessingQueue {
    * @param filename - Original filename for logging
    * @returns Result indicating if processing starts immediately and queue position
    */
-  enqueue(fileId: string, filename: string): EnqueueResult {
+  enqueue(fileId: string, filename: string, payload?: QueueJobPayload): EnqueueResult {
     // Check if we're under the concurrent limit
     if (this.activeJobs.size < this.MAX_CONCURRENT) {
       // Start processing immediately
@@ -72,6 +78,7 @@ export class ProcessingQueue {
       fileId,
       filename,
       addedAt: Date.now(),
+      payload,
     };
 
     this.queuedJobs.push(job);
@@ -98,7 +105,7 @@ export class ProcessingQueue {
    * @param fileId - File ID of completed job
    * @returns File ID of next job to process, or null if queue is empty
    */
-  async complete(fileId: string): Promise<string | null> {
+  async complete(fileId: string): Promise<QueueJob | null> {
     // Remove from active jobs (if present)
     const wasActive = this.activeJobs.delete(fileId);
 
@@ -151,7 +158,7 @@ export class ProcessingQueue {
       }
     }
 
-    return nextJob.fileId;
+    return nextJob;
   }
 
   /**

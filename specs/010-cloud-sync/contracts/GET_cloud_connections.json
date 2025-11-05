@@ -1,0 +1,111 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Cloud Connections API",
+    "version": "1.0.0",
+    "description": "Lists active cloud storage connections for the user"
+  },
+  "paths": {
+    "/api/cloud-connections": {
+      "get": {
+        "summary": "List cloud connections",
+        "description": "Retrieves all active cloud storage connections (Google Drive, etc.) with sync status",
+        "operationId": "getCloudConnections",
+        "tags": ["Cloud Storage"],
+        "responses": {
+          "200": {
+            "description": "List of connections retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["connections"],
+                  "properties": {
+                    "connections": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CloudConnection"
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "connections": [
+                    {
+                      "id": "550e8400-e29b-41d4-a716-446655440000",
+                      "provider": "google_drive",
+                      "folder_name": "Work Notes",
+                      "sync_enabled": true,
+                      "last_sync": "2025-10-31T10:30:00Z",
+                      "created_at": "2025-10-30T15:00:00Z"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error retrieving connections",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CloudConnection": {
+        "type": "object",
+        "required": ["id", "provider", "sync_enabled", "created_at"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Connection identifier"
+          },
+          "provider": {
+            "type": "string",
+            "enum": ["google_drive"],
+            "description": "Cloud storage provider"
+          },
+          "folder_name": {
+            "type": "string",
+            "nullable": true,
+            "description": "Name of monitored folder (null if not set)"
+          },
+          "sync_enabled": {
+            "type": "boolean",
+            "description": "Whether sync is active"
+          },
+          "last_sync": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "Last successful sync timestamp"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Connection creation timestamp"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error message"
+          }
+        }
+      }
+    }
+  }
+}

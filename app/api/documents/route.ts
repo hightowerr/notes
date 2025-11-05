@@ -65,7 +65,11 @@ export async function GET(request: NextRequest) {
         size,
         mime_type,
         uploaded_at,
+        updated_at,
         status,
+        source,
+        external_id,
+        sync_enabled,
         processed_documents (
           confidence,
           processing_duration,
@@ -123,7 +127,11 @@ export async function GET(request: NextRequest) {
         size: file.size,
         mimeType: file.mime_type,
         uploadedAt: file.uploaded_at,
+        updatedAt: file.updated_at,
         status: file.status,
+        source: file.source ?? null,
+        externalId: file.external_id ?? null,
+        syncEnabled: Boolean(file.sync_enabled),
       };
 
       // Add summary data if document is processed
