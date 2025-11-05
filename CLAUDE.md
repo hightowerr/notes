@@ -17,6 +17,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - [Common Development Patterns](#common-development-patterns)
 - [Known Issues & Workarounds](#known-issues--workarounds)
 - [Agent Usage](#agent-usage)
+- [Performance Targets](#performance-targets)
 - [Quick Troubleshooting](#quick-troubleshooting)
 
 ## Quick Links
@@ -89,15 +90,9 @@ pnpm test:integration   # Integration tests only
 ```
 
 **Current Test Status:** 27/44 tests passing (61% pass rate)
-- **Passing:** Component tests, database tests, schema validation, service logic
-- **Blocked:** Upload API contract tests (FormData serialization issue in test environment)
-- **Workaround:** Use manual testing guides (`T002_MANUAL_TEST.md`, `T004_MANUAL_TEST.md`, etc.)
-
-**Test Organization:**
-- **Unit:** `lib/services/__tests__/*.test.ts` - Pure logic, no external dependencies
-- **Component:** `app/components/__tests__/*.test.tsx` - React component behavior
-- **Integration:** `__tests__/integration/*.test.ts` - Multi-service workflows
-- **Contract:** `__tests__/contract/*.test.ts` - API endpoint contracts
+- **Workaround for blocked tests**: Use manual testing guides (`T002_MANUAL_TEST.md`, `T004_MANUAL_TEST.md`)
+- **If you need test organization details**: See `.claude/standards.md` lines 695-775
+- **If you need TDD workflow**: See `.claude/standards.md` lines 159-204
 
 ### Utility Scripts
 - `npx tsx scripts/test-mastra.ts` - Validate Mastra tool registry and telemetry
@@ -270,7 +265,11 @@ pnpm test:integration   # Integration tests only
 - **Semantic colors** - Each has `*-bg`, `*-hover`, `*-text` variants
 - **WCAG AA compliance** - 4.5:1 minimum contrast ratio
 
-**Full design system reference:** `.claude/standards.md` lines 421-479
+**If you need:**
+- Color layer specifications → See `.claude/standards.md` lines 421-432
+- Shadow system utilities → See `.claude/standards.md` lines 452-471
+- Accessibility requirements → See `.claude/standards.md` lines 381-420
+- ShadCN UI conventions → See `.claude/standards.md` lines 480-560
 
 ## Configuration
 
@@ -346,65 +345,27 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key  # Only needed for admin operati
 
 ## Common Development Patterns
 
-**Quick Reference** (full details in `.claude/standards.md` lines 871-1011):
-
-**Adding API Endpoint:**
-```typescript
-// app/api/example/route.ts
-import { z } from 'zod';
-import { NextResponse } from 'next/server';
-
-const requestSchema = z.object({ field: z.string() });
-
-export async function POST(request: Request) {
-  try {
-    const body = await request.json();
-    const { field } = requestSchema.parse(body);
-    // ... process ...
-    return NextResponse.json({ success: true }, { status: 200 });
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: 'Invalid input' }, { status: 400 });
-    }
-    return NextResponse.json({ error: 'Server error' }, { status: 500 });
-  }
-}
-```
-
-**Supabase Relationship Query (normalize arrays/objects/null):**
-```typescript
-const processedDoc = Array.isArray(fileData.processed_documents)
-  ? fileData.processed_documents[0]
-  : fileData.processed_documents;
-```
-
-**React Hook Form Sync (defer getValues with setTimeout):**
-```typescript
-setTimeout(() => { const values = form.getValues(); }, 0);
-```
+**If you need:**
+- API endpoint patterns → See `.claude/standards.md` lines 874-903
+- Component patterns → See `.claude/standards.md` lines 905-929
+- Service patterns → See `.claude/standards.md` lines 931-962
+- Supabase relationship queries → See `.claude/standards.md` lines 964-988
+- React Hook Form sync patterns → See `.claude/standards.md` lines 990-1011
+- Error handling standards → See `.claude/standards.md` lines 562-692
 
 ## Known Issues & Workarounds
 
-**Full documentation:** `.claude/standards.md` lines 1026-1148
+**Quick fixes:**
+- **pdf-parse errors?** → Auto-patched via `pnpm install` postinstall hook
+- **FormData test failures?** → Use manual testing guides (`T002_MANUAL_TEST.md` pattern)
+- **Wrong Node version?** → Run `nvm use` (requires Node.js 20+)
 
-### pdf-parse Library
-- **Issue:** Debug mode causes test file errors
-- **Fix:** Automatic patch via `pnpm install` postinstall hook
-- **Verify:** Check `node_modules/.pnpm/pdf-parse@1.1.1/node_modules/pdf-parse/index.js` has `isDebugMode = false`
-
-### FormData Testing
-- **Issue:** File properties become undefined in Vitest
-- **Workaround:** Use manual testing guides (`T002_MANUAL_TEST.md`, etc.)
-- **Status:** 27/44 tests passing (61% pass rate)
-
-### Node.js Version
-- **Required:** Node.js 20 (check `.nvmrc`)
-- **Command:** `nvm use` before development
-
-### AI Hallucination (RESOLVED)
-- **Fix Date:** 2025-10-09
-- **Solution:** OCR placeholder cleanup + meta-content detection + confidence penalty
-- **Result:** Scanned PDFs marked `review_required`, no fabricated tasks
+**If you need:**
+- pdf-parse details → See `.claude/standards.md` lines 1028-1084
+- FormData testing workaround → See `.claude/standards.md` lines 1046-1069
+- Node.js setup → See `.claude/standards.md` lines 1086-1099
+- AI hallucination prevention → See `.claude/standards.md` lines 1115-1148 (RESOLVED 2025-10-09)
+- Edge case handling → See `.claude/standards.md` lines 1013-1024
 
 ## Agent Usage
 
@@ -419,48 +380,16 @@ setTimeout(() => { const values = form.getValues(); }, 0);
 
 **Workflow:** slice-orchestrator delegates to backend-engineer and frontend-ui-builder, then uses test-runner and code-reviewer for validation
 
-## Success Metrics
+## Performance Targets
 
-- **Autonomy:** 100% (zero manual triggers for upload/processing/cleanup)
-- **Processing Time:** <8 seconds target
+- **Processing Time:** <8 seconds per document
 - **Search Performance:** <500ms (95th percentile) for semantic search
 - **Confidence Threshold:** ≥80% for auto-approval
-- **File Formats:** PDF, DOCX, TXT, Markdown
 - **Max File Size:** 10MB
+- **Concurrent Processing:** Max 3 parallel uploads
 - **Data Retention:** 30 days auto-cleanup (daily at 2 AM UTC)
-- **Concurrent Processing:** Max 3 parallel uploads with automatic queueing
 
-## Data Structures
-
-### AI Output (Document Summary)
-```typescript
-{
-  topics: string[],           // ["Budget Planning", "Team Restructure"]
-  decisions: string[],        // ["Approved 15% budget increase"]
-  actions: string[],          // ["Schedule follow-up meeting"]
-  lno_tasks: {
-    leverage: string[],       // High-value tasks
-    neutral: string[],        // Standard operational tasks
-    overhead: string[]        // Administrative/maintenance tasks
-  }
-}
-```
-
-### Outcome Statement
-```typescript
-{
-  direction: 'increase' | 'decrease' | 'maintain' | 'launch' | 'ship',
-  object_text: string,        // 3-100 chars
-  metric_text: string,        // 3-100 chars
-  clarifier: string,          // 3-150 chars
-  assembled_text: string,     // Computed with grammar rules
-  is_active: boolean          // Only one active outcome per user
-}
-```
-
-**Assembly Formula:**
-- Launch/Ship: `"{Direction} {object} by {metric} through {clarifier}"` (no "the" article)
-- Others: `"{Direction} the {object} by {metric} through {clarifier}"`
+**If you need data structure schemas:** Check `lib/schemas/` or the actual TypeScript types in service files
 
 ## Quick Troubleshooting
 

@@ -28,11 +28,15 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   let fileId: string | undefined;
+  let trigger: string | undefined;
+  let isReprocess = false;
 
   try {
     // 1. Validate request body
     const body = await request.json();
     fileId = body.fileId;
+    trigger = typeof body.trigger === 'string' ? body.trigger : undefined;
+    isReprocess = trigger === 'reprocess';
 
     if (!fileId) {
       return Response.json(
@@ -341,6 +345,10 @@ export async function POST(request: NextRequest) {
       .update({ status: finalStatus })
       .eq('id', fileId);
 
+    if (isReprocess) {
+      await logOperation(fileId, 'reprocess', 'completed', processingDuration);
+    }
+
     // 10. Console log metrics (FR-007)
     console.log('[PROCESS COMPLETE]', {
       fileId,
@@ -372,6 +380,7 @@ export async function POST(request: NextRequest) {
           fileId: nextJob.fileId,
           rawContent: nextJob.payload?.inlineContent,
           contentHash: nextJob.payload?.contentHash,
+          trigger: nextJob.payload?.trigger,
         }),
       }).catch(error => {
         console.error('[PROCESS] Failed to trigger processing for next queued file:', error);
@@ -401,6 +410,9 @@ export async function POST(request: NextRequest) {
     // Log error operation
     if (fileId) {
       await logOperation(fileId, 'error', 'failed', processingDuration, errorMessage);
+      if (isReprocess) {
+        await logOperation(fileId, 'reprocess', 'failed', processingDuration, errorMessage);
+      }
 
       // Update file status to failed
       await supabase
@@ -434,6 +446,7 @@ export async function POST(request: NextRequest) {
             fileId: nextJob.fileId,
             rawContent: nextJob.payload?.inlineContent,
             contentHash: nextJob.payload?.contentHash,
+            trigger: nextJob.payload?.trigger,
           }),
         }).catch(error => {
           console.error('[PROCESS] Failed to trigger processing for next queued file:', error);

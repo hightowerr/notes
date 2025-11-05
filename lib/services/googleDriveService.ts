@@ -164,19 +164,49 @@ async function refreshTokensForConnection(tokens: DriveCredentials) {
   try {
     const response = await oauthClient.refreshToken(tokens.refreshToken);
 
-    if (!response || !response.credentials) {
-      console.error('[Drive] Token refresh returned invalid response', { connectionId });
+    const rawCredentials =
+      (response as { credentials?: Record<string, unknown> }).credentials ??
+      (response as { tokens?: Record<string, unknown> }).tokens ??
+      (response as { data?: Record<string, unknown> }).data ??
+      (response as { res?: { data?: Record<string, unknown> } }).res?.data ??
+      {};
+
+    if (!rawCredentials || typeof rawCredentials !== 'object') {
+      console.error('[Drive] Token refresh returned invalid response structure', {
+        connectionId,
+        keys: Object.keys(response ?? {}),
+      });
       throw new Error('Token refresh response missing credentials');
     }
 
-    const credentials = response.credentials;
+    const maybeAccessToken =
+      (rawCredentials as { access_token?: unknown }).access_token ??
+      (response as { token?: unknown }).token;
 
-    accessToken = credentials.access_token ?? undefined;
-    refreshToken = credentials.refresh_token ?? tokens.refreshToken;
-    expiryDate =
-      typeof credentials.expiry_date === 'number' && !Number.isNaN(credentials.expiry_date)
-        ? credentials.expiry_date
-        : Date.now() + 60 * 60 * 1000;
+    if (typeof maybeAccessToken === 'string' && maybeAccessToken.length > 0) {
+      accessToken = maybeAccessToken;
+    }
+
+    const maybeRefreshToken =
+      (rawCredentials as { refresh_token?: unknown }).refresh_token ??
+      (response as { refresh_token?: unknown }).refresh_token;
+
+    if (typeof maybeRefreshToken === 'string' && maybeRefreshToken.length > 0) {
+      refreshToken = maybeRefreshToken;
+    }
+
+    const rawExpiry =
+      (rawCredentials as { expiry_date?: unknown }).expiry_date ??
+      (rawCredentials as { expires_in?: unknown }).expires_in;
+
+    if (typeof rawExpiry === 'number' && !Number.isNaN(rawExpiry)) {
+      expiryDate = rawExpiry > 1_000_000_000 ? rawExpiry : Date.now() + rawExpiry * 1000;
+    } else {
+      const possibleExpiry = (response as { expiry_date?: unknown }).expiry_date;
+      if (typeof possibleExpiry === 'number' && !Number.isNaN(possibleExpiry)) {
+        expiryDate = possibleExpiry;
+      }
+    }
   } catch (error) {
     if (isInvalidGrantError(error)) {
       await markConnectionError(connectionId, 'TOKEN_REFRESH_FAILED', 'Reconnect Google Drive');
@@ -482,6 +512,43 @@ export async function downloadFile(
   }
 
   return Buffer.from(response.data as ArrayBuffer);
+}
+
+export type DownloadFileResult = {
+  name: string;
+  mimeType: string;
+  size: number;
+  modifiedTime: string | null;
+  buffer: Buffer;
+};
+
+export async function downloadFileById(
+  fileId: string,
+  tokens: {
+    access_token: string;
+    refresh_token: string;
+    token_expires_at?: string | null;
+    connection_id?: string | null;
+  }
+): Promise<DownloadFileResult> {
+  const driveTokens: DriveCredentials = {
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    tokenExpiresAt: tokens.token_expires_at ?? null,
+    connectionId: tokens.connection_id ?? undefined,
+  };
+
+  const driveClient = createDriveClient(driveTokens);
+  const metadata = await getFileMetadata(fileId, driveTokens, driveClient);
+  const buffer = await downloadFile(fileId, driveTokens, driveClient);
+
+  return {
+    name: metadata.name,
+    mimeType: metadata.mimeType,
+    size: metadata.size,
+    modifiedTime: metadata.modifiedTime,
+    buffer,
+  };
 }
 
 export type WebhookRegistrationParams = {

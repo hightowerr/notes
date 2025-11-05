@@ -244,6 +244,46 @@ async function convertTxtToMarkdown(buffer: Buffer): Promise<string> {
  * @param buffer - PDF file buffer
  * @returns Markdown string with extracted text
  */
+/**
+ * Validate OCR text quality to detect gibberish
+ * @param text - OCR extracted text
+ * @returns true if text appears to be valid, false if likely gibberish
+ */
+function validateOcrTextQuality(text: string): boolean {
+  if (!text || text.trim().length < 20) {
+    return false;
+  }
+
+  // Remove whitespace for analysis
+  const trimmed = text.trim();
+
+  // Check 1: Reasonable word-to-character ratio (words should be 4-7 chars on average)
+  const words = trimmed.split(/\s+/).filter(w => w.length > 0);
+  if (words.length < 10) {
+    return false; // Too few words
+  }
+
+  const avgWordLength = trimmed.replace(/\s+/g, '').length / words.length;
+  if (avgWordLength < 2 || avgWordLength > 15) {
+    return false; // Words too short or too long
+  }
+
+  // Check 2: Not too many special characters (gibberish often has high special char ratio)
+  const specialChars = (trimmed.match(/[^a-zA-Z0-9\s.,!?;:()\-'"]/g) || []).length;
+  const specialCharRatio = specialChars / trimmed.length;
+  if (specialCharRatio > 0.3) {
+    return false; // More than 30% special characters
+  }
+
+  // Check 3: Reasonable letter distribution (gibberish has uneven distribution)
+  const letters = trimmed.replace(/[^a-zA-Z]/g, '').toLowerCase();
+  if (letters.length < 20) {
+    return false;
+  }
+
+  return true;
+}
+
 async function applyOcrFallback(buffer: Buffer): Promise<string> {
   console.log('[OCR FALLBACK] Starting OCR processing for scanned PDF...');
   const startTime = Date.now();
@@ -254,7 +294,7 @@ async function applyOcrFallback(buffer: Buffer): Promise<string> {
     // Convert PDF pages to PNG images
     console.log('[OCR] Converting PDF to images...');
     const pngPages = await pdfToPng(buffer, {
-      viewportScale: 2.0, // Higher resolution for better OCR
+      viewportScale: 3.0, // Increased from 2.0 for better OCR quality on slides
       outputFolder: undefined, // Return buffers instead of writing to disk
       strictPagesToProcess: false,
       pagesToProcess: [1, 2, 3, 4, 5], // Process first 5 pages max (performance)
@@ -276,8 +316,17 @@ async function applyOcrFallback(buffer: Buffer): Promise<string> {
       corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@v6.0.0',
     });
 
+    // Configure Tesseract for presentation slides/documents
+    // PSM 3 = Fully automatic page segmentation (best for mixed content)
+    await worker.setParameters({
+      tessedit_pageseg_mode: '3',  // Fully automatic page segmentation
+      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,!?;:()\'-" ',
+    });
+
     // Extract text from each page
     const pageTexts: string[] = [];
+    const validPages: number[] = [];
+
     for (let i = 0; i < pngPages.length; i++) {
       console.log(`[OCR] Processing page ${i + 1}/${pngPages.length}...`);
 
@@ -292,8 +341,17 @@ async function applyOcrFallback(buffer: Buffer): Promise<string> {
         const text = data.text.trim();
 
         if (text.length > 0) {
-          pageTexts.push(`## Page ${i + 1}\n\n${text}`);
-          console.log(`[OCR] Extracted ${text.length} characters from page ${i + 1}`);
+          // Validate text quality before accepting
+          const isValid = validateOcrTextQuality(text);
+
+          if (isValid) {
+            pageTexts.push(`## Page ${i + 1}\n\n${text}`);
+            validPages.push(i + 1);
+            console.log(`[OCR] ✓ Extracted ${text.length} chars from page ${i + 1} (valid)`);
+          } else {
+            console.warn(`[OCR] ✗ Page ${i + 1} text quality too low (likely gibberish)`);
+            pageTexts.push(`## Page ${i + 1}\n\n[Low quality OCR output - text appears to be gibberish]`);
+          }
         } else {
           console.warn(`[OCR] No text extracted from page ${i + 1}`);
         }
@@ -303,19 +361,62 @@ async function applyOcrFallback(buffer: Buffer): Promise<string> {
       }
     }
 
+    console.log(`[OCR] Quality check: ${validPages.length}/${pngPages.length} pages passed validation`);
+
     // Terminate worker
     await worker.terminate();
     worker = null;
 
-    // Combine all page texts
-    const markdown = pageTexts.length > 0
-      ? `# Document (OCR Extracted)\n\n${pageTexts.join('\n\n')}`
-      : `# Document Processing Notice\n\nUnable to extract readable text from this PDF using OCR.`;
+    // Check if we extracted any valid text
+    if (validPages.length === 0) {
+      // No valid text extracted - likely a scanned presentation with images/graphics
+      const markdown = `# Document Processing Notice
+
+This document appears to be a scanned presentation or image-heavy PDF.
+
+**OCR Status:** Failed to extract readable text from ${pngPages.length} page${pngPages.length === 1 ? '' : 's'}
+**Quality Check:** All extracted text appeared to be gibberish or unreadable
+
+**Possible Reasons:**
+- Low image quality or resolution
+- Text embedded in images/graphics
+- Complex formatting or layouts
+- Non-standard fonts or styling
+
+**Next Steps:**
+- Manual review of the original document recommended
+- Consider requesting a text-based version (DOCX, TXT, or searchable PDF)
+- If this is a presentation, speaker notes or transcript may be more suitable
+
+**File Size:** ${(buffer.length / 1024 / 1024).toFixed(2)} MB`;
+
+      const duration = Date.now() - startTime;
+      console.log('[OCR FALLBACK] Complete (no valid text)', {
+        duration,
+        pagesProcessed: pngPages.length,
+        validPages: 0,
+      });
+
+      return markdown;
+    }
+
+    // Combine valid page texts
+    const markdown = validPages.length < pngPages.length
+      ? `# Document (OCR Extracted - Partial Success)
+
+**OCR Status:** Extracted readable text from ${validPages.length} of ${pngPages.length} pages
+**Warning:** Some pages produced low-quality or unreadable text
+
+${pageTexts.join('\n\n')}`
+      : `# Document (OCR Extracted)
+
+${pageTexts.join('\n\n')}`;
 
     const duration = Date.now() - startTime;
     console.log('[OCR FALLBACK] Complete', {
       duration,
       pagesProcessed: pngPages.length,
+      validPages: validPages.length,
       totalLength: markdown.length,
       avgCharsPerPage: Math.round(markdown.length / pngPages.length),
     });
