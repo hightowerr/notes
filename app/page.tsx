@@ -415,12 +415,13 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-bg-layer-1">
-      {/* Toast Notifications */}
+    <>
+      {/* Toast Notifications - moved outside main div to avoid render cycle */}
       <Toaster position="top-right" richColors />
 
-      {/* Outcome Display Banner (shown when active outcome exists) */}
-      <OutcomeDisplay onEdit={(outcome) => {
+      <div className="min-h-screen bg-bg-layer-1">
+        {/* Outcome Display Banner (shown when active outcome exists) */}
+        <OutcomeDisplay onEdit={(outcome) => {
         setEditingOutcome({
           direction: outcome.direction,
           object: outcome.object_text,
@@ -653,6 +654,7 @@ export default function Home() {
         isOpen={reflectionPanelOpen}
         onOpenChange={setReflectionPanelOpen}
       />
-    </div>
+      </div>
+    </>
   );
 }

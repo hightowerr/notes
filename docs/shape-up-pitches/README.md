@@ -134,6 +134,35 @@ Each pitch has a **fixed appetite** (time budget). We shape the solution to fit 
 ---
 
 ## Total Timeline: 4.5-5.5 Weeks (vs 6+ weeks custom)
+### Phase 5: Context-Aware Dynamic Re-Prioritization
+**Appetite:** 2 weeks
+
+**Problem:** Agent prioritizes without knowing current reality (stage, time, energy, blockers)
+
+**Solution:** Surface reflections at decision point + instant adjustment via toggles
+
+**Components:**
+- Pre-prioritization context card (5 recent reflections)
+- Lightweight re-ranking engine (<500ms)
+- Toggle switches for reflection filtering
+- Visual diff showing task movements
+- Context visibility in reasoning trace
+
+**Key unlock:** Users can adapt priorities to current situation without 30s re-runs
+
+**What's New:**
+- ✅ Reflection discoverability (shown before "Analyze Tasks")
+- ✅ Instant adjustment (<500ms vs 30s full agent re-run)
+- ✅ Visual feedback (task moved up/down with reasons)
+- ✅ Context influence transparency (trace shows which reflections used)
+
+**Time Saved:** N/A (New feature, not a replacement)
+
+[Read Full Pitch →](./phase-5-context-aware-reprioritization.md)
+
+---
+
+## Total Timeline: 5-6 Weeks (vs 6+ weeks custom)
 
 Each phase is:
 - **Independently shippable** (can ship Phase 1 without Phase 2)
@@ -203,11 +232,15 @@ Phase 4: UI Integration (Mastra Telemetry)
 Phase 5: Cloud Sync (Google Drive + Text Input)
   ↓
 Result: Full Agentic RAG System with Autonomous Sync
+Phase 5: Context-Aware Re-Prioritization (Custom)
+  ↓
+Result: Full Agentic RAG System with Context Adaptation
 ```
 
 Each phase builds on the previous, but can be deployed independently.
 
 **Note:** Phase 5 is parallel to Phases 1-4. It enhances input sources but doesn't depend on agent features.
+**Phase 5 Note:** Unlike Phases 2-4, Phase 5 does not use Mastra. It's a lightweight custom service that complements the agent runtime with instant context-based adjustments.
 
 ---
 
@@ -261,10 +294,11 @@ const trace = await taskOrchestratorAgent.getExecutionTrace(executionId);
 ## Next Steps
 
 1. **Install Mastra:** `npm install @mastra/core`
-2. **Review all 4 pitches**
+2. **Review all 5 pitches**
 3. **Approve/reject/modify based on priorities**
 4. **If approved, start with Phase 1** (vector storage)
 5. **Ship each phase independently** as a vertical slice
+6. **Phase 5 can be developed in parallel** with Phases 1-4 (no Mastra dependency)
 
 ---
 
@@ -278,6 +312,6 @@ const trace = await taskOrchestratorAgent.getExecutionTrace(executionId);
 
 ---
 
-**Last Updated:** 2025-10-17
-**Status:** Revised for Mastra Integration
+**Last Updated:** 2025-10-24
+**Status:** Updated with Phase 5 (Context-Aware Re-Prioritization)
 **Framework:** Mastra AI (TypeScript-first, YC-backed)

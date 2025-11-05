@@ -138,7 +138,7 @@ export class RecomputeService {
       console.log(`[Recompute] Fetched ${docCount} processed documents for user ${job.userId}`);
 
       // T023: Fetch recent reflections for context injection
-      const reflections = await fetchRecentReflections(job.userId, 5);
+      const reflections = await fetchRecentReflections(job.userId, { limit: 5 });
       const reflectionContext = reflections
         .filter(r => r.weight >= 0.10) // Exclude aged reflections
         .map((r, i) =>

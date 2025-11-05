@@ -9,7 +9,7 @@ by the /constitution command validation process to ensure all templates referenc
 current constitution version.
 
 Modified Principles:
-  - None (version reference updates only)
+  - None (clarification and formatting improvements only)
 
 Added Sections:
   - None
@@ -27,7 +27,8 @@ Templates Requiring Updates:
   ✅ .claude/SYSTEM_RULES.md - No changes needed (implementation protocol, not version-dependent)
 
 Follow-up TODOs:
-  - None (consistency maintenance only)
+  - Next MINOR version: Consider adding principle for AI safety/security patterns
+  - Next constitution review: Validate Test-First Development exception status (automated testing resolution)
 -->
 
 # AI Note Synthesiser Constitution
@@ -165,15 +166,31 @@ All changes must verify:
 ### Amendment Procedure
 Constitution changes require:
 1. Proposal documenting: rationale, affected principles, migration impact
-2. Version bump following semantic versioning (see below)
+2. Version bump following semantic versioning (see Versioning Policy below)
 3. Update of dependent templates (plan-template.md, spec-template.md, tasks-template.md)
-4. Sync Impact Report prepended to this file
+4. Sync Impact Report prepended to this file as HTML comment
 5. Commit message format: `docs: amend constitution to vX.Y.Z (summary of changes)`
 
+When templates reference constitution version numbers, they should be updated to
+match the current version. However, version drift in templates is non-critical
+and can be addressed in batch updates.
+
 ### Versioning Policy
-- **MAJOR**: Backward-incompatible changes (principle removal/redefinition requiring code changes)
-- **MINOR**: New principles or materially expanded guidance (additive changes)
-- **PATCH**: Clarifications, wording improvements, typo fixes (non-semantic refinements)
+- **MAJOR (X.0.0)**: Backward-incompatible changes requiring code modifications
+  - Examples: Principle removal, principle redefinition that invalidates existing code,
+    new mandatory requirements that existing features don't meet
+- **MINOR (x.Y.0)**: Additive changes that don't invalidate existing implementations
+  - Examples: New principle added, materially expanded guidance for existing principle,
+    new quality standard or development workflow step
+- **PATCH (x.y.Z)**: Non-semantic refinements with zero behavioral impact
+  - Examples: Clarifications, wording improvements, typo fixes, formatting changes,
+    template consistency updates, rationale enhancements
+
+**Version Determination Guidelines**:
+- If existing code would need changes to comply: MAJOR
+- If new code must follow new guidance but existing code is grandfathered: MINOR
+- If only documentation readability improves: PATCH
+- When uncertain, propose reasoning before finalizing version bump
 
 ### Compliance Review
 The /plan command Constitution Check section enforces these principles before design
@@ -184,7 +201,7 @@ The /tasks command validates slice compliance before generating tasks.md. Any
 task failing the Three Laws (SEE, DO, VERIFY) is rejected and restructured.
 
 **Runtime Guidance**: See `CLAUDE.md` and `.claude/SYSTEM_RULES.md` in repository
-root for agent-specific development instructions and slice enforcement protocol
+root for agent-specific development instructions and slice enforcement protocol.
 
 ---
 **Version**: 1.1.6 | **Ratified**: 2025-10-05 | **Last Amended**: 2025-10-31

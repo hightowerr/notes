@@ -42,6 +42,7 @@ export const prioritizedPlanSchema = z.object({
   synthesis_summary: z.string().min(1),
   task_annotations: z.array(taskAnnotationSchema).optional(),
   removed_tasks: z.array(taskRemovalSchema).optional(),
+  created_at: z.string().datetime().optional(),
 });
 
 export type ExecutionWaveSchema = typeof executionWaveSchema;

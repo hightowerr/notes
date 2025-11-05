@@ -2,7 +2,7 @@ import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
 
 import { supabase } from '@/lib/supabase';
-import { fetchRecentReflections } from '@/lib/services/reflectionService';
+import { enrichReflection, fetchRecentReflections } from '@/lib/services/reflectionService';
 import { generateTaskId } from '@/lib/services/embeddingService';
 import { EmbeddingQueue } from '@/lib/services/embeddingQueue';
 import { taskOrchestratorAgent } from '@/lib/mastra/agents/taskOrchestrator';
@@ -36,6 +36,7 @@ type OrchestrateTaskOptions = {
   sessionId: string;
   userId: string;
   outcomeId: string;
+  activeReflectionIds?: string[];
 };
 
 type SupabaseOutcomeRow = {
@@ -131,7 +132,11 @@ async function hydrateFallbackEmbeddings(tasks: TaskSummary[]): Promise<TaskSumm
   return (data ?? []).map(toTaskSummary);
 }
 
-async function fetchRuntimeContext(userId: string, outcomeId: string): Promise<AgentRuntimeContext> {
+async function fetchRuntimeContext(
+  userId: string,
+  outcomeId: string,
+  options: { activeReflectionIds?: string[] } = {}
+): Promise<AgentRuntimeContext> {
   const [{ data: outcome, error: outcomeError }] = await Promise.all([
     supabase
       .from('user_outcomes')
@@ -150,10 +155,40 @@ async function fetchRuntimeContext(userId: string, outcomeId: string): Promise<A
     throw new Error('Outcome not found for prioritization');
   }
 
-  const reflectionsPromise = fetchRecentReflections(userId).catch(error => {
-    console.error('[AgentOrchestration] Failed to fetch reflections', error);
-    return [];
-  });
+  const activeReflectionIds =
+    Array.isArray(options.activeReflectionIds) && options.activeReflectionIds.length > 0
+      ? Array.from(new Set(options.activeReflectionIds))
+      : [];
+
+  const reflectionsPromise = (async () => {
+    try {
+      if (activeReflectionIds.length > 0) {
+        const { data, error } = await supabase
+          .from('reflections')
+          .select('*')
+          .eq('user_id', userId)
+          .in('id', activeReflectionIds)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          throw error;
+        }
+
+        const reflections = (data ?? [])
+          .filter(reflection => reflection?.is_active_for_prioritization !== false);
+
+        return reflections.map(enrichReflection);
+      }
+
+      return await fetchRecentReflections(userId, {
+        limit: 50,
+        activeOnly: true,
+      });
+    } catch (error) {
+      console.error('[AgentOrchestration] Failed to fetch reflections', error);
+      return [];
+    }
+  })();
 
   const tasksPromise = supabase
     .from('task_embeddings')
@@ -793,11 +828,11 @@ async function persistTrace(trace: ReasoningTraceRecord): Promise<void> {
 }
 
 export async function orchestrateTaskPriorities(options: OrchestrateTaskOptions): Promise<void> {
-  const { sessionId, userId, outcomeId } = options;
+  const { sessionId, userId, outcomeId, activeReflectionIds } = options;
 
   let context: AgentRuntimeContext;
   try {
-    context = await fetchRuntimeContext(userId, outcomeId);
+    context = await fetchRuntimeContext(userId, outcomeId, { activeReflectionIds });
   } catch (error) {
     console.error('[AgentOrchestration] Unable to build runtime context', error);
     await supabase
@@ -835,16 +870,27 @@ export async function orchestrateTaskPriorities(options: OrchestrateTaskOptions)
         tools_used_count: result.metadata.tool_call_count,
       };
 
+  const updatedAt = new Date().toISOString();
+  const baselinePlan =
+    result.status === 'completed'
+      ? {
+          ...result.plan,
+          created_at: updatedAt,
+        }
+      : null;
+
   const updatePayload: {
     status: AgentSessionStatus;
     prioritized_plan: PrioritizedTaskPlan | null;
+    baseline_plan: (PrioritizedTaskPlan & { created_at?: string }) | null;
     execution_metadata: ExecutionMetadata;
     updated_at: string;
   } = {
     status: result.status,
     prioritized_plan: result.status === 'completed' ? result.plan : null,
+    baseline_plan: baselinePlan,
     execution_metadata: result.metadata,
-    updated_at: new Date().toISOString(),
+    updated_at: updatedAt,
   };
 
   const { error: updateError } = await supabase

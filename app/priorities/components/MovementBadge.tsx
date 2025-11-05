@@ -1,8 +1,15 @@
 'use client';
 
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+
 export type MovementInfo =
-  | { type: 'up'; delta: number }
-  | { type: 'down'; delta: number }
+  | { type: 'up'; delta: number; reason?: string }
+  | { type: 'down'; delta: number; reason?: string }
   | { type: 'new' }
   | { type: 'reintroduced' }
   | { type: 'confidence-drop'; delta: number }
@@ -39,8 +46,29 @@ export function MovementBadge({ movement }: MovementBadgeProps) {
   }
 
   const delta = Math.abs(movement.delta ?? 0);
-  if (movement.type === 'up') {
-    return <span className={baseClass}>↑{delta}</span>;
+  const badgeContent = movement.type === 'up'
+    ? <span className={baseClass}>↑{delta}</span>
+    : <span className={baseClass}>↓{delta}</span>;
+
+  // Show tooltip if reason exists (from context-based adjustment)
+  const hasReason = (movement.type === 'up' || movement.type === 'down') &&
+                    movement.reason &&
+                    movement.reason.length > 0;
+
+  if (hasReason) {
+    return (
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            {badgeContent}
+          </TooltipTrigger>
+          <TooltipContent side="left" align="center" className="max-w-xs">
+            <p className="text-xs">{movement.reason}</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
   }
-  return <span className={baseClass}>↓{delta}</span>;
+
+  return badgeContent;
 }
