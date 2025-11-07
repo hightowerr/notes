@@ -6,6 +6,20 @@ default_agent: slice-orchestrator
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Table of Contents
+- [Quick Links](#quick-links)
+- [First Day Checklist](#first-day-checklist)
+- [Project Overview](#project-overview)
+- [Development Commands](#development-commands)
+- [Architecture](#architecture)
+- [Configuration](#configuration)
+- [Design Principles](#design-principles)
+- [Common Development Patterns](#common-development-patterns)
+- [Known Issues & Workarounds](#known-issues--workarounds)
+- [Agent Usage](#agent-usage)
+- [Performance Targets](#performance-targets)
+- [Quick Troubleshooting](#quick-troubleshooting)
+
 ## Quick Links
 - **`.claude/SYSTEM_RULES.md`** - 🚨 READ FIRST: Mandatory vertical slice protocol (SEE → DO → VERIFY)
 - **`AGENTS.md`** - Repository workflow, commit guidelines, security rules
@@ -69,6 +83,19 @@ npm run test:run -- --pool=threads --poolOptions.threads.minThreads=1 --poolOpti
 - **Workaround:** Use manual testing guides (`specs/*/T*_MANUAL_TEST.md`)
 
 ### Mastra Validation
+**Current Test Status:** 27/44 tests passing (61% pass rate)
+- **Workaround for blocked tests**: Use manual testing guides (`T002_MANUAL_TEST.md`, `T004_MANUAL_TEST.md`)
+- **If you need test organization details**: See `.claude/standards.md` lines 695-775
+- **If you need TDD workflow**: See `.claude/standards.md` lines 159-204
+
+### Utility Scripts
+- `npx tsx scripts/test-mastra.ts` - Validate Mastra tool registry and telemetry
+- `npx tsx scripts/run-semantic-search.ts` - Test semantic search manually
+- `bash scripts/test-search-endpoint.sh` - Quick test of embedding search API
+
+### Workflow Commands (.specify/)
+
+**Feature Development Workflow:**
 ```bash
 npx tsx scripts/test-mastra.ts              # Validate tool registry and telemetry
 npx tsx scripts/run-semantic-search.ts     # Test semantic search manually
@@ -220,6 +247,11 @@ bash scripts/test-search-endpoint.sh       # Quick test of embedding search API
 - **WCAG AA compliance** - 4.5:1 minimum contrast ratio
 
 **Full reference:** `.claude/standards.md` lines 421-479
+**If you need:**
+- Color layer specifications → See `.claude/standards.md` lines 421-432
+- Shadow system utilities → See `.claude/standards.md` lines 452-471
+- Accessibility requirements → See `.claude/standards.md` lines 381-420
+- ShadCN UI conventions → See `.claude/standards.md` lines 480-560
 
 ## Configuration
 
@@ -318,10 +350,20 @@ const processedDoc = Array.isArray(fileData.processed_documents)
 ```typescript
 setTimeout(() => { const values = form.getValues(); }, 0);
 ```
+**If you need:**
+- API endpoint patterns → See `.claude/standards.md` lines 874-903
+- Component patterns → See `.claude/standards.md` lines 905-929
+- Service patterns → See `.claude/standards.md` lines 931-962
+- Supabase relationship queries → See `.claude/standards.md` lines 964-988
+- React Hook Form sync patterns → See `.claude/standards.md` lines 990-1011
+- Error handling standards → See `.claude/standards.md` lines 562-692
 
 ## Known Issues & Workarounds
 
-**Full documentation:** `.claude/standards.md` lines 1026-1148
+**Quick fixes:**
+- **pdf-parse errors?** → Auto-patched via `pnpm install` postinstall hook
+- **FormData test failures?** → Use manual testing guides (`T002_MANUAL_TEST.md` pattern)
+- **Wrong Node version?** → Run `nvm use` (requires Node.js 20+)
 
 ### pdf-parse Library
 - **Issue:** Debug mode causes test file errors
@@ -341,6 +383,12 @@ setTimeout(() => { const values = form.getValues(); }, 0);
 - **Fix Date:** 2025-10-09
 - **Solution:** OCR placeholder cleanup + meta-content detection + confidence penalty
 - **Result:** Scanned PDFs marked `review_required`, no fabricated tasks
+**If you need:**
+- pdf-parse details → See `.claude/standards.md` lines 1028-1084
+- FormData testing workaround → See `.claude/standards.md` lines 1046-1069
+- Node.js setup → See `.claude/standards.md` lines 1086-1099
+- AI hallucination prevention → See `.claude/standards.md` lines 1115-1148 (RESOLVED 2025-10-09)
+- Edge case handling → See `.claude/standards.md` lines 1013-1024
 
 ## Agent Usage
 
@@ -356,16 +404,17 @@ setTimeout(() => { const values = form.getValues(); }, 0);
 
 **Workflow:** slice-orchestrator → delegates to backend-engineer/frontend-ui-builder → test-runner → code-reviewer
 
-## Success Metrics
+## Performance Targets
 
-- **Autonomy:** 100% (zero manual triggers for upload/processing/cleanup)
-- **Processing Time:** <8 seconds target
+- **Processing Time:** <8 seconds per document
 - **Search Performance:** <500ms (95th percentile) for semantic search
 - **Confidence Threshold:** ≥80% for auto-approval
-- **File Formats:** PDF, DOCX, TXT, Markdown
 - **Max File Size:** 10MB
+- **Concurrent Processing:** Max 3 parallel uploads
 - **Data Retention:** 30 days auto-cleanup (daily at 2 AM UTC)
 - **Concurrent Processing:** Max 3 parallel uploads with automatic queueing
+
+**If you need data structure schemas:** Check `lib/schemas/` or the actual TypeScript types in service files
 
 ## Quick Troubleshooting
 

@@ -83,6 +83,7 @@ export type ProcessedDocument = z.infer<typeof ProcessedDocumentSchema>;
 // Processing log operation enum
 export const LogOperation = z.enum([
   'upload',
+  'reprocess',
   'convert',
   'summarize',
   'store',

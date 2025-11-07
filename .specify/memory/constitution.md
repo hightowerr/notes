@@ -24,7 +24,8 @@ Templates Requiring Updates:
   ✅ .specify/templates/agent-file-template.md - Template placeholders only
   ✅ CLAUDE.md - No changes needed (documents principles, not version)
   ✅ README.md - No changes needed (no constitution version references)
-  ✅ .claude/SYSTEM_RULES.md - No changes needed (implementation protocol, not version-dependent)
+  ✅ .claude/SYSTEM_RULES.md - No changes needed (protocol documentation)
+  ✅ .claude/standards.md - No changes needed (implementation standards)
 
 Follow-up TODOs:
   - Next MINOR version: Consider adding principle for AI safety/security patterns

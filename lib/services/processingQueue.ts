@@ -13,6 +13,7 @@
 export interface QueueJobPayload {
   inlineContent?: string;
   contentHash?: string;
+  trigger?: string;
 }
 
 export interface QueueJob {

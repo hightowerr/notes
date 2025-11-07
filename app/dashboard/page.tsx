@@ -14,7 +14,18 @@ import { Alert } from '@/components/ui/alert';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox';
-import { CheckCircle2, Download, FileText, Loader2, Package, Target, Trash2, Upload } from 'lucide-react';
+import {
+  CheckCircle2,
+  Download,
+  FileText,
+  Loader2,
+  MoreVertical,
+  Package,
+  RefreshCw,
+  Target,
+  Trash2,
+  Upload,
+} from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { MainNav } from '@/components/main-nav';
 import { OutcomeDisplay } from '@/app/components/OutcomeDisplay';
@@ -22,6 +33,12 @@ import { OutcomeBuilder } from '@/app/components/OutcomeBuilder';
 import { toast } from 'sonner';
 import JSZip from 'jszip';
 import type { Action } from '@/lib/schemas';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 type DocumentStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'review_required' | 'all';
 type SortField = 'date' | 'name' | 'confidence' | 'size';
@@ -136,6 +153,7 @@ export default function DashboardPage() {
   const [sortField, setSortField] = useState<SortField>('date');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
+  const [reprocessingIds, setReprocessingIds] = useState<Set<string>>(new Set());
   const [selectedDocuments, setSelectedDocuments] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState(false);
   const [outcomeModalOpen, setOutcomeModalOpen] = useState(false);
@@ -259,6 +277,15 @@ export default function DashboardPage() {
       ids.forEach(id => next.delete(id));
       return next;
     });
+
+    setReprocessingIds(prev => {
+      if (prev.size === 0) {
+        return prev;
+      }
+      const next = new Set(prev);
+      ids.forEach(id => next.delete(id));
+      return next;
+    });
   };
 
   const handleDeleteDocuments = async (ids: string[]) => {
@@ -341,6 +368,98 @@ export default function DashboardPage() {
       }
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleReprocessDocument = async (doc: Document) => {
+    if (!doc) {
+      return;
+    }
+
+    if (doc.source === 'text_input') {
+      toast.error('Text input documents cannot be reprocessed');
+      return;
+    }
+
+    if (reprocessingIds.has(doc.id)) {
+      toast.error('Document is already being processed. Please wait for the current operation to finish.');
+      return;
+    }
+
+    if (doc.status === 'processing') {
+      toast.error('Document is already being processed. Please wait for the current operation to finish.');
+      return;
+    }
+
+    if (doc.status === 'pending') {
+      toast.error('Document is already queued for processing. Please wait for the current operation to finish.');
+      return;
+    }
+
+    const previousStatus = doc.status;
+
+    setReprocessingIds(prev => {
+      const next = new Set(prev);
+      next.add(doc.id);
+      return next;
+    });
+
+    setDocuments(prev =>
+      prev.map(existing =>
+        existing.id === doc.id
+          ? { ...existing, status: 'processing' }
+          : existing
+      )
+    );
+
+    try {
+      const response = await fetch(`/api/documents/${doc.id}/reprocess`, {
+        method: 'POST',
+      });
+
+      let data: any = null;
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
+      }
+
+      if (!response.ok || data?.success !== true) {
+        const message = typeof data?.error === 'string' ? data.error : 'Failed to reprocess document';
+        toast.error(message);
+
+        setDocuments(prev =>
+          prev.map(existing =>
+            existing.id === doc.id
+              ? { ...existing, status: previousStatus }
+              : existing
+          )
+        );
+        return;
+      }
+
+      const successMessage =
+        typeof data?.message === 'string' && data.message.length > 0
+          ? data.message
+          : 'Document reprocessed successfully';
+      toast.success(successMessage);
+      await fetchDocuments({ showLoading: false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to reprocess document';
+      toast.error(message);
+      setDocuments(prev =>
+        prev.map(existing =>
+          existing.id === doc.id
+            ? { ...existing, status: previousStatus }
+            : existing
+        )
+      );
+    } finally {
+      setReprocessingIds(prev => {
+        const next = new Set(prev);
+        next.delete(doc.id);
+        return next;
+      });
     }
   };
 
@@ -768,59 +887,93 @@ export default function DashboardPage() {
               return formatRelativeUpdated(doc.updatedAt);
             })();
 
-            return (
-              <Card key={doc.id} className="flex flex-col">
-                <CardHeader>
-                  <div className="flex w-full items-start gap-3">
-                    {/* Checkbox for bulk export (only for completed documents) */}
-                    {(doc.status === 'completed' || doc.status === 'review_required') && doc.summary && (
-                      <Checkbox
-                        checked={selectedDocuments.has(doc.id)}
-                        onCheckedChange={() => toggleDocumentSelection(doc.id)}
-                        aria-label={`Select ${doc.name} for export`}
-                        className="mt-1"
-                      />
-                    )}
-                    <div className="flex-1">
-                      <CardTitle className="text-lg truncate" title={doc.name}>
-                        {doc.name}
-                      </CardTitle>
-                      <CardDescription>
-                        {formatSize(doc.size)} • {formatDate(doc.uploadedAt)}
-                        {updatedDisplay ? (
-                          <span className="mt-1 block text-xs text-muted-foreground">
-                            Updated {updatedDisplay}
-                          </span>
-                        ) : null}
-                      </CardDescription>
-                      {doc.source ? (
-                        <div className="mt-2">
-                          <SourceBadge source={doc.source} syncEnabled={doc.syncEnabled} status={doc.status} />
-                        </div>
-                      ) : null}
-                      <div className="flex gap-2 mt-2">
-                        <Badge variant={getStatusBadgeVariant(doc.status)}>{doc.status.replace('_', ' ')}</Badge>
-                        {doc.confidence !== undefined && (
-                          <Badge variant={getConfidenceBadgeVariant(doc.confidence)}>
-                            {Math.round(doc.confidence * 100)}% confidence
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleDeleteDocuments([doc.id])}
-                      disabled={deleting}
-                      aria-label={`Delete ${doc.name}`}
-                      className="ml-auto text-muted-foreground hover:text-destructive"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </CardHeader>
+            const isProcessingState = doc.status === 'processing' || doc.status === 'pending';
+            const isReprocessing = reprocessingIds.has(doc.id);
+            const showProcessingOverlay = isProcessingState || isReprocessing;
+            const overlayLabel = isReprocessing
+              ? doc.source === 'google_drive'
+                ? 'Downloading latest from Drive...'
+                : 'Reprocessing...'
+              : doc.status === 'pending'
+              ? 'Waiting to process...'
+              : 'Processing...';
+            const disableReprocess =
+              doc.source === 'text_input' || isProcessingState || isReprocessing;
 
-                <CardContent className="flex-1">
+            return (
+              <div key={doc.id} className="relative">
+                <Card className="flex flex-col">
+                  <CardHeader>
+                    <div className="flex w-full items-start gap-3">
+                      {/* Checkbox for bulk export (only for completed documents) */}
+                      {(doc.status === 'completed' || doc.status === 'review_required') && doc.summary && (
+                        <Checkbox
+                          checked={selectedDocuments.has(doc.id)}
+                          onCheckedChange={() => toggleDocumentSelection(doc.id)}
+                          aria-label={`Select ${doc.name} for export`}
+                          className="mt-1"
+                        />
+                      )}
+                      <div className="flex-1">
+                        <CardTitle className="text-lg truncate" title={doc.name}>
+                          {doc.name}
+                        </CardTitle>
+                        <CardDescription>
+                          {formatSize(doc.size)} • {formatDate(doc.uploadedAt)}
+                          {updatedDisplay ? (
+                            <span className="mt-1 block text-xs text-muted-foreground">
+                              Updated {updatedDisplay}
+                            </span>
+                          ) : null}
+                        </CardDescription>
+                        {doc.source ? (
+                          <div className="mt-2">
+                            <SourceBadge source={doc.source} syncEnabled={doc.syncEnabled} status={doc.status} />
+                          </div>
+                        ) : null}
+                        <div className="flex gap-2 mt-2">
+                          <Badge variant={getStatusBadgeVariant(doc.status)}>{doc.status.replace('_', ' ')}</Badge>
+                          {doc.confidence !== undefined && (
+                            <Badge variant={getConfidenceBadgeVariant(doc.confidence)}>
+                              {Math.round(doc.confidence * 100)}% confidence
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            disabled={deleting}
+                            aria-label={`Actions for ${doc.name}`}
+                            className="ml-auto text-muted-foreground hover:text-foreground"
+                          >
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onSelect={() => handleReprocessDocument(doc)}
+                            disabled={disableReprocess}
+                          >
+                            <RefreshCw className="h-4 w-4" />
+                            Reprocess
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onSelect={() => handleDeleteDocuments([doc.id])}
+                            disabled={deleting}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </CardHeader>
+
+                  <CardContent className="flex-1">
                   {/* Quick Preview (first 3 topics) */}
                   {doc.summary && !isExpanded && (
                     <div className="mb-2">
@@ -968,7 +1121,11 @@ export default function DashboardPage() {
                   {/* No Summary (still processing or failed) */}
                   {!doc.summary && (
                     <p className="text-sm text-muted-foreground">
-                      {doc.status === 'processing' ? 'Processing in progress...' : 'No summary available'}
+                      {doc.status === 'processing'
+                        ? 'Processing in progress...'
+                        : doc.status === 'pending'
+                        ? 'Waiting to process...'
+                        : 'No summary available'}
                     </p>
                   )}
 
@@ -984,8 +1141,15 @@ export default function DashboardPage() {
                       {isExpanded ? 'Collapse ▲' : 'Expand ▼'}
                     </Button>
                   )}
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+                {showProcessingOverlay ? (
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-lg bg-background/75 backdrop-blur pointer-events-auto">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">{overlayLabel}</span>
+                  </div>
+                ) : null}
+              </div>
             );
           })}
         </div>
