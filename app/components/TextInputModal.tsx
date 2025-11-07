@@ -179,12 +179,12 @@ export function TextInputModal({ open, onOpenChange }: TextInputModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>Quick Capture</DialogTitle>
+      <DialogContent className="max-w-[min(100vw-2rem,720px)] space-y-0 p-0 sm:max-w-3xl sm:p-0">
+        <DialogHeader className="border-b border-border/70 px-5 py-4 sm:px-6 sm:py-5">
+          <DialogTitle className="text-xl font-semibold">Quick Capture</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="flex flex-col gap-4 px-5 pb-5 pt-4 sm:px-6 sm:pb-6">
           <Input
             placeholder="Title (optional)"
             value={title}
@@ -196,8 +196,8 @@ export function TextInputModal({ open, onOpenChange }: TextInputModalProps) {
             placeholder="Paste markdown or plain text here..."
             value={content}
             onChange={(event) => setContent(event.target.value)}
-            rows={16}
-            className="font-mono"
+            rows={12}
+            className="min-h-[45vh] resize-none font-mono sm:min-h-[320px]"
           />
 
           {validationMessage ? (

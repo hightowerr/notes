@@ -87,6 +87,73 @@ function createTimeout(ms: number): Promise<never> {
   });
 }
 
+function normalizeGenerationError(error: unknown): TaskGenerationError {
+  if (error instanceof TaskGenerationError) {
+    return error;
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  const lowerMessage = message.toLowerCase();
+
+  const isApiKeyError =
+    lowerMessage.includes('api key') ||
+    lowerMessage.includes('unauthorized') ||
+    lowerMessage.includes('authentication');
+  if (isApiKeyError) {
+    return new TaskGenerationError(
+      'AI service error: Invalid authentication while generating bridging tasks.',
+      'AI_SERVICE_ERROR',
+      { original_error: message }
+    );
+  }
+
+  const isRateLimitError =
+    lowerMessage.includes('rate limit') ||
+    lowerMessage.includes('quota');
+  if (isRateLimitError) {
+    return new TaskGenerationError(
+      `AI service error: ${message}`,
+      'AI_SERVICE_ERROR',
+      { original_error: message }
+    );
+  }
+
+  return new TaskGenerationError(
+    `Task generation failed: ${message}`,
+    'GENERATION_FAILED',
+    { original_error: message }
+  );
+}
+
+function isTransientGenerationError(error: TaskGenerationError): boolean {
+  if (error.code === 'TIMEOUT') {
+    return true;
+  }
+
+  const lowerMessage = error.message.toLowerCase();
+
+  if (
+    error.code === 'AI_SERVICE_ERROR' &&
+    (lowerMessage.includes('rate limit') ||
+      lowerMessage.includes('temporarily') ||
+      lowerMessage.includes('try again'))
+  ) {
+    return true;
+  }
+
+  if (
+    error.code === 'GENERATION_FAILED' &&
+    (lowerMessage.includes('timeout') ||
+      lowerMessage.includes('temporarily') ||
+      lowerMessage.includes('overload') ||
+      lowerMessage.includes('connection'))
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 function formatSearchResults(results: SimilaritySearchResult[]): string {
   if (results.length === 0) {
     return 'None found.\n';
@@ -257,51 +324,43 @@ Respond ONLY with valid JSON matching the specified schema.`;
 
   // T005: Add 8-second timeout for AI generation with manual retry only
   const GENERATION_TIMEOUT_MS = 8000;
+  const MAX_GENERATION_ATTEMPTS = 2;
 
-  let agentResponse: z.infer<typeof agentResponseSchema>;
-  try {
-    const generationPromise = generateObject({
-      model: openai('gpt-4o-mini'),
-      schema: agentResponseSchema,
-      prompt,
-      temperature: 0.3,
-    });
+  let agentResponse: z.infer<typeof agentResponseSchema> | null = null;
+  let lastGenerationError: TaskGenerationError | null = null;
 
-    // Race between AI generation and timeout
-    const { object } = await Promise.race([
-      generationPromise,
-      createTimeout(GENERATION_TIMEOUT_MS),
-    ]);
+  for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt += 1) {
+    try {
+      const generationPromise = generateObject({
+        model: openai('gpt-4o-mini'),
+        schema: agentResponseSchema,
+        prompt,
+        temperature: 0.3,
+      });
 
-    agentResponse = object;
-  } catch (error) {
-    // T005: Distinguish between timeout and AI service errors
-    if (error instanceof TaskGenerationError && error.code === 'TIMEOUT') {
-      throw error; // Re-throw timeout error (504)
+      const { object } = await Promise.race([
+        generationPromise,
+        createTimeout(GENERATION_TIMEOUT_MS),
+      ]);
+
+      agentResponse = object;
+      break;
+    } catch (error) {
+      const normalizedError = normalizeGenerationError(error);
+      if (attempt < MAX_GENERATION_ATTEMPTS - 1 && isTransientGenerationError(normalizedError)) {
+        lastGenerationError = normalizedError;
+        continue;
+      }
+      throw normalizedError;
     }
+  }
 
-    // Check for AI service errors (invalid API key, rate limit, etc.)
-    const message = error instanceof Error ? error.message : String(error);
-    const isApiKeyError = message.toLowerCase().includes('api key') ||
-                          message.toLowerCase().includes('unauthorized') ||
-                          message.toLowerCase().includes('authentication');
-    const isRateLimitError = message.toLowerCase().includes('rate limit') ||
-                             message.toLowerCase().includes('quota');
-
-    if (isApiKeyError || isRateLimitError) {
-      throw new TaskGenerationError(
-        `AI service error: ${message}`,
-        'AI_SERVICE_ERROR',
-        { original_error: message }
+  if (!agentResponse) {
+    throw lastGenerationError ??
+      new TaskGenerationError(
+        'Task generation failed: no response received from AI service.',
+        'GENERATION_FAILED'
       );
-    }
-
-    // Generic generation failure
-    throw new TaskGenerationError(
-      `Task generation failed: ${message}`,
-      'GENERATION_FAILED',
-      { original_error: message }
-    );
   }
 
   const deduplicatedTasks = deduplicateGeneratedTasks(

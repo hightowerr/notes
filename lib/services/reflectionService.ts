@@ -142,3 +142,26 @@ export async function createReflection(
 
   return enrichReflection(data as Reflection);
 }
+
+/**
+ * Delete a reflection
+ *
+ * @param userId - User ID (UUID)
+ * @param reflectionId - Reflection ID (UUID)
+ * @throws Error if deletion fails or reflection doesn't belong to user
+ */
+export async function deleteReflection(
+  userId: string,
+  reflectionId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('reflections')
+    .delete()
+    .eq('id', reflectionId)
+    .eq('user_id', userId); // Ensure user owns the reflection
+
+  if (error) {
+    console.error('Error deleting reflection:', error);
+    throw new Error('Failed to delete reflection');
+  }
+}

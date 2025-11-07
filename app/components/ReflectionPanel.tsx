@@ -21,6 +21,7 @@ export function ReflectionPanel({ isOpen, onOpenChange }: ReflectionPanelProps) 
   const [isLoading, setIsLoading] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [pendingToggleIds, setPendingToggleIds] = useState<Set<string>>(new Set());
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
 
   const setTogglePending = useCallback((reflectionId: string, pending: boolean) => {
     setPendingToggleIds((prev) => {
@@ -162,10 +163,47 @@ export function ReflectionPanel({ isOpen, onOpenChange }: ReflectionPanelProps) 
     }
   };
 
+  const handleReflectionDelete = useCallback(
+    async (reflectionId: string) => {
+      if (deletingIds.has(reflectionId) || !UUID_PATTERN.test(reflectionId)) {
+        return;
+      }
+
+      // Optimistic UI update
+      setReflections((prev) => prev.filter((r) => r.id !== reflectionId));
+      setDeletingIds((prev) => new Set(prev).add(reflectionId));
+
+      try {
+        const response = await fetch(`/api/reflections/${reflectionId}`, {
+          method: 'DELETE',
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to delete reflection');
+        }
+
+        toast.success('Reflection deleted');
+      } catch (error) {
+        // Rollback on error - re-fetch to restore
+        await fetchReflections();
+        const message =
+          error instanceof Error ? error.message : 'Failed to delete reflection';
+        toast.error(message);
+      } finally {
+        setDeletingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(reflectionId);
+          return next;
+        });
+      }
+    },
+    [deletingIds]
+  );
+
   const PanelContent = () => (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6 pb-4 border-b border-text-muted/20">
+      <div className="flex items-center justify-between mb-6 pb-4">
         <div>
           <h2 className="text-lg font-semibold text-text-heading">Reflections</h2>
           <p className="text-xs text-text-muted mt-1">Quick context capture</p>
@@ -194,7 +232,9 @@ export function ReflectionPanel({ isOpen, onOpenChange }: ReflectionPanelProps) 
           reflections={reflections}
           isLoading={isLoading}
           onToggle={handleReflectionToggle}
+          onDelete={handleReflectionDelete}
           pendingIds={pendingToggleIds}
+          deletingIds={deletingIds}
         />
       </div>
     </div>
@@ -202,38 +242,37 @@ export function ReflectionPanel({ isOpen, onOpenChange }: ReflectionPanelProps) 
 
   return (
     <>
-      {/* Desktop: Collapsible sidebar */}
-      <Dialog open={isOpen} onOpenChange={onOpenChange}>
-        <div className="hidden md:block">
+      {/* Desktop: Collapsible sidebar (outside Dialog) */}
+      {isOpen && (
+        <>
+          {/* Overlay (click to close) */}
           <div
-            className={`fixed right-0 top-0 h-full w-80 bg-bg-layer-2 shadow-2layer-lg z-50 transform transition-transform duration-300 ease-in-out ${
-              isOpen ? 'translate-x-0' : 'translate-x-full'
-            }`}
+            className="hidden md:block fixed inset-0 bg-black/20 transition-opacity duration-300"
+            style={{ zIndex: 999 }}
+            onClick={() => onOpenChange(false)}
+          />
+
+          {/* Panel - higher z-index to appear above overlay */}
+          <div
+            className="hidden md:block fixed right-0 top-0 h-full w-80 bg-bg-layer-2 shadow-2layer-lg transform transition-transform duration-300 ease-in-out translate-x-0"
+            style={{ zIndex: 1000 }}
           >
             <div className="h-full p-6 overflow-hidden">
               <PanelContent />
             </div>
           </div>
+        </>
+      )}
 
-          {/* Overlay (click to close) */}
-          {isOpen && (
-            <div
-              className="fixed inset-0 bg-black/20 z-40 transition-opacity duration-300"
-              onClick={() => onOpenChange(false)}
-            />
-          )}
-        </div>
-
-        {/* Mobile: Full-screen modal */}
-        <div className="md:hidden">
-          <DialogContent className="w-full h-full max-w-none p-6 overflow-y-auto">
-            <DialogHeader className="sr-only">
-              <DialogTitle>Reflections</DialogTitle>
-              <DialogDescription>Capture current context reflections.</DialogDescription>
-            </DialogHeader>
-            <PanelContent />
-          </DialogContent>
-        </div>
+      {/* Mobile: Full-screen modal */}
+      <Dialog open={isOpen} onOpenChange={onOpenChange}>
+        <DialogContent className="w-full h-full max-w-none p-6 overflow-y-auto md:hidden">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Reflections</DialogTitle>
+            <DialogDescription>Capture current context reflections.</DialogDescription>
+          </DialogHeader>
+          <PanelContent />
+        </DialogContent>
       </Dialog>
     </>
   );

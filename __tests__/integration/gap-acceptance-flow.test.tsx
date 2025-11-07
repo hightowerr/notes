@@ -96,6 +96,8 @@ const gapResponse = {
     gaps_detected: 1,
     analysis_duration_ms: 42,
   },
+  suggestions: [],
+  analysis_session_id: 'gap-session-001',
 };
 
 const generationResponse = {
@@ -168,11 +170,48 @@ describe('Gap acceptance flow', () => {
       if (url.endsWith('/api/gaps/accept') && init?.method === 'POST') {
         const parsedBody = typeof init.body === 'string' ? JSON.parse(init.body) : null;
         acceptedPayloads.push(parsedBody);
+        const updatedPlan = {
+          ...sessionResponse.session.prioritized_plan,
+          ordered_task_ids: ['task-1', 'bridge-1', 'task-2'],
+          dependencies: [
+            ...sessionResponse.session.prioritized_plan.dependencies,
+            {
+              source_task_id: 'task-1',
+              target_task_id: 'bridge-1',
+              relationship_type: 'prerequisite',
+              confidence: 0.85,
+              detection_method: 'stored_relationship',
+            },
+            {
+              source_task_id: 'bridge-1',
+              target_task_id: 'task-2',
+              relationship_type: 'prerequisite',
+              confidence: 0.85,
+              detection_method: 'stored_relationship',
+            },
+          ],
+          confidence_scores: {
+            ...sessionResponse.session.prioritized_plan.confidence_scores,
+            'bridge-1': 0.85,
+          },
+          task_annotations: [
+            ...(sessionResponse.session.prioritized_plan.task_annotations ?? []),
+            {
+              task_id: 'bridge-1',
+              state: 'manual_override',
+              reasoning: generationResponse.bridging_tasks[0].reasoning,
+              dependency_notes: 'Estimated effort: 96 hours',
+              manual_override: true,
+            },
+          ],
+        };
         return new Response(
           JSON.stringify({
             inserted_count: 1,
             task_ids: ['bridge-1'],
             relationships_created: 2,
+            updated_plan: updatedPlan,
+            gap_analysis_session_id: 'gap-session-001',
           }),
           {
             status: 201,
@@ -218,6 +257,8 @@ describe('Gap acceptance flow', () => {
     });
 
     expect(acceptedPayloads[0]).toMatchObject({
+      analysis_session_id: 'gap-session-001',
+      agent_session_id: 'session-001',
       accepted_tasks: [
         {
           predecessor_id: 'task-1',
@@ -233,6 +274,10 @@ describe('Gap acceptance flow', () => {
 
     await waitFor(() => {
       expect(screen.queryByLabelText(/task description/i)).not.toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/AI Generated/i)).toBeInTheDocument();
     });
   });
 });

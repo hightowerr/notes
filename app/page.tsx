@@ -13,7 +13,7 @@ import { OutcomeDisplay } from '@/app/components/OutcomeDisplay';
 import { OutcomeBuilder } from '@/app/components/OutcomeBuilder';
 import { ReflectionPanel } from '@/app/components/ReflectionPanel';
 import { useReflectionShortcut } from '@/lib/hooks/useReflectionShortcut';
-import { toast, Toaster } from 'sonner';
+import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { DocumentOutput, StatusResponse, FileStatusType } from '@/lib/schemas';
 
@@ -40,12 +40,14 @@ interface UploadedFileInfo {
 // Client-side file validation (T004)
 const validateFileBeforeUpload = (file: File): { valid: boolean; error?: string } => {
   const MAX_SIZE = 10 * 1024 * 1024; // 10MB
-  const ALLOWED_TYPES = [
+  const ALLOWED_TYPES = new Set([
     'application/pdf',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'text/plain',
     'text/markdown',
-  ];
+  ]);
+  const MARKDOWN_FALLBACK_TYPES = new Set(['', 'text/plain', 'application/octet-stream', 'text/x-markdown']);
+  const ALLOWED_EXTENSIONS = new Set(['.pdf', '.docx', '.txt', '.md']);
 
   // Check file size
   if (file.size > MAX_SIZE) {
@@ -56,11 +58,30 @@ const validateFileBeforeUpload = (file: File): { valid: boolean; error?: string 
     };
   }
 
-  // Check MIME type
-  if (!ALLOWED_TYPES.includes(file.type)) {
+  const extension = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')).toLowerCase() : '';
+  if (!ALLOWED_EXTENSIONS.has(extension)) {
     return {
       valid: false,
-      error: `Unsupported file type: ${file.name}. Please use PDF, DOCX, or TXT files.`,
+      error: `Unsupported file type: ${file.name}. Please use PDF, DOCX, TXT, or MD files.`,
+    };
+  }
+
+  // Check MIME type (fall back to extension for markdown uploads with generic types)
+  const normalizedType = (file.type || '').toLowerCase();
+  const isMarkdown = extension === '.md' || extension === '.markdown';
+
+  if (!ALLOWED_TYPES.has(normalizedType)) {
+    if (isMarkdown && MARKDOWN_FALLBACK_TYPES.has(normalizedType)) {
+      return { valid: true };
+    }
+
+    if (!normalizedType && (extension === '.txt' || isMarkdown)) {
+      return { valid: true };
+    }
+
+    return {
+      valid: false,
+      error: `Unsupported file type: ${file.name}. Please use PDF, DOCX, TXT, or MD files.`,
     };
   }
 
@@ -230,11 +251,12 @@ export default function Home() {
         errorCount++;
 
         // Log to console immediately (no delay)
+        // Note: File object properties must be explicitly accessed for logging
         console.error('[CLIENT VALIDATION]', {
-          filename: file.name,
-          size: file.size,
-          type: file.type,
-          error: validation.error,
+          filename: file?.name ?? 'unknown',
+          size: file?.size ?? 0,
+          type: file?.type ?? 'unknown',
+          error: validation.error ?? 'Validation failed',
           timestamp: new Date().toISOString(),
         });
 
@@ -416,9 +438,6 @@ export default function Home() {
 
   return (
     <>
-      {/* Toast Notifications - moved outside main div to avoid render cycle */}
-      <Toaster position="top-right" richColors />
-
       <div className="min-h-screen bg-bg-layer-1">
         {/* Outcome Display Banner (shown when active outcome exists) */}
         <OutcomeDisplay onEdit={(outcome) => {
@@ -450,31 +469,33 @@ export default function Home() {
 
       <MainNav
         actions={
-          <>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setReflectionPanelOpen(true)}
-              className="gap-2"
-              title="Reflections (Cmd+Shift+R / Ctrl+Shift+R)"
-            >
-              <MessageSquare className="h-4 w-4" />
-              <span className="hidden sm:inline">Reflections</span>
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setOutcomeModalOpen(true)}
-              className="gap-2"
-            >
-              <Target className="h-4 w-4" />
-              <span className="hidden sm:inline">Set Outcome</span>
-            </Button>
-            <Badge variant="secondary" className="px-4 py-2">
-              {files.length} {files.length === 1 ? 'Document' : 'Documents'}
-            </Badge>
-            <ThemeToggle />
-          </>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setReflectionPanelOpen(true)}
+                className="gap-2 h-11 sm:h-9 flex-1 sm:flex-initial"
+                title="Reflections (Cmd+Shift+R / Ctrl+Shift+R)"
+              >
+                <MessageSquare className="h-4 w-4" />
+                <span className="text-sm">Reflections</span>
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setOutcomeModalOpen(true)}
+                className="gap-2 h-11 sm:h-9 flex-1 sm:flex-initial"
+              >
+                <Target className="h-4 w-4" />
+                <span className="text-sm">Outcome</span>
+              </Button>
+            </div>
+            <div className="flex items-center justify-between sm:justify-start gap-2">
+              <Badge variant="secondary" className="px-3 sm:px-4 py-2 text-xs sm:text-sm whitespace-nowrap">
+                {files.length} {files.length === 1 ? 'Doc' : 'Docs'}
+              </Badge>
+              <ThemeToggle />
+            </div>
+          </div>
         }
       />
 

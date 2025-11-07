@@ -46,13 +46,13 @@ export async function POST(request: Request) {
       const enhancedError = validation.code === 'FILE_TOO_LARGE'
         ? `File too large: ${file.name} (${(file.size / (1024 * 1024)).toFixed(1)}MB). Maximum size: 10MB`
         : validation.code === 'UNSUPPORTED_FORMAT'
-        ? `Unsupported file type: ${file.name}. Please use PDF, DOCX, or TXT files.`
-        : validation.error!;
+        ? `Unsupported file type: ${file.name}. Please use PDF, DOCX, TXT, or MD files.`
+        : validation.error;
 
       const errorResponse: ErrorResponse = {
         success: false,
         error: enhancedError,
-        code: validation.code!,
+        code: validation.code,
       };
 
       // Log rejection for observability (FR-007)
@@ -82,12 +82,14 @@ export async function POST(request: Request) {
             rejection_reason: validation.code,
           },
           timestamp: new Date().toISOString(),
-        });
+      });
 
       // Return appropriate HTTP status code (413 for size, 400 for format)
       const statusCode = validation.code === 'FILE_TOO_LARGE' ? 413 : 400;
       return NextResponse.json(errorResponse, { status: statusCode });
     }
+
+    const { normalizedMimeType } = validation;
 
     // Generate unique file ID
     const fileId = randomUUID();
@@ -107,7 +109,7 @@ export async function POST(request: Request) {
       .storage
       .from('notes')
       .upload(storagePath, arrayBuffer, {
-        contentType: file.type,
+        contentType: normalizedMimeType,
         upsert: false, // Prevent overwriting existing files
       });
 
@@ -165,7 +167,7 @@ export async function POST(request: Request) {
         id: fileId,
         name: file.name,
         size: file.size,
-        mime_type: file.type,
+        mime_type: normalizedMimeType,
         content_hash: contentHash,
         uploaded_at: new Date().toISOString(),
         storage_path: storagePath,

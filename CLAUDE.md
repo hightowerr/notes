@@ -21,74 +21,68 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - [Quick Troubleshooting](#quick-troubleshooting)
 
 ## Quick Links
-- **`AGENTS.md`** - Repository workflow, structure, commit expectations
-- **`.claude/standards.md`** - Universal standards for all agents (TypeScript, TDD, design system, error handling)
-- **`IMPLEMENTATION_STATUS.md`** - Detailed feature completion status
-- **`.claude/SYSTEM_RULES.md`** - Vertical slice development protocol (read before ANY coding)
+- **`.claude/SYSTEM_RULES.md`** - 🚨 READ FIRST: Mandatory vertical slice protocol (SEE → DO → VERIFY)
+- **`AGENTS.md`** - Repository workflow, commit guidelines, security rules
+- **`.claude/standards.md`** - TypeScript, TDD, design system, error handling standards
+- **`IMPLEMENTATION_STATUS.md`** - Feature completion status
 
 ## First Day Checklist
 
-**Get running in 5 minutes:**
-
-1. **Check Node version**: `node --version` (requires 20+, run `nvm use` to switch)
-2. **Install dependencies**: `pnpm install` (this project uses **pnpm**, not npm)
-3. **Set up environment**: Create `.env.local` with these required keys:
+1. **Check Node version**: `node --version` (requires 20+, use `nvm use` to switch)
+2. **Install dependencies**: `npm install` (this project uses **npm**, not yarn/pnpm)
+3. **Set up environment**: Create `.env.local` with required keys:
    ```env
    NEXT_PUBLIC_SUPABASE_URL=https://emgvqqqqdbfpjwbouybj.supabase.co
    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_key_here
    OPENAI_API_KEY=sk-proj-...
+   ENCRYPTION_KEY=32_byte_hex  # Generate: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
    ```
-4. **Start dev server**: `pnpm dev`
-5. **Open browser**: http://localhost:3000
-6. **Read the rules**: Review [Design Principles](#design-principles) below - this project requires **vertical slice development**
+4. **Apply migrations**: `supabase db push` or manually via Supabase Dashboard → SQL Editor
+5. **Start dev server**: `npm run dev` → http://localhost:3000
+6. **Read the rules**: Review `.claude/SYSTEM_RULES.md` - this project requires **vertical slice development** (every task must deliver user-testable value)
 
 ## Project Overview
 
 **AI Note Synthesiser** — An autonomous agent that converts documents (PDF/DOCX/TXT) to Markdown, extracts structured insights using GPT-4o, generates vector embeddings for semantic search, and provides intelligent task prioritization through Mastra-powered agents.
 
-**Input Methods:**
-- Manual file upload (drag-and-drop or file picker)
-- Google Drive sync (automatic detection of new/updated files in monitored folder)
-- Direct text input (Quick Capture modal for markdown/plaintext)
-
 **Tech Stack:** Next.js 15, React 19, TypeScript, Vercel AI SDK (OpenAI GPT-4o), Supabase (pgvector), Tailwind CSS v4, Mastra, Google Drive API
 
 **Core Pattern:** Sense → Reason → Act → Learn
-- **Sense:** File upload detection, Drive webhooks, text input
-- **Reason:** Convert to Markdown → AI summarization → Extract structured data
-- **Act:** Store outputs, generate embeddings, prioritize tasks
-- **Learn:** Log metrics, confidence scores, agent reasoning traces
 
 ## Development Commands
 
-**Important:** This project uses **pnpm** as the package manager. Always use `pnpm` instead of `npm`.
-
 ### Core Commands
-- `pnpm dev` - Start development server (http://localhost:3000)
-- `pnpm build` - Build for production
-- `pnpm start` - Start production server
-- `pnpm lint` - Run ESLint
+```bash
+npm run dev          # Start development server (http://localhost:3000)
+npm run build        # Build for production
+npm run start        # Start production server
+npm run lint         # Run ESLint (use -- --fix to auto-correct)
+```
 
 ### Testing Commands
 ```bash
-# Watch mode (recommended for development)
-pnpm test
-
-# Run all tests once (CI mode)
-pnpm test:run
+npm test             # Watch mode (recommended for development)
+npm run test:run     # Run all tests once (CI mode)
+npm run test:ui      # Tests with UI dashboard
 
 # Run specific test file
-pnpm test:run __tests__/contract/outcomes.test.ts
-
-# Run tests with UI dashboard
-pnpm test:ui
+npm run test:run __tests__/contract/outcomes.test.ts
 
 # Run by category
-pnpm test:unit          # Unit tests only
-pnpm test:contract      # Contract tests only
-pnpm test:integration   # Integration tests only
+npm run test:run lib/services/__tests__/    # Unit tests
+npm run test:run __tests__/contract/        # Contract tests
+npm run test:run __tests__/integration/     # Integration tests
+
+# Stress test with single thread (for Tinypool issues)
+npm run test:run -- --pool=threads --poolOptions.threads.minThreads=1 --poolOptions.threads.maxThreads=1
 ```
 
+**Current Test Status:** 29/46 tests passing (63% pass rate)
+- **Passing:** Component tests, database tests, schema validation, service logic, task insertion, cycle detection
+- **Blocked:** Upload API contract tests (FormData serialization issue in test environment)
+- **Workaround:** Use manual testing guides (`specs/*/T*_MANUAL_TEST.md`)
+
+### Mastra Validation
 **Current Test Status:** 27/44 tests passing (61% pass rate)
 - **Workaround for blocked tests**: Use manual testing guides (`T002_MANUAL_TEST.md`, `T004_MANUAL_TEST.md`)
 - **If you need test organization details**: See `.claude/standards.md` lines 695-775
@@ -103,29 +97,22 @@ pnpm test:integration   # Integration tests only
 
 **Feature Development Workflow:**
 ```bash
-# 1. Create feature specification
-/specify "feature description"
-
-# 2. Generate implementation plan
-/plan
-
-# 3. Break down into vertical slice tasks
-/tasks
-
-# 4. Clarify ambiguities (optional)
-/clarify
-
-# 5. Execute implementation
-/implement
+npx tsx scripts/test-mastra.ts              # Validate tool registry and telemetry
+npx tsx scripts/run-semantic-search.ts     # Test semantic search manually
+bash scripts/test-search-endpoint.sh       # Quick test of embedding search API
 ```
 
-**Slash Command Details:**
-- `/specify` - Create feature specification from natural language description
-- `/plan` - Generate implementation plan from spec (design artifacts)
-- `/tasks` - Generate **vertical slice** task list (UI + Backend + Data + Feedback per task)
-- `/clarify` - Ask targeted questions to resolve underspecified areas
-- `/implement` - Execute implementation plan using slice-orchestrator agent
-- `/analyze` - Perform consistency analysis across spec, plan, and tasks
+### Feature Development Workflow (.specify/)
+
+**Slash Commands** (used with Claude Code):
+```bash
+/specify "feature description"  # 1. Create feature specification
+/plan                           # 2. Generate implementation plan
+/tasks                          # 3. Break down into vertical slice tasks
+/clarify                        # 4. Ask targeted questions (optional)
+/implement                      # 5. Execute implementation
+/analyze                        # 6. Consistency analysis across artifacts
+```
 
 **Important:** All tasks MUST be vertical slices delivering complete user value (SEE → DO → VERIFY). See `.claude/SYSTEM_RULES.md` for the mandatory vertical slice protocol.
 
@@ -134,53 +121,48 @@ pnpm test:integration   # Integration tests only
 ### High-Level Processing Pipeline
 
 ```
-1. Upload → 2. Convert to Markdown → 3. AI Extract → 4. Generate Embeddings → 5. Display
-   ↓              ↓                       ↓                ↓                      ↓
- /api/upload   noteProcessor.ts      aiSummarizer.ts  embeddingService.ts   SummaryPanel.tsx
-   ↓              ↓                       ↓                ↓                      ↓
- Supabase      Markdown storage      JSON storage     task_embeddings       Status polling
- storage                                                 (pgvector)
+1. Upload → 2. Convert → 3. AI Extract → 4. Embed → 5. Display
+   ↓           ↓            ↓              ↓          ↓
+/api/upload  noteProcessor aiSummarizer  embeddings SummaryPanel
+   ↓           ↓            ↓              ↓          ↓
+ Supabase    Markdown     JSON storage   pgvector   Polling
 ```
 
-**Key Flow:**
-1. **Upload** (`POST /api/upload`) → Validate, hash, store in Supabase, queue processing
-2. **Process** (`POST /api/process`) → PDF/DOCX/TXT → Markdown → GPT-4o extraction
-3. **Embed** (automatic) → Generate embeddings for tasks → Store in pgvector
-4. **Display** (`GET /api/status/[fileId]`) → Poll status → Show SummaryPanel when complete
-5. **Search** (`POST /api/embeddings/search`) → Semantic search across all tasks (<500ms)
+**Key Flows:**
+1. **Document Intake**: Upload → Validate → Hash → Store → Queue → Convert → Extract → Embed
+2. **Task Prioritization**: Trigger → Load Context → Agent Run → Tool Execution → Parse Results → Store
+3. **Gap Filling**: Detect Gaps → Generate Tasks → Review/Edit → Accept → Insert with Cycle Detection
 
-### Key Service Modules
+### Service Modules
 
-**Document Processing:**
-- `lib/services/noteProcessor.ts` - Converts PDF/DOCX/TXT to Markdown
-- `lib/services/aiSummarizer.ts` - GPT-4o extraction with structured output (Zod)
-- `lib/services/processingQueue.ts` - Concurrent upload management (max 3 parallel)
+**Document Processing** (`lib/services/`):
+- `noteProcessor.ts` - PDF/DOCX/TXT → Markdown (with OCR fallback)
+- `aiSummarizer.ts` - GPT-4o extraction with structured output (Zod)
+- `processingQueue.ts` - Concurrent upload management (max 3 parallel)
 
-**Vector Embeddings:**
-- `lib/services/embeddingService.ts` - OpenAI text-embedding-3-small generation
-- `lib/services/vectorStorage.ts` - Supabase pgvector operations
-- `lib/services/embeddingQueue.ts` - Rate limiting (max 3 concurrent documents)
+**Vector Embeddings** (`lib/services/`):
+- `embeddingService.ts` - OpenAI text-embedding-3-small generation
+- `vectorStorage.ts` - Supabase pgvector operations
+- `embeddingQueue.ts` - Rate limiting (max 3 concurrent)
 
-**Mastra Tools (Phase 2):**
-- `lib/mastra/tools/semanticSearch.ts` - Find tasks by semantic meaning
-- `lib/mastra/tools/getDocumentContext.ts` - Retrieve full document content
-- `lib/mastra/tools/detectDependencies.ts` - AI-powered relationship detection
-- `lib/mastra/tools/queryTaskGraph.ts` - Query existing relationships
-- `lib/mastra/tools/clusterBySimilarity.ts` - Group similar tasks
+**Mastra Tools** (`lib/mastra/tools/`):
+- `semanticSearch.ts` - Find tasks by semantic meaning
+- `getDocumentContext.ts` - Retrieve full document content
+- `detectDependencies.ts` - AI-powered relationship detection
+- `queryTaskGraph.ts` - Query existing relationships
+- `clusterBySimilarity.ts` - Group similar tasks
+- `suggestBridgingTasks.ts` - Generate tasks to fill plan gaps (Feature 011)
 
-**Other Services:**
-- `lib/services/outcomeService.ts` - Outcome statement assembly
-- `lib/services/reflectionService.ts` - Quick-capture reflections
-- `lib/services/recomputeService.ts` - Background recompute jobs
-- `lib/jobs/cleanupExpiredFiles.ts` - Automatic file cleanup (30-day retention)
+**Gap Filling** (`lib/services/` - Feature 011):
+- `gapDetection.ts` - Detect logical gaps using 4 indicators (time, action type, skill, dependency)
+- `taskInsertion.ts` - Insert tasks with Kahn's algorithm cycle detection
+- Zod schemas: `lib/schemas/gapAnalysis.ts`
 
-**Cloud Sync Services (Phase 5):**
-- `lib/services/googleDriveService.ts` - Drive API client, OAuth token management
-- `lib/services/googleDriveFolderSync.ts` - Folder monitoring, file download
-- `lib/services/tokenEncryption.ts` - AES-256 encryption for OAuth tokens
-- `lib/services/webhookVerification.ts` - Webhook signature validation
-- `lib/services/webhookRetry.ts` - Retry logic with exponential backoff
-- `lib/services/textInputService.ts` - In-memory text processing (no file storage)
+**Cloud Sync** (`lib/services/` - Phase 5):
+- `googleDriveService.ts` - Drive API client, OAuth token management
+- `googleDriveFolderSync.ts` - Folder monitoring, file download
+- `tokenEncryption.ts` - AES-256 encryption for OAuth tokens
+- `textInputService.ts` - In-memory text processing
 
 ### Database Schema (Supabase)
 
@@ -191,16 +173,16 @@ pnpm test:integration   # Integration tests only
 - `user_outcomes` - User-defined outcome statements
 - `reflections` - Quick-capture reflections for context-aware reasoning
 - `task_relationships` - Task dependencies (prerequisite/blocking/related)
-- `agent_sessions` - Agent execution traces and reasoning steps
+- `agent_sessions` - Agent execution traces, reasoning steps, gap_analysis JSONB
 - `processing_logs` - Metrics, errors, retry attempts
-- `cloud_connections` - OAuth tokens, folder selection, webhook state (Phase 5)
-- `sync_events` - Audit log for cloud sync operations (Phase 5)
+- `cloud_connections` - OAuth tokens, folder selection, webhook state
+- `sync_events` - Audit log for cloud sync operations
 
 **Storage Buckets:**
 - `notes/` - Original uploaded files (hash-based naming)
 - `notes/processed/` - Generated Markdown and JSON files
 
-**Migrations:** `supabase/migrations/` (001-018+) - Apply manually via Supabase Dashboard → SQL Editor or `supabase db push`
+**Migrations:** `supabase/migrations/` (001-022+)
 
 ### API Endpoints
 
@@ -212,15 +194,11 @@ pnpm test:integration   # Integration tests only
 - `GET /api/export/[fileId]?format=json|markdown` - Export document summary
 
 **Vector Search:**
-- `POST /api/embeddings/search` - Semantic search across task embeddings
-  - Request: `{ query: string, limit?: number, threshold?: number }`
-  - Response time target: <500ms (95th percentile)
+- `POST /api/embeddings/search` - Semantic search across task embeddings (<500ms target)
 
-**Outcome Management:**
+**Outcome & Reflections:**
 - `GET /api/outcomes` - Fetch active outcome statement
 - `POST /api/outcomes` - Create or update outcome statement
-
-**Reflections:**
 - `POST /api/reflections` - Create quick reflection entry
 - `GET /api/reflections?limit=20&tags=work` - Retrieve recent reflections
 
@@ -229,13 +207,16 @@ pnpm test:integration   # Integration tests only
 - `GET /api/agent/sessions/[sessionId]` - Get agent session details
 - `GET /api/agent/sessions/latest` - Get latest agent session
 
-**Cloud Sync (Phase 5):**
+**Gap Filling (Feature 011):**
+- `POST /api/agent/suggest-gaps` - Detect gaps and generate bridging tasks
+- `POST /api/agent/accept-suggestions` - Insert accepted tasks with cycle validation
+
+**Cloud Sync:**
 - `POST /api/cloud/google-drive/connect` - Initiate Google Drive OAuth flow
 - `GET /api/cloud/google-drive/callback` - OAuth callback handler
 - `POST /api/cloud/google-drive/select-folder` - Choose Drive folder to monitor
 - `POST /api/webhooks/google-drive` - Webhook for Drive change notifications
 - `POST /api/text-input` - Direct text input (Quick Capture)
-- `GET /api/cloud-connections` - List user's cloud connections
 
 **Maintenance:**
 - `POST /api/cleanup?dryRun=true` - Manual cleanup trigger (deletes expired documents)
@@ -249,12 +230,12 @@ pnpm test:integration   # Integration tests only
 
 **Key Components:**
 - `app/components/SummaryPanel.tsx` - Displays topics, decisions, actions, LNO tasks
-- `app/components/OutcomeBuilder.tsx` - Modal form for outcome statements (draft recovery)
-- `app/components/OutcomeDisplay.tsx` - Persistent banner showing active outcome
+- `app/components/OutcomeBuilder.tsx` - Modal form for outcome statements
 - `app/components/ReflectionPanel.tsx` - Quick-capture reflection interface
 - `app/components/ReasoningTracePanel.tsx` - Agent reasoning visualization
+- `app/priorities/components/GapDetectionModal.tsx` - Gap detection UI (Feature 011)
 
-**UI Library:** shadcn/ui components (install via `pnpm dlx shadcn@latest add <component>`)
+**UI Library:** shadcn/ui components (install via `npx shadcn@latest add <component>`)
 
 ### Design System
 
@@ -265,6 +246,7 @@ pnpm test:integration   # Integration tests only
 - **Semantic colors** - Each has `*-bg`, `*-hover`, `*-text` variants
 - **WCAG AA compliance** - 4.5:1 minimum contrast ratio
 
+**Full reference:** `.claude/standards.md` lines 421-479
 **If you need:**
 - Color layer specifications → See `.claude/standards.md` lines 421-432
 - Shadow system utilities → See `.claude/standards.md` lines 452-471
@@ -275,32 +257,22 @@ pnpm test:integration   # Integration tests only
 
 ### Environment Variables
 
-**Required variables** (create `.env.local` in project root):
+**Required** (create `.env.local`):
 ```env
-# Supabase (Database & Storage)
 NEXT_PUBLIC_SUPABASE_URL=https://emgvqqqqdbfpjwbouybj.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_key_here
 OPENAI_API_KEY=sk-proj-...
-ENCRYPTION_KEY=32_byte_random_secret  # Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+ENCRYPTION_KEY=32_byte_hex_secret
 ```
 
-**Optional variables:**
+**Optional:**
 ```env
-# Development
-NODE_ENV=development              # development | production | test
+NODE_ENV=development
 NEXT_PUBLIC_APP_URL=http://localhost:3000
-
-# Supabase (admin operations)
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key  # Only needed for admin operations
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key  # For admin operations only
 ```
 
-**Environment setup notes:**
-- Get Supabase credentials from your project dashboard at https://supabase.com
-- OpenAI API key required for `gpt-4o` model and `text-embedding-3-small`
-- Service role key is optional (only needed for RLS bypass in development)
-- Never commit `.env.local` to version control (already in `.gitignore`)
-
-### TypeScript
+### TypeScript Configuration
 - Path alias: `@/*` → project root
 - Strict mode enabled
 - Target: ES2017
@@ -308,14 +280,13 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key  # Only needed for admin operati
 ### Supabase Setup
 - **Storage Bucket:** `notes` (50MB limit, `application/*` and `text/*` MIME types)
 - **RLS Policies:** Public access for P0 development
-- **Migrations:** Apply manually via Supabase Dashboard → SQL Editor
 - **pgvector:** Enabled in migration 007, IVFFlat index for 10K scale
 
 ## Design Principles
 
 ### 🚨 CRITICAL: Vertical Slice Development
 
-**Every code change MUST deliver complete user value:**
+**READ `.claude/SYSTEM_RULES.md` BEFORE ANY CODE GENERATION**
 
 **The Three Laws:**
 1. **SEE IT** → Visible UI change or feedback
@@ -333,18 +304,52 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key  # Only needed for admin operati
 - ❌ Infrastructure tasks without user value
 - ❌ Tasks that can't be demoed to non-technical person
 
-**See `.claude/SYSTEM_RULES.md` for complete protocol**
-
 ### Core Architectural Principles
 
 1. **Autonomous by Default** - No manual triggers, system operates via Sense → Reason → Act loop
 2. **Deterministic Outputs** - Consistent JSON schemas with Zod validation
 3. **Modular Architecture** - Decoupled services with clear interfaces
-4. **Test-First Development** - TDD mandatory (automated tests currently blocked by FormData issue)
+4. **Test-First Development** - TDD mandatory (write failing test first)
 5. **Observable by Design** - Structured logging with metrics, errors, confidence scores
 
 ## Common Development Patterns
 
+**Full patterns:** `.claude/standards.md` lines 871-1011
+
+**API Endpoint Template:**
+```typescript
+// app/api/example/route.ts
+import { z } from 'zod';
+import { NextResponse } from 'next/server';
+
+const requestSchema = z.object({ field: z.string() });
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const { field } = requestSchema.parse(body);
+    // ... process ...
+    return NextResponse.json({ success: true }, { status: 200 });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ error: 'Invalid input' }, { status: 400 });
+    }
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+  }
+}
+```
+
+**Supabase Relationship Query (normalize arrays/objects/null):**
+```typescript
+const processedDoc = Array.isArray(fileData.processed_documents)
+  ? fileData.processed_documents[0]
+  : fileData.processed_documents;
+```
+
+**React Hook Form Sync (defer getValues):**
+```typescript
+setTimeout(() => { const values = form.getValues(); }, 0);
+```
 **If you need:**
 - API endpoint patterns → See `.claude/standards.md` lines 874-903
 - Component patterns → See `.claude/standards.md` lines 905-929
@@ -360,6 +365,24 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key  # Only needed for admin operati
 - **FormData test failures?** → Use manual testing guides (`T002_MANUAL_TEST.md` pattern)
 - **Wrong Node version?** → Run `nvm use` (requires Node.js 20+)
 
+### pdf-parse Library
+- **Issue:** Debug mode causes test file errors
+- **Fix:** Automatic patch via `npm install` postinstall hook (`scripts/patch-pdf-parse.js`)
+- **Verify:** Check `node_modules/.pnpm/pdf-parse@1.1.1/node_modules/pdf-parse/index.js` has `isDebugMode = false`
+
+### FormData Testing
+- **Issue:** File properties become undefined in Vitest
+- **Workaround:** Use manual testing guides (`specs/*/T*_MANUAL_TEST.md`)
+- **Status:** 29/46 tests passing (63% pass rate)
+
+### Node.js Version
+- **Required:** Node.js 20+ (check `.nvmrc`)
+- **Command:** `nvm use` before development
+
+### AI Hallucination (RESOLVED)
+- **Fix Date:** 2025-10-09
+- **Solution:** OCR placeholder cleanup + meta-content detection + confidence penalty
+- **Result:** Scanned PDFs marked `review_required`, no fabricated tasks
 **If you need:**
 - pdf-parse details → See `.claude/standards.md` lines 1028-1084
 - FormData testing workaround → See `.claude/standards.md` lines 1046-1069
@@ -369,16 +392,17 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key  # Only needed for admin operati
 
 ## Agent Usage
 
-**See `AGENTS.md` for repository-wide agent workflow.**
+**See `AGENTS.md` for complete workflow.**
 
-- **slice-orchestrator** - Feature implementation coordination (use for ALL features)
+**Available Agents:**
+- **slice-orchestrator** (default) - Feature implementation coordination
 - **backend-engineer** - Backend services and API endpoints
 - **frontend-ui-builder** - React components and UI integration
 - **test-runner** - Test validation and coverage verification
 - **code-reviewer** - Code quality review after implementation
 - **debugger** - Error investigation and root cause analysis
 
-**Workflow:** slice-orchestrator delegates to backend-engineer and frontend-ui-builder, then uses test-runner and code-reviewer for validation
+**Workflow:** slice-orchestrator → delegates to backend-engineer/frontend-ui-builder → test-runner → code-reviewer
 
 ## Performance Targets
 
@@ -388,6 +412,7 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key  # Only needed for admin operati
 - **Max File Size:** 10MB
 - **Concurrent Processing:** Max 3 parallel uploads
 - **Data Retention:** 30 days auto-cleanup (daily at 2 AM UTC)
+- **Concurrent Processing:** Max 3 parallel uploads with automatic queueing
 
 **If you need data structure schemas:** Check `lib/schemas/` or the actual TypeScript types in service files
 
@@ -410,14 +435,19 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key  # Only needed for admin operati
 
 **Queue not working?**
 1. Verify migration 003 (queue_position) applied
-2. Restart dev server (`pnpm dev`)
+2. Restart dev server (`npm run dev`)
 3. Check `processingQueue.ts` singleton initialized
+
+**Tests failing after fresh install?**
+1. Run `npm install` to trigger pdf-parse patch
+2. Verify `node_modules/.pnpm/pdf-parse@1.1.1/node_modules/pdf-parse/index.js` has `isDebugMode = false`
+3. If still failing, manually set to `false`
 
 ## Resources
 
 - **Implementation Status:** `IMPLEMENTATION_STATUS.md`
 - **Standards & Patterns:** `.claude/standards.md`
-- **System Rules:** `.claude/SYSTEM_RULES.md`
+- **System Rules:** `.claude/SYSTEM_RULES.md` (🚨 READ FIRST)
 - **Agent Workflow:** `AGENTS.md`
 - **Feature Specs:** `specs/*/spec.md`
 - **Agent Transcripts:** `.claude/logs/`

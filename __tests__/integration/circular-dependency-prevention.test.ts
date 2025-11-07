@@ -16,6 +16,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { supabase } from '@/lib/supabase';
+import { randomUUID } from 'node:crypto';
 
 describe('T006: Circular Dependency Prevention', () => {
   const testDocumentId = 'test-doc-cycle-prevention';
@@ -25,12 +26,18 @@ describe('T006: Circular Dependency Prevention', () => {
     taskC: 'cccccccc-0000-0000-0000-000000000003',
     bridgingTask: 'dddddddd-0000-0000-0000-000000000004',
   };
+  const analysisSessionId = 'gap-session-cycle';
+  const agentSessionId = 'eeeeeeee-0000-0000-0000-000000000005';
+  const outcomeId = 'ffffffff-0000-0000-0000-000000000006';
+  const testUserId = `cycle-test-user-${randomUUID()}`;
 
   beforeEach(async () => {
     // Clean up any existing test data
     await supabase.from('task_relationships').delete().in('source_task_id', Object.values(taskIds));
     await supabase.from('task_relationships').delete().in('target_task_id', Object.values(taskIds));
     await supabase.from('task_embeddings').delete().in('task_id', Object.values(taskIds));
+    await supabase.from('agent_sessions').delete().eq('id', agentSessionId);
+    await supabase.from('user_outcomes').delete().eq('id', outcomeId);
 
     // Create test tasks: A → B → C (linear dependency chain)
     const testEmbedding = Array.from({ length: 1536 }, () => 0.1);
@@ -76,6 +83,130 @@ describe('T006: Circular Dependency Prevention', () => {
         confidence_score: 1.0,
       },
     ]);
+
+    // Create supporting user outcome and agent session for acceptance flow
+    await supabase.from('user_outcomes').insert([
+      {
+        id: outcomeId,
+        user_id: testUserId,
+        direction: 'launch',
+        object_text: 'Test objective',
+        metric_text: 'Test metric',
+        clarifier: 'Integration test clarifier text',
+        assembled_text: 'Launch the test initiative successfully.',
+        is_active: false,
+      },
+    ]);
+
+    const prioritizedPlan = {
+      ordered_task_ids: [taskIds.taskA, taskIds.taskB, taskIds.taskC],
+      execution_waves: [
+        {
+          wave_number: 1,
+          task_ids: [taskIds.taskA, taskIds.taskB, taskIds.taskC],
+          parallel_execution: false,
+          estimated_duration_hours: null,
+        },
+      ],
+      dependencies: [
+        {
+          source_task_id: taskIds.taskA,
+          target_task_id: taskIds.taskB,
+          relationship_type: 'prerequisite',
+          confidence: 0.95,
+          detection_method: 'stored_relationship',
+        },
+        {
+          source_task_id: taskIds.taskB,
+          target_task_id: taskIds.taskC,
+          relationship_type: 'prerequisite',
+          confidence: 0.95,
+          detection_method: 'stored_relationship',
+        },
+      ],
+      confidence_scores: {
+        [taskIds.taskA]: 0.9,
+        [taskIds.taskB]: 0.85,
+        [taskIds.taskC]: 0.88,
+      },
+      task_annotations: [],
+      removed_tasks: [],
+      synthesis_summary: 'Baseline prioritized plan for circular dependency prevention tests.',
+    };
+
+    const gapAnalysis = {
+      session_id: analysisSessionId,
+      trigger_timestamp: new Date().toISOString(),
+      plan_snapshot: prioritizedPlan.ordered_task_ids.map(taskId => ({
+        task_id: taskId,
+        task_text:
+          taskId === taskIds.taskA
+            ? 'Task A: Design app mockups'
+            : taskId === taskIds.taskB
+            ? 'Task B: Implement core features'
+            : 'Task C: Launch on app store',
+        estimated_hours: 40,
+        depends_on:
+          taskId === taskIds.taskA
+            ? []
+            : taskId === taskIds.taskB
+            ? [taskIds.taskA]
+            : [taskIds.taskB],
+      })),
+      detected_gaps: [
+        {
+          predecessor_id: taskIds.taskC,
+          successor_id: taskIds.taskA,
+          gap_type: 'dependency',
+          confidence: 0.8,
+          indicators: {
+            time_gap: false,
+            action_type_jump: false,
+            no_dependency: true,
+            skill_jump: false,
+          },
+        },
+        {
+          predecessor_id: taskIds.taskA,
+          successor_id: taskIds.taskB,
+          gap_type: 'dependency',
+          confidence: 0.8,
+          indicators: {
+            time_gap: false,
+            action_type_jump: false,
+            no_dependency: true,
+            skill_jump: false,
+          },
+        },
+      ],
+      generated_tasks: [],
+      user_acceptances: [],
+      insertion_result: {
+        success: false,
+        inserted_task_ids: [],
+        error: null,
+      },
+      performance_metrics: {
+        detection_ms: 120,
+        generation_ms: 480,
+        total_ms: 600,
+        search_query_count: 2,
+      },
+    };
+
+    await supabase.from('agent_sessions').insert([
+      {
+        id: agentSessionId,
+        user_id: testUserId,
+        outcome_id: outcomeId,
+        status: 'completed',
+        prioritized_plan: prioritizedPlan,
+        execution_metadata: {},
+        result: {
+          gap_analysis: gapAnalysis,
+        },
+      },
+    ]);
   });
 
   afterEach(async () => {
@@ -83,6 +214,8 @@ describe('T006: Circular Dependency Prevention', () => {
     await supabase.from('task_relationships').delete().in('source_task_id', Object.values(taskIds));
     await supabase.from('task_relationships').delete().in('target_task_id', Object.values(taskIds));
     await supabase.from('task_embeddings').delete().in('task_id', Object.values(taskIds));
+    await supabase.from('agent_sessions').delete().eq('id', agentSessionId);
+    await supabase.from('user_outcomes').delete().eq('id', outcomeId);
   });
 
   it('detects and prevents circular dependency when accepting bridging task', async () => {
@@ -109,6 +242,8 @@ describe('T006: Circular Dependency Prevention', () => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
+        analysis_session_id: analysisSessionId,
+        agent_session_id: agentSessionId,
         accepted_tasks: [
           {
             task: bridgingTask,
@@ -175,6 +310,8 @@ describe('T006: Circular Dependency Prevention', () => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
+        analysis_session_id: analysisSessionId,
+        agent_session_id: agentSessionId,
         accepted_tasks: [
           {
             task: bridgingTask,
