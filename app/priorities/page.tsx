@@ -10,7 +10,6 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { MainNav } from '@/components/main-nav';
 import { TaskList } from '@/app/priorities/components/TaskList';
-import { ReasoningTracePanel } from '@/app/components/ReasoningTracePanel';
 import { ContextCard } from '@/app/priorities/components/ContextCard';
 import { ReflectionPanel } from '@/app/components/ReflectionPanel';
 import { prioritizedPlanSchema } from '@/lib/schemas/prioritizedPlanSchema';
@@ -21,8 +20,6 @@ import { reflectionWithWeightSchema } from '@/lib/schemas/reflectionSchema';
 import type { ExecutionMetadata, PrioritizedTaskPlan } from '@/lib/types/agent';
 import { adjustedPlanSchema, type AdjustedPlan } from '@/lib/types/adjustment';
 import type { ReflectionWithWeight } from '@/lib/schemas/reflectionSchema';
-import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
-import { useSessionStorage } from '@/lib/hooks/useSessionStorage';
 import {
   GapDetectionModal,
   type GapSuggestionState,
@@ -35,6 +32,10 @@ import {
   integrateAcceptedTasksIntoPlan,
   type AcceptedSuggestionForPlan,
 } from '@/lib/services/planIntegration';
+import {
+  buildDependencyOverrideEdges,
+  getOutcomeDependencyOverrides,
+} from '@/lib/utils/dependencyOverrides';
 
 const DEFAULT_USER_ID = 'default-user';
 const POLL_INTERVAL_MS = 2000;
@@ -266,10 +267,13 @@ export default function TaskPrioritiesPage() {
     search_query_count?: number;
   } | null>(null);
 
-  // T005: Reasoning trace discoverability
-  const [hasSeenTrace, setHasSeenTrace] = useSessionStorage('trace-first-visit', false);
-  const [isTraceCollapsed, setIsTraceCollapsed] = useLocalStorage('reasoning-trace-collapsed', false);
-  const [isTraceExpanded, setIsTraceExpanded] = useState(() => !isTraceCollapsed);
+  const readDependencyOverrideEdges = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return [];
+    }
+    const overrides = getOutcomeDependencyOverrides(activeOutcome?.id ?? null);
+    return buildDependencyOverrideEdges(overrides);
+  }, [activeOutcome?.id]);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const reflectionsFetchRef = useRef<{ hasFetched: boolean }>({ hasFetched: false });
@@ -476,69 +480,6 @@ export default function TaskPrioritiesPage() {
     return map;
   }, [reflections]);
 
-  const baselineContextReflections = useMemo(() => {
-    const sourceIds = baselineReflectionIds.length > 0
-      ? baselineReflectionIds
-      : reflections
-          .filter(reflection => reflection.is_active_for_prioritization)
-          .map(reflection => reflection.id);
-
-    const uniqueIds = Array.from(new Set(sourceIds.filter(id => UUID_PATTERN.test(id))));
-
-    return uniqueIds
-      .map(id => reflectionMap.get(id))
-      .filter((reflection): reflection is ReflectionWithWeight => Boolean(reflection))
-      .map(reflection => ({
-        id: reflection.id,
-        text: reflection.text,
-        recency_weight:
-          typeof reflection.recency_weight === 'number'
-            ? reflection.recency_weight
-            : reflection.weight,
-        created_at: reflection.created_at,
-      }));
-  }, [baselineReflectionIds, reflections, reflectionMap]);
-
-  const adjustmentContextReflections = useMemo(() => {
-    const metadata = latestAdjustment?.adjustment_metadata?.reflections;
-    if (!metadata || metadata.length === 0) {
-      return [];
-    }
-
-    const seen = new Set<string>();
-
-    return metadata
-      .filter(reflection => reflection && typeof reflection.id === 'string')
-      .filter(reflection => {
-        if (seen.has(reflection.id)) {
-          return false;
-        }
-        seen.add(reflection.id);
-        return true;
-      })
-      .map(reflection => ({
-        id: reflection.id,
-        text: reflection.text,
-        recency_weight: reflection.recency_weight,
-        created_at: reflection.created_at,
-      }));
-  }, [latestAdjustment]);
-
-  const contextSummary = useMemo(() => {
-    const baseline = baselineContextReflections.length > 0 ? baselineContextReflections : undefined;
-    const adjustment = adjustmentContextReflections.length > 0 ? adjustmentContextReflections : undefined;
-
-    if (!baseline && !adjustment) {
-      return null;
-    }
-
-    return {
-      baseline,
-      adjustment,
-      baselineCreatedAt,
-    } as const;
-  }, [baselineContextReflections, adjustmentContextReflections, baselineCreatedAt]);
-
   const baselineAgeInfo = useMemo(() => {
     if (!baselineCreatedAt) {
       return null;
@@ -583,10 +524,14 @@ export default function TaskPrioritiesPage() {
       new Set(activeReflectionIds.filter(id => UUID_PATTERN.test(id)))
     );
 
-    const previousNormalized = lastActiveReflectionIdsRef.current;
+    // Compare against baseline, not previous render state
+    const baselineIds = baselineReflectionIds.length > 0
+      ? baselineReflectionIds
+      : lastActiveReflectionIdsRef.current;
+
     const isSame =
-      previousNormalized.length === normalized.length &&
-      previousNormalized.every((id, index) => id === normalized[index]);
+      baselineIds.length === normalized.length &&
+      baselineIds.every((id, index) => id === normalized[index]);
 
     if (isSame) {
       return;
@@ -704,7 +649,7 @@ export default function TaskPrioritiesPage() {
       controller.abort();
       adjustmentControllerRef.current = null;
     };
-  }, [activeReflectionIds, currentSessionId, prioritizedPlan, sessionStatus]);
+  }, [activeReflectionIds, currentSessionId, prioritizedPlan, sessionStatus, baselineReflectionIds]);
 
   const pollSessionStatus = (id: string) => {
     stopPolling();
@@ -785,6 +730,7 @@ export default function TaskPrioritiesPage() {
       const validActiveReflectionIds = Array.from(
         new Set(activeReflectionIds.filter(id => UUID_PATTERN.test(id)))
       );
+      const dependencyOverrideEdges = readDependencyOverrideEdges();
 
       const response = await fetch('/api/agent/prioritize', {
         method: 'POST',
@@ -795,6 +741,7 @@ export default function TaskPrioritiesPage() {
           outcome_id: activeOutcome.id,
           user_id: DEFAULT_USER_ID,
           active_reflection_ids: validActiveReflectionIds,
+          dependency_overrides: dependencyOverrideEdges,
         }),
       });
 
@@ -811,6 +758,7 @@ export default function TaskPrioritiesPage() {
 
       const data: PrioritizeResponse = await response.json();
       setBaselineReflectionIds(validActiveReflectionIds);
+      lastActiveReflectionIdsRef.current = validActiveReflectionIds;
       setSessionStatus('running');
       setCurrentSessionId(data.session_id);
       pollSessionStatus(data.session_id);
@@ -1758,6 +1706,12 @@ export default function TaskPrioritiesPage() {
           applySessionResults(session);
           setHasTriggered(true);
           setPlanStatusMessage(null);
+
+          // Initialize ref with currently active reflections to prevent immediate adjustment
+          const currentlyActive = reflections
+            .filter(r => r.is_active_for_prioritization && UUID_PATTERN.test(r.id))
+            .map(r => r.id);
+          lastActiveReflectionIdsRef.current = currentlyActive;
         } else {
           setIsLoadingResults(false);
         }
@@ -1778,28 +1732,7 @@ export default function TaskPrioritiesPage() {
     return () => {
       isCancelled = true;
     };
-  }, [activeOutcome, prioritizedPlan, hasFetchedInitialPlan, applySessionResults]);
-
-  // T005: Auto-expand trace on first visit
-  useEffect(() => {
-    if (!hasSeenTrace && prioritizedPlan && currentSessionId && executionMetadata) {
-      const hasSteps = executionMetadata.steps_taken > 0;
-      if (hasSteps) {
-        setIsTraceExpanded(true);
-        setHasSeenTrace(true);
-        setIsTraceCollapsed(false);
-      }
-    }
-  }, [hasSeenTrace, prioritizedPlan, currentSessionId, executionMetadata, setHasSeenTrace, setIsTraceCollapsed]);
-
-  // T005: Handle manual toggle
-  const handleToggleTrace = useCallback(() => {
-    setIsTraceExpanded(prev => {
-      const nextExpanded = !prev;
-      setIsTraceCollapsed(!nextExpanded);
-      return nextExpanded;
-    });
-  }, [setIsTraceCollapsed]);
+  }, [activeOutcome, prioritizedPlan, hasFetchedInitialPlan, applySessionResults, reflections]);
 
   return (
     <div className="min-h-screen bg-muted/30">
@@ -2052,14 +1985,11 @@ export default function TaskPrioritiesPage() {
             <TaskList
               plan={prioritizedPlan}
               executionMetadata={executionMetadata ?? undefined}
-              sessionId={currentSessionId}
               planVersion={planVersion}
               outcomeId={activeOutcome?.id ?? null}
+              outcomeStatement={activeOutcome?.assembled_text ?? null}
               adjustedPlan={latestAdjustment}
               onDiffSummary={handleDiffSummary}
-              onToggleTrace={handleToggleTrace}
-              isTraceExpanded={isTraceExpanded}
-              stepCount={executionMetadata?.steps_taken ?? 0}
             />
             <div className="mt-6 flex justify-end">
               <Button
@@ -2093,19 +2023,6 @@ export default function TaskPrioritiesPage() {
             </Card>
           )
         )}
-        {currentSessionId && prioritizedPlan && (
-          <ReasoningTracePanel
-            sessionId={currentSessionId}
-            open={isTraceExpanded}
-            executionMetadata={executionMetadata}
-            contextSummary={contextSummary}
-            onTraceUnavailable={() => {
-              setIsTraceExpanded(false);
-              setIsTraceCollapsed(true);
-            }}
-          />
-        )}
-
         <GapDetectionModal
           open={isGapModalOpen}
           onOpenChange={setIsGapModalOpen}

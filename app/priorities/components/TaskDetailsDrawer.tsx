@@ -6,7 +6,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { MovementBadge, type MovementInfo } from '@/app/priorities/components/MovementBadge';
-import { ReasoningTracePanel } from '@/app/components/ReasoningTracePanel';
 import type { TaskDependency } from '@/lib/types/agent';
 import { cn } from '@/lib/utils';
 
@@ -27,6 +26,9 @@ type TaskSummary = {
   dependencyNotes?: string | null;
   manualOverride?: boolean;
   state?: 'active' | 'completed' | 'discarded' | 'manual_override' | 'reintroduced';
+  lnoCategory?: 'leverage' | 'neutral' | 'overhead' | null;
+  outcomeRationale?: string | null;
+  sourceText?: string | null;
 };
 
 type TaskDetailsDrawerProps = {
@@ -40,7 +42,15 @@ type TaskDetailsDrawerProps = {
   onReturnToActive: () => void;
   onNavigateToTask: (taskId: string) => void;
   getTaskTitle: (taskId: string) => string;
-  sessionId: string | null;
+  outcomeStatement?: string | null;
+  isLocked?: boolean;
+  onRemoveDependency?: (taskId: string, dependencyId: string) => void;
+  onAddDependency?: (
+    taskId: string,
+    dependencyId: string,
+    relationship: TaskDependency['relationship_type']
+  ) => void;
+  taskOptions?: Array<{ id: string; title: string }>;
 };
 
 export function TaskDetailsDrawer({
@@ -54,25 +64,17 @@ export function TaskDetailsDrawer({
   onReturnToActive,
   onNavigateToTask,
   getTaskTitle,
-  sessionId,
+  outcomeStatement,
+  isLocked = false,
+  onRemoveDependency,
+  onAddDependency,
+  taskOptions = [],
 }: TaskDetailsDrawerProps) {
   const [isMounted, setIsMounted] = useState(false);
-  const [showTrace, setShowTrace] = useState(false);
-  const [traceAvailable, setTraceAvailable] = useState(true);
 
   useEffect(() => {
     setIsMounted(true);
   }, []);
-
-  useEffect(() => {
-    if (!open) {
-      setShowTrace(false);
-    }
-  }, [open]);
-
-  useEffect(() => {
-    setTraceAvailable(true);
-  }, [sessionId]);
 
   const confidenceLabel = useMemo(() => {
     if (!task || typeof task.confidence !== 'number') {
@@ -96,6 +98,59 @@ export function TaskDetailsDrawer({
   }, [task]);
 
   const manualOverride = Boolean(task?.manualOverride);
+  const categoryLabel = useMemo(() => {
+    if (!task?.lnoCategory) {
+      return null;
+    }
+    if (task.lnoCategory === 'leverage') {
+      return 'Leverage task';
+    }
+    if (task.lnoCategory === 'neutral') {
+      return 'Neutral task';
+    }
+    if (task.lnoCategory === 'overhead') {
+      return 'Overhead task';
+    }
+    return null;
+  }, [task]);
+
+  const alignmentCopy = useMemo(() => {
+    if (!task) {
+      return null;
+    }
+    const goalLabel = outcomeStatement ? `“${outcomeStatement}”` : 'your stated outcome';
+    if (task.lnoCategory && task.sourceText) {
+      switch (task.lnoCategory) {
+        case 'leverage':
+          return `High-leverage work on ${task.sourceText} keeps pressure on ${goalLabel}.`;
+        case 'neutral':
+          return `Operational guardrail: ${task.sourceText} protects ${goalLabel}.`;
+        case 'overhead':
+          return `Removes overhead by tackling ${task.sourceText}, freeing focus for ${goalLabel}.`;
+        default:
+          break;
+      }
+    }
+    return task.outcomeRationale ?? null;
+  }, [task, outcomeStatement]);
+
+  const [isEditingDependencies, setIsEditingDependencies] = useState(false);
+  const [newDependencyId, setNewDependencyId] = useState('');
+  const [newRelationship, setNewRelationship] =
+    useState<TaskDependency['relationship_type']>('prerequisite');
+
+  useEffect(() => {
+    setIsEditingDependencies(false);
+    setNewDependencyId('');
+  }, [task?.id, open]);
+
+  const availableDependencyOptions = useMemo(() => {
+    if (!task) {
+      return [];
+    }
+    const existing = new Set(task.dependencies.map(dependency => dependency.source_task_id));
+    return taskOptions.filter(option => option.id !== task.id && !existing.has(option.id));
+  }, [task, taskOptions]);
 
   if (!isMounted || !open) {
     return null;
@@ -156,6 +211,16 @@ export function TaskDetailsDrawer({
                       Manual override
                     </Badge>
                   )}
+                  {isLocked && (
+                    <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700">
+                      Locked
+                    </Badge>
+                  )}
+                  {categoryLabel && (
+                    <Badge variant="outline" className="bg-muted/60">
+                      {categoryLabel}
+                    </Badge>
+                  )}
                   <Badge variant="outline" className={cn(statusBadge)}>
                     {isCompleted ? 'Completed' : isDiscarded ? 'Discarded' : 'To do'}
                   </Badge>
@@ -190,6 +255,25 @@ export function TaskDetailsDrawer({
               </section>
             )}
 
+            {(alignmentCopy || task?.sourceText) && (
+              <section className="space-y-2 text-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Outcome alignment
+                </p>
+                <div className="rounded-md border border-border/60 bg-primary/5 px-3 py-2 space-y-1">
+                  {task.sourceText && (
+                    <p className="text-sm font-medium text-foreground">“{task.sourceText}”</p>
+                  )}
+                  {alignmentCopy && (
+                    <p className="text-sm text-muted-foreground">{alignmentCopy}</p>
+                  )}
+                  {outcomeStatement && (
+                    <p className="text-xs text-muted-foreground">Goal: “{outcomeStatement}”</p>
+                  )}
+                </div>
+              </section>
+            )}
+
             {task.dependencyNotes && (
               <section className="space-y-2 text-sm">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -215,31 +299,119 @@ export function TaskDetailsDrawer({
             )}
 
             <section className="space-y-3 text-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Depends on</p>
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Depends on
+                </p>
+                {onAddDependency && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => setIsEditingDependencies(value => !value)}
+                  >
+                    {isEditingDependencies ? 'Done' : 'Edit'}
+                  </Button>
+                )}
+              </div>
               {task.dependencies.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No upstream dependencies.</p>
+                <p className="text-sm text-muted-foreground">
+                  {isEditingDependencies
+                    ? 'No prerequisites yet. Add one below.'
+                    : 'No upstream dependencies.'}
+                </p>
               ) : (
                 <div className="flex flex-col gap-2">
                   {task.dependencies.map(dependency => {
                     const sourceTitle = getTaskTitle(dependency.source_task_id);
                     const rank = task.dependencyLinks.find(link => link.taskId === dependency.source_task_id)?.rank;
                     return (
-                      <button
+                      <div
                         key={`${task.id}-drawer-dep-${dependency.source_task_id}`}
-                        type="button"
-                        onClick={() => onNavigateToTask(dependency.source_task_id)}
-                        className="flex flex-col items-start rounded-md border border-transparent px-3 py-2 text-left text-sm transition-colors hover:border-border/60 hover:bg-muted/40"
+                        className="rounded-md border border-transparent px-3 py-2 transition-colors hover:border-border/60 hover:bg-muted/40"
                       >
-                        <span className="font-medium text-foreground">
-                          #{rank ?? '?'} • {sourceTitle}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          Relationship: {dependency.relationship_type} • via{' '}
-                          {dependency.detection_method === 'ai_inference' ? 'AI inference' : 'stored graph'}
-                        </span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => onNavigateToTask(dependency.source_task_id)}
+                          className="flex w-full flex-col items-start text-left text-sm"
+                        >
+                          <span className="font-medium text-foreground">
+                            #{rank ?? '?'} • {sourceTitle}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            Relationship: {dependency.relationship_type} • via{' '}
+                            {dependency.detection_method === 'ai_inference' ? 'AI inference' : 'stored graph'}
+                          </span>
+                        </button>
+                        {isEditingDependencies && onRemoveDependency && (
+                          <div className="mt-2 flex justify-end">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="xs"
+                              onClick={() => onRemoveDependency(task.id, dependency.source_task_id)}
+                            >
+                              Remove
+                            </Button>
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
+                </div>
+              )}
+              {isEditingDependencies && onAddDependency && (
+                <div className="space-y-2 rounded-md border border-dashed border-border/60 p-3">
+                  {availableDependencyOptions.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      All tasks are already linked as dependencies.
+                    </p>
+                  ) : (
+                    <form
+                      className="flex flex-col gap-2"
+                      onSubmit={event => {
+                        event.preventDefault();
+                        if (!newDependencyId) {
+                          return;
+                        }
+                        onAddDependency(task.id, newDependencyId, newRelationship);
+                        setNewDependencyId('');
+                      }}
+                    >
+                      <label className="text-xs font-medium text-muted-foreground">
+                        Add dependency
+                        <select
+                          className="mt-1 w-full rounded-md border border-border/60 bg-background px-2 py-1 text-sm"
+                          value={newDependencyId}
+                          onChange={event => setNewDependencyId(event.target.value)}
+                        >
+                          <option value="">Select a task…</option>
+                          {availableDependencyOptions.map(option => (
+                            <option key={`dep-option-${option.id}`} value={option.id}>
+                              {option.title}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="text-xs font-medium text-muted-foreground">
+                        Relationship
+                        <select
+                          className="mt-1 w-full rounded-md border border-border/60 bg-background px-2 py-1 text-sm"
+                          value={newRelationship}
+                          onChange={event =>
+                            setNewRelationship(event.target.value as TaskDependency['relationship_type'])
+                          }
+                        >
+                          <option value="prerequisite">Prerequisite</option>
+                          <option value="blocks">Blocks</option>
+                          <option value="related">Related</option>
+                        </select>
+                      </label>
+                      <Button type="submit" size="xs" disabled={!newDependencyId}>
+                        Add dependency
+                      </Button>
+                    </form>
+                  )}
                 </div>
               )}
             </section>
@@ -294,32 +466,7 @@ export function TaskDetailsDrawer({
                   Return to active
                 </Button>
               )}
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={!sessionId || !traceAvailable}
-                onClick={() => setShowTrace(value => !value)}
-              >
-                {showTrace ? 'Hide reasoning trace' : 'Open reasoning trace'}
-              </Button>
             </div>
-
-            {!traceAvailable && (
-              <p className="text-xs text-muted-foreground">
-                Reasoning trace expired for this session. Run prioritization again to capture a fresh trace.
-              </p>
-            )}
-
-            {showTrace && sessionId && traceAvailable && (
-              <ReasoningTracePanel
-                sessionId={sessionId}
-                open={showTrace}
-                onTraceUnavailable={() => {
-                  setTraceAvailable(false);
-                  setShowTrace(false);
-                }}
-              />
-            )}
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">Select a task from the list to view its details.</p>

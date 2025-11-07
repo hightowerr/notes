@@ -179,17 +179,18 @@ export function TextInputModal({ open, onOpenChange }: TextInputModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-[min(100vw-2rem,720px)] space-y-0 p-0 sm:max-w-3xl sm:p-0">
-        <DialogHeader className="border-b border-border/70 px-5 py-4 sm:px-6 sm:py-5">
+      <DialogContent className="max-w-[min(100vw-2rem,720px)] space-y-0 p-3 sm:max-w-3xl sm:p-6">
+        <DialogHeader className="border-b border-border/70 px-0 pb-4 pt-0 sm:pb-5">
           <DialogTitle className="text-xl font-semibold">Quick Capture</DialogTitle>
         </DialogHeader>
 
-        <div className="flex flex-col gap-4 px-5 pb-5 pt-4 sm:px-6 sm:pb-6">
+        <div className="flex flex-col gap-4">
           <Input
             placeholder="Title (optional)"
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             maxLength={256}
+            className="h-12 sm:h-10 text-base sm:text-sm"
           />
 
           <Textarea
@@ -197,7 +198,7 @@ export function TextInputModal({ open, onOpenChange }: TextInputModalProps) {
             value={content}
             onChange={(event) => setContent(event.target.value)}
             rows={12}
-            className="min-h-[45vh] resize-none font-mono sm:min-h-[320px]"
+            className="min-h-[50vh] resize-none font-mono text-base sm:text-sm sm:min-h-[320px]"
           />
 
           {validationMessage ? (

@@ -29,16 +29,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## First Day Checklist
 
 1. **Check Node version**: `node --version` (requires 20+, use `nvm use` to switch)
-2. **Install dependencies**: `npm install` (this project uses **npm**, not yarn/pnpm)
+2. **Install dependencies**: `pnpm install` (this project uses **pnpm**)
 3. **Set up environment**: Create `.env.local` with required keys:
    ```env
    NEXT_PUBLIC_SUPABASE_URL=https://emgvqqqqdbfpjwbouybj.supabase.co
    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_key_here
+   SUPABASE_SERVICE_ROLE_KEY=your_service_role_key  # Required for task metadata API
    OPENAI_API_KEY=sk-proj-...
    ENCRYPTION_KEY=32_byte_hex  # Generate: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
    ```
 4. **Apply migrations**: `supabase db push` or manually via Supabase Dashboard → SQL Editor
-5. **Start dev server**: `npm run dev` → http://localhost:3000
+5. **Start dev server**: `pnpm dev` → http://localhost:3000
 6. **Read the rules**: Review `.claude/SYSTEM_RULES.md` - this project requires **vertical slice development** (every task must deliver user-testable value)
 
 ## Project Overview
@@ -53,28 +54,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Core Commands
 ```bash
-npm run dev          # Start development server (http://localhost:3000)
-npm run build        # Build for production
-npm run start        # Start production server
-npm run lint         # Run ESLint (use -- --fix to auto-correct)
+pnpm dev             # Start development server (http://localhost:3000)
+pnpm build           # Build for production
+pnpm start           # Start production server
+pnpm lint            # Run ESLint (use -- --fix to auto-correct)
 ```
 
 ### Testing Commands
 ```bash
-npm test             # Watch mode (recommended for development)
-npm run test:run     # Run all tests once (CI mode)
-npm run test:ui      # Tests with UI dashboard
+pnpm test            # Watch mode (recommended for development)
+pnpm test:run        # Run all tests once (CI mode)
+pnpm test:ui         # Tests with UI dashboard
 
 # Run specific test file
-npm run test:run __tests__/contract/outcomes.test.ts
+pnpm test:run __tests__/contract/outcomes.test.ts
 
 # Run by category
-npm run test:run lib/services/__tests__/    # Unit tests
-npm run test:run __tests__/contract/        # Contract tests
-npm run test:run __tests__/integration/     # Integration tests
+pnpm test:run lib/services/__tests__/    # Unit tests
+pnpm test:run __tests__/contract/        # Contract tests
+pnpm test:run __tests__/integration/     # Integration tests
 
 # Stress test with single thread (for Tinypool issues)
-npm run test:run -- --pool=threads --poolOptions.threads.minThreads=1 --poolOptions.threads.maxThreads=1
+pnpm test:run -- --pool=threads --poolOptions.threads.minThreads=1 --poolOptions.threads.maxThreads=1
 ```
 
 **Current Test Status:** 29/46 tests passing (63% pass rate)
@@ -269,7 +270,6 @@ ENCRYPTION_KEY=32_byte_hex_secret
 ```env
 NODE_ENV=development
 NEXT_PUBLIC_APP_URL=http://localhost:3000
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key  # For admin operations only
 ```
 
 ### TypeScript Configuration
@@ -281,6 +281,10 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key  # For admin operations only
 - **Storage Bucket:** `notes` (50MB limit, `application/*` and `text/*` MIME types)
 - **RLS Policies:** Public access for P0 development
 - **pgvector:** Enabled in migration 007, IVFFlat index for 10K scale
+- **Client Architecture:** Modern @supabase/ssr pattern (migrated 2025-11-07)
+  - `lib/supabase/client.ts` → Browser client (Client Components)
+  - `lib/supabase/server.ts` → Server client with cookies (API routes, RLS-respecting)
+  - `lib/supabase/admin.ts` → Admin client with service_role (webhooks, admin ops only)
 
 ## Design Principles
 
@@ -364,10 +368,11 @@ setTimeout(() => { const values = form.getValues(); }, 0);
 - **pdf-parse errors?** → Auto-patched via `pnpm install` postinstall hook
 - **FormData test failures?** → Use manual testing guides (`T002_MANUAL_TEST.md` pattern)
 - **Wrong Node version?** → Run `nvm use` (requires Node.js 20+)
+- **Empty task list on /priorities page?** → Add `SUPABASE_SERVICE_ROLE_KEY` to `.env.local` (required for task metadata API)
 
 ### pdf-parse Library
 - **Issue:** Debug mode causes test file errors
-- **Fix:** Automatic patch via `npm install` postinstall hook (`scripts/patch-pdf-parse.js`)
+- **Fix:** Automatic patch via `pnpm install` postinstall hook (`scripts/patch-pdf-parse.js`)
 - **Verify:** Check `node_modules/.pnpm/pdf-parse@1.1.1/node_modules/pdf-parse/index.js` has `isDebugMode = false`
 
 ### FormData Testing
@@ -439,9 +444,15 @@ setTimeout(() => { const values = form.getValues(); }, 0);
 3. Check `processingQueue.ts` singleton initialized
 
 **Tests failing after fresh install?**
-1. Run `npm install` to trigger pdf-parse patch
+1. Run `pnpm install` to trigger pdf-parse patch
 2. Verify `node_modules/.pnpm/pdf-parse@1.1.1/node_modules/pdf-parse/index.js` has `isDebugMode = false`
 3. If still failing, manually set to `false`
+
+**Priorities page showing empty task cards?**
+1. Verify `SUPABASE_SERVICE_ROLE_KEY` is set in `.env.local`
+2. Get service role key from Supabase Dashboard → Settings → API
+3. Restart dev server: `pnpm dev`
+4. Task metadata API (`/api/tasks/metadata`) requires admin client access
 
 ## Resources
 

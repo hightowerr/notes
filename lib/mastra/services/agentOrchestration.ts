@@ -19,6 +19,7 @@ import {
   parsePlanFromAgentResponse,
   summariseToolUsage,
 } from '@/lib/mastra/services/resultParser';
+import { resolveOutcomeAlignedTasks } from '@/lib/services/lnoTaskService';
 import type {
   AgentRuntimeContext,
   AgentRunResult,
@@ -28,6 +29,7 @@ import type {
   ReasoningStep,
   ReasoningTraceRecord,
   TaskAnnotation,
+  TaskDependency,
   TaskRemoval,
   TaskSummary,
 } from '@/lib/types/agent';
@@ -37,6 +39,7 @@ type OrchestrateTaskOptions = {
   userId: string;
   outcomeId: string;
   activeReflectionIds?: string[];
+  dependencyOverrides?: TaskDependency[];
 };
 
 type SupabaseOutcomeRow = {
@@ -326,6 +329,8 @@ async function fetchRuntimeContext(
     }
   }
 
+  const alignedTasks = await alignTasksWithOutcome(taskSummaries, outcome.assembled_text);
+
   return {
     outcome: {
       id: outcome.id,
@@ -344,7 +349,7 @@ async function fetchRuntimeContext(
       weight: reflection.weight,
       relative_time: reflection.relative_time,
     })),
-    tasks: taskSummaries,
+    tasks: alignedTasks,
     metadata: {
       task_count: taskSummaries.length,
       document_count: documentCount,
@@ -362,6 +367,52 @@ async function fetchRuntimeContext(
         }
       : undefined,
   };
+}
+
+async function alignTasksWithOutcome(
+  tasks: TaskSummary[],
+  outcomeText: string | null
+): Promise<TaskSummary[]> {
+  if (tasks.length === 0) {
+    return [];
+  }
+
+  const alignment = await resolveOutcomeAlignedTasks(
+    tasks.map(task => task.task_id),
+    { outcome: outcomeText }
+  );
+
+  const aligned: TaskSummary[] = [];
+  const dropped: string[] = [];
+
+  tasks.forEach(task => {
+    const meta = alignment[task.task_id];
+    if (!meta || !meta.category) {
+      dropped.push(task.task_id);
+      return;
+    }
+
+    aligned.push({
+      ...task,
+      task_text: meta.title,
+      lnoCategory: meta.category,
+      outcomeAlignment: meta.rationale ?? null,
+      sourceText: meta.original_text,
+    });
+  });
+
+  if (aligned.length === 0) {
+    console.warn('[AgentOrchestration] No LNO classification found for requested tasks. Falling back to original tasks.');
+    return tasks;
+  }
+
+  if (dropped.length > 0) {
+    console.warn('[AgentOrchestration] Dropping tasks without LNO alignment', {
+      droppedCount: dropped.length,
+    });
+  }
+
+  return aligned;
 }
 
 function condenseStatusText(value?: string | null, maxLength = 160): string | null {
@@ -466,6 +517,7 @@ type PartialResultOptions = {
   normalizedSteps: ReasoningStep[];
   narrative: string | null;
   error: unknown;
+  dependencyOverrides?: TaskDependency[];
 };
 
 function buildPartialResult(options: PartialResultOptions): AgentRunResult {
@@ -512,7 +564,14 @@ function buildPartialResult(options: PartialResultOptions): AgentRunResult {
   }
 
   const planSummary = buildPlanSummary(context);
-  const plan = generateFallbackPlan(context.tasks, planSummary);
+  const planWithoutOverrides = generateFallbackPlan(context.tasks, planSummary);
+  const plan = {
+    ...planWithoutOverrides,
+    dependencies: mergePlanDependencies(
+      planWithoutOverrides.dependencies ?? [],
+      options.dependencyOverrides ?? []
+    ),
+  };
   const fallbackSteps = generateFallbackTrace(context.tasks, plan, { narrative: null });
 
   const provisionalFailedTools = inferFailureTools(normalizedSteps, narrative, errorMessage);
@@ -561,11 +620,19 @@ function buildPartialResult(options: PartialResultOptions): AgentRunResult {
   };
 }
 
-async function runAgent(context: AgentRuntimeContext): Promise<AgentRunResult> {
+async function runAgent(
+  context: AgentRuntimeContext,
+  options: { dependencyOverrides?: TaskDependency[] } = {}
+): Promise<AgentRunResult> {
   const startedAt = performance.now();
   let normalizedSteps: ReasoningStep[] = [];
   let lastNarrative: string | null = null;
   const previousPlan = context.history?.previous_plan;
+  const dependencyOverrides = options.dependencyOverrides ?? [];
+  const taskTitleLookup = new Map<string, string>();
+  context.tasks.forEach(task => {
+    taskTitleLookup.set(task.task_id, task.task_text);
+  });
 
   const hasEmbeddingBackedTasks =
     context.tasks.length === 0 || context.tasks.some(task => task.source === 'embedding');
@@ -579,6 +646,7 @@ async function runAgent(context: AgentRuntimeContext): Promise<AgentRunResult> {
       error: new Error(
         'Task embeddings are still processing. Please retry once document ingestion completes.'
       ),
+      dependencyOverrides,
     });
   }
 
@@ -697,6 +765,22 @@ async function runAgent(context: AgentRuntimeContext): Promise<AgentRunResult> {
       });
     }
 
+    if (dependencyOverrides.length > 0) {
+      messages.push({
+        role: 'user',
+        content: [
+          'Handle these user-locked dependencies exactly as specified:',
+          ...dependencyOverrides.map(dep => {
+            const source =
+              taskTitleLookup.get(dep.source_task_id) ?? dep.source_task_id;
+            const target =
+              taskTitleLookup.get(dep.target_task_id) ?? dep.target_task_id;
+            return `- ${source} (${dep.source_task_id}) ➝ ${target} (${dep.relationship_type})`;
+          }),
+        ].join('\n'),
+      });
+    }
+
     const response = await taskOrchestratorAgent.generate(
       messages,
       {
@@ -742,6 +826,7 @@ async function runAgent(context: AgentRuntimeContext): Promise<AgentRunResult> {
         normalizedSteps,
         narrative: parsedPlan.narrative ?? null,
         error: parsedPlan.error,
+        dependencyOverrides,
       });
     }
 
@@ -757,6 +842,7 @@ async function runAgent(context: AgentRuntimeContext): Promise<AgentRunResult> {
     });
 
     const plan = ensurePlanConsistency(parsedPlan.plan);
+    plan.dependencies = mergePlanDependencies(plan.dependencies ?? [], dependencyOverrides);
 
     const trace: ReasoningTraceRecord = {
       session_id: '',
@@ -784,8 +870,86 @@ async function runAgent(context: AgentRuntimeContext): Promise<AgentRunResult> {
       normalizedSteps,
       narrative: fallbackNarrative,
       error,
+      dependencyOverrides,
     });
   }
+}
+
+function sanitizeDependencyOverrides(overrides?: TaskDependency[]): TaskDependency[] {
+  if (!Array.isArray(overrides) || overrides.length === 0) {
+    return [];
+  }
+  const sanitized: TaskDependency[] = [];
+  const seen = new Set<string>();
+  overrides.forEach(override => {
+    if (
+      !override ||
+      typeof override.source_task_id !== 'string' ||
+      typeof override.target_task_id !== 'string'
+    ) {
+      return;
+    }
+    const source = override.source_task_id.trim();
+    const target = override.target_task_id.trim();
+    if (!source || !target || source === target) {
+      return;
+    }
+    const key = `${source}->${target}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    sanitized.push({
+      source_task_id: source,
+      target_task_id: target,
+      relationship_type: override.relationship_type ?? 'prerequisite',
+      confidence:
+        typeof override.confidence === 'number' && Number.isFinite(override.confidence)
+          ? Math.min(1, Math.max(0, override.confidence))
+          : 1,
+      detection_method: 'stored_relationship',
+    });
+  });
+  return sanitized;
+}
+
+function mergePlanDependencies(
+  dependencies: TaskDependency[] = [],
+  overrides: TaskDependency[]
+): TaskDependency[] {
+  if (!Array.isArray(overrides) || overrides.length === 0) {
+    return dependencies ?? [];
+  }
+  const overrideKeys = new Set(
+    overrides.map(dep => `${dep.source_task_id}->${dep.target_task_id}`)
+  );
+  const base = Array.isArray(dependencies) ? dependencies : [];
+  const filtered = base.filter(
+    dep => !overrideKeys.has(`${dep.source_task_id}->${dep.target_task_id}`)
+  );
+  return [...filtered, ...overrides];
+}
+
+function applyOverridesToContext(
+  context: AgentRuntimeContext,
+  overrides: TaskDependency[]
+): AgentRuntimeContext {
+  if (!overrides.length || !context.history?.previous_plan) {
+    return context;
+  }
+
+  const mergedPlan = {
+    ...context.history.previous_plan,
+    dependencies: mergePlanDependencies(context.history.previous_plan.dependencies ?? [], overrides),
+  };
+
+  return {
+    ...context,
+    history: {
+      ...context.history,
+      previous_plan: mergedPlan,
+    },
+  };
 }
 
 async function persistTrace(trace: ReasoningTraceRecord): Promise<void> {
@@ -828,11 +992,14 @@ async function persistTrace(trace: ReasoningTraceRecord): Promise<void> {
 }
 
 export async function orchestrateTaskPriorities(options: OrchestrateTaskOptions): Promise<void> {
-  const { sessionId, userId, outcomeId, activeReflectionIds } = options;
+  const { sessionId, userId, outcomeId, activeReflectionIds, dependencyOverrides: overrideInput } =
+    options;
+  const dependencyOverrides = sanitizeDependencyOverrides(overrideInput);
 
   let context: AgentRuntimeContext;
   try {
     context = await fetchRuntimeContext(userId, outcomeId, { activeReflectionIds });
+    context = applyOverridesToContext(context, dependencyOverrides);
   } catch (error) {
     console.error('[AgentOrchestration] Unable to build runtime context', error);
     await supabase
@@ -856,7 +1023,7 @@ export async function orchestrateTaskPriorities(options: OrchestrateTaskOptions)
     return;
   }
 
-  const result = await runAgent(context);
+  const result = await runAgent(context, { dependencyOverrides });
   const traceWithSession: ReasoningTraceRecord = result.trace
     ? {
         ...result.trace,

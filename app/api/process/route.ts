@@ -15,7 +15,14 @@
 import { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { convertToMarkdown } from '@/lib/services/noteProcessor';
-import { extractStructuredData, calculateLowConfidence, scoreActionsWithSemanticSimilarity, generateAndStoreEmbeddings } from '@/lib/services/aiSummarizer';
+import {
+  extractStructuredData,
+  calculateLowConfidence,
+  scoreActionsWithSemanticSimilarity,
+  scoreActions,
+  extractActionTextsFromOutput,
+  generateAndStoreEmbeddings,
+} from '@/lib/services/aiSummarizer';
 import type { LogOperationType, LogStatusType } from '@/lib/schemas';
 import { processingQueue } from '@/lib/services/processingQueue';
 import { filterActions, shouldApplyFiltering, logFilteringOperation } from '@/lib/services/filteringService';
@@ -272,6 +279,52 @@ export async function POST(request: NextRequest) {
     const storeStartTime = Date.now();
 
     const docId = crypto.randomUUID();
+
+    // 6.7 Re-classify LNO buckets from actions to ensure embeddings have coverage
+    const reclassStartTime = Date.now();
+    if (aiResult.output.actions.length > 0) {
+      const reclassified = await scoreActions(
+        { id: docId, structured_output: aiResult.output },
+        outcome?.assembled_text || ''
+      );
+      aiResult.output.lno_tasks = {
+        leverage: reclassified.leverage,
+        neutral: reclassified.neutral,
+        overhead: reclassified.overhead,
+      };
+    }
+
+    const hasEmptyBuckets =
+      (aiResult.output.lno_tasks?.leverage?.length ?? 0) === 0 ||
+      (aiResult.output.lno_tasks?.neutral?.length ?? 0) === 0 ||
+      (aiResult.output.lno_tasks?.overhead?.length ?? 0) === 0;
+
+    if (hasEmptyBuckets) {
+      const fallbackActions = extractActionTextsFromOutput(aiResult.output);
+      if (fallbackActions.length > 0) {
+        const neutralSet = new Set(
+          Array.isArray(aiResult.output.lno_tasks?.neutral)
+            ? aiResult.output.lno_tasks!.neutral
+            : []
+        );
+        fallbackActions.forEach(text => neutralSet.add(text));
+        aiResult.output.lno_tasks = {
+          leverage: aiResult.output.lno_tasks?.leverage ?? [],
+          neutral: Array.from(neutralSet),
+          overhead: aiResult.output.lno_tasks?.overhead ?? [],
+        };
+        console.warn('[PROCESS] LNO buckets incomplete; defaulted action items to neutral bucket', {
+          documentId: docId,
+          addedCount: fallbackActions.length,
+        });
+      }
+    }
+    console.log('[PROCESS] LNO reclassification complete', {
+      duration: Date.now() - reclassStartTime,
+      leverage: aiResult.output.lno_tasks?.leverage?.length ?? 0,
+      neutral: aiResult.output.lno_tasks?.neutral?.length ?? 0,
+      overhead: aiResult.output.lno_tasks?.overhead?.length ?? 0,
+    });
     const markdownPath = `processed/${docId}.md`;
     const jsonPath = `processed/${docId}.json`;
 

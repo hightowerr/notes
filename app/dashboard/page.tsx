@@ -821,7 +821,7 @@ export default function DashboardPage() {
 
       {/* Loading State */}
       {loading && (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
           {[1, 2, 3].map((i) => (
             <Card key={i}>
               <CardHeader>
@@ -866,7 +866,7 @@ export default function DashboardPage() {
 
       {/* Document Grid */}
       {!loading && !error && documents.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
           {documents.map((doc) => {
             const isExpanded = expandedCards.has(doc.id);
             const updatedDisplay = (() => {
@@ -904,7 +904,7 @@ export default function DashboardPage() {
               <div key={doc.id} className="relative">
                 <Card className="flex flex-col">
                   <CardHeader>
-                    <div className="flex w-full items-start gap-3">
+                    <div className="flex w-full flex-wrap items-start gap-3 sm:flex-nowrap">
                       {/* Checkbox for bulk export (only for completed documents) */}
                       {(doc.status === 'completed' || doc.status === 'review_required') && doc.summary && (
                         <Checkbox
@@ -914,7 +914,7 @@ export default function DashboardPage() {
                           className="mt-1"
                         />
                       )}
-                      <div className="flex-1">
+                      <div className="flex-1 min-w-0">
                         <CardTitle className="text-lg truncate" title={doc.name}>
                           {doc.name}
                         </CardTitle>
@@ -931,7 +931,7 @@ export default function DashboardPage() {
                             <SourceBadge source={doc.source} syncEnabled={doc.syncEnabled} status={doc.status} />
                           </div>
                         ) : null}
-                        <div className="flex gap-2 mt-2">
+                        <div className="mt-2 flex flex-wrap gap-2">
                           <Badge variant={getStatusBadgeVariant(doc.status)}>{doc.status.replace('_', ' ')}</Badge>
                           {doc.confidence !== undefined && (
                             <Badge variant={getConfidenceBadgeVariant(doc.confidence)}>

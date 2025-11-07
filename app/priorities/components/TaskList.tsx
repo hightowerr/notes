@@ -1,9 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 
-import { supabase } from '@/lib/supabase';
 import type {
   ExecutionMetadata,
   PrioritizedTaskPlan,
@@ -13,7 +12,6 @@ import type {
 } from '@/lib/types/agent';
 import type { AdjustedPlan } from '@/lib/types/adjustment';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TaskRow } from '@/app/priorities/components/TaskRow';
@@ -23,6 +21,12 @@ import { TaskDetailsDrawer } from '@/app/priorities/components/TaskDetailsDrawer
 import { useTaskDiff } from '@/app/priorities/components/useTaskDiff';
 import { useScrollToTask } from '@/app/priorities/components/useScrollToTask';
 import type { MovementInfo } from '@/app/priorities/components/MovementBadge';
+import {
+  DEPENDENCY_OVERRIDE_STORAGE_KEY,
+  type DependencyOverrideEntry,
+  type DependencyOverrideStore,
+} from '@/lib/utils/dependencyOverrides';
+import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
 
 type TaskStatus = 'active' | 'completed' | 'discarded';
 
@@ -37,12 +41,18 @@ type TaskLookup = Record<
   {
     title: string;
     documentId?: string | null;
+    category?: 'leverage' | 'neutral' | 'overhead' | null;
+    rationale?: string | null;
+    sourceText?: string | null;
   }
 >;
 
 type TaskRenderNode = {
   id: string;
   title: string;
+  category?: 'leverage' | 'neutral' | 'overhead' | null;
+  rationale?: string | null;
+  sourceText?: string | null;
   confidence: number | null;
   confidenceDelta?: number | null;
   dependencies: TaskDependency[];
@@ -56,17 +66,23 @@ type TaskRenderNode = {
   removalReason?: string | null;
 };
 
+type LockedTaskState = {
+  order: number;
+};
+
+type TaskOption = {
+  id: string;
+  title: string;
+};
+
 type TaskListProps = {
   plan: PrioritizedTaskPlan;
   executionMetadata?: ExecutionMetadata | null;
-  sessionId: string | null;
   planVersion: number;
   outcomeId: string | null;
+  outcomeStatement?: string | null;
   adjustedPlan?: AdjustedPlan | null;
   onDiffSummary?: (summary: { hasChanges: boolean; isInitial: boolean }) => void;
-  onToggleTrace?: () => void;
-  isTraceExpanded?: boolean;
-  stepCount?: number;
 };
 
 const DEFAULT_REMOVAL_REASON =
@@ -162,37 +178,36 @@ function sanitizePlanOrder(plan: PrioritizedTaskPlan): string[] {
 
 function buildDependencyLinks(
   dependencies: TaskDependency[],
-  ranks: Record<string, number>
+  ranks: Record<string, number>,
+  getTitle: (taskId: string) => string
 ) {
   return dependencies.map(dependency => ({
     taskId: dependency.source_task_id,
     rank: ranks[dependency.source_task_id] ?? null,
-    label: `Depends on #${ranks[dependency.source_task_id] ?? '?'}`,
+    label: getTitle(dependency.source_task_id),
   }));
 }
 
 function buildDependentLinks(
   dependents: TaskDependency[],
-  ranks: Record<string, number>
+  ranks: Record<string, number>,
+  getTitle: (taskId: string) => string
 ) {
   return dependents.map(dependency => ({
     taskId: dependency.target_task_id,
     rank: ranks[dependency.target_task_id] ?? null,
-    label: `Unblocks #${ranks[dependency.target_task_id] ?? '?'}`,
+    label: getTitle(dependency.target_task_id),
   }));
 }
 
 export function TaskList({
   plan,
   executionMetadata,
-  sessionId,
   planVersion,
   outcomeId,
+  outcomeStatement,
   adjustedPlan,
   onDiffSummary,
-  onToggleTrace,
-  isTraceExpanded = false,
-  stepCount = 0,
 }: TaskListProps) {
   const sanitizedTaskIds = useMemo(() => sanitizePlanOrder(plan), [plan]);
   const taskAnnotations = useMemo<TaskAnnotation[]>(() => plan.task_annotations ?? [], [plan.task_annotations]);
@@ -249,6 +264,7 @@ export function TaskList({
   const failedTools = executionMetadata?.failed_tools ?? [];
 
   const [taskLookup, setTaskLookup] = useState<TaskLookup>({});
+  const lastMetadataRequestKeyRef = useRef<string | null>(null);
   const [priorityState, setPriorityState] = useState<PriorityState>({
     statuses: {},
     reasons: {},
@@ -259,6 +275,41 @@ export function TaskList({
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [recentlyDiscarded, setRecentlyDiscarded] = useState<Set<string>>(new Set());
+  const [lockStore, setLockStore] = useLocalStorage<Record<string, Record<string, LockedTaskState>>>('locked-tasks', {});
+  const [dependencyStore, setDependencyStore] = useLocalStorage<DependencyOverrideStore>(DEPENDENCY_OVERRIDE_STORAGE_KEY, {});
+  const outcomeKey = outcomeId ?? 'global';
+  const lockedTasks = lockStore[outcomeKey] ?? {};
+  const dependencyOverrides = dependencyStore[outcomeKey] ?? {};
+
+  const updateLockedTasks = useCallback(
+    (updater: (current: Record<string, LockedTaskState>) => Record<string, LockedTaskState>) => {
+      setLockStore(prev => {
+        const current = prev[outcomeKey] ?? {};
+        const nextOutcomeEntry = updater(current);
+        return {
+          ...prev,
+          [outcomeKey]: nextOutcomeEntry,
+        };
+      });
+    },
+    [outcomeKey, setLockStore]
+  );
+
+  const updateDependencyOverrides = useCallback(
+    (
+      updater: (current: Record<string, DependencyOverrideEntry>) => Record<string, DependencyOverrideEntry>
+    ) => {
+      setDependencyStore(prev => {
+        const current = prev[outcomeKey] ?? {};
+        const nextOutcomeEntry = updater(current);
+        return {
+          ...prev,
+          [outcomeKey]: nextOutcomeEntry,
+        };
+      });
+    },
+    [outcomeKey, setDependencyStore]
+  );
 
   const storageKey = outcomeId ? `priority-state:${outcomeId}` : null;
   const previousPlanRef = useRef<string[] | null>(null);
@@ -267,6 +318,7 @@ export function TaskList({
   const hasLoadedStoredState = useRef(false);
   const discardTimeoutRef = useRef<number | null>(null);
   const previousStorageKeyRef = useRef<string | null>(null);
+  const didUnmountRef = useRef(false);
 
   useEffect(() => {
     priorityStateRef.current = priorityState;
@@ -367,14 +419,14 @@ export function TaskList({
     }, 2000);
   }, []);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    return () => {
+      didUnmountRef.current = true;
       if (discardTimeoutRef.current) {
         window.clearTimeout(discardTimeoutRef.current);
       }
-    },
-    []
-  );
+    };
+  }, []);
 
   useEffect(() => {
     if (!outcomeId) {
@@ -485,6 +537,19 @@ export function TaskList({
       }
     });
 
+    Object.entries(lockedTasks).forEach(([taskId, lockState]) => {
+      if (nextState.statuses[taskId] !== 'completed' && nextState.statuses[taskId] !== 'discarded') {
+        if (nextState.statuses[taskId] !== 'active') {
+          nextState.statuses[taskId] = 'active';
+          stateChanged = true;
+        }
+      }
+      if (typeof lockState.order === 'number' && nextState.ranks[taskId] !== lockState.order) {
+        nextState.ranks[taskId] = lockState.order;
+        ranksChanged = true;
+      }
+    });
+
     if (stateChanged || ranksChanged) {
       updatePriorityState(() => nextState);
     }
@@ -512,6 +577,7 @@ export function TaskList({
     annotationById,
     removalById,
     removedTasksFromPlan,
+    lockedTasks,
   ]);
 
   const trackedTaskIds = useMemo(
@@ -522,57 +588,115 @@ export function TaskList({
   useEffect(() => {
     if (trackedTaskIds.length === 0) {
       setTaskLookup({});
+      lastMetadataRequestKeyRef.current = null;
+      setIsLoadingTasks(false);
       return;
     }
 
-    let isMounted = true;
+    const requestKey = `${trackedTaskIds.join('|')}::${outcomeStatement ?? ''}`;
+    if (lastMetadataRequestKeyRef.current === requestKey) {
+      return;
+    }
+    lastMetadataRequestKeyRef.current = requestKey;
 
     const loadTasks = async () => {
       try {
         setIsLoadingTasks(true);
         setTaskError(null);
 
-        const { data, error } = await supabase
-          .from('task_embeddings')
-          .select('task_id, task_text, document_id')
-          .in('task_id', trackedTaskIds);
+        const response = await fetch('/api/tasks/metadata', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            taskIds: trackedTaskIds,
+            outcome: outcomeStatement ?? null,
+          }),
+        });
 
-        if (error) {
-          throw error;
+        if (!response.ok) {
+          throw new Error(`Metadata request failed with status ${response.status}`);
         }
 
-        if (!isMounted) {
+        const payload = (await response.json()) as {
+          tasks?: Array<{
+            task_id: string;
+            title: string;
+            document_id?: string | null;
+            category?: 'leverage' | 'neutral' | 'overhead' | null;
+            rationale?: string | null;
+            original_text?: string | null;
+          }>;
+        };
+
+        if (
+          didUnmountRef.current ||
+          lastMetadataRequestKeyRef.current !== requestKey
+        ) {
           return;
         }
 
         setTaskLookup(prev => {
           const next = { ...prev };
-          for (const task of data ?? []) {
+          for (const task of payload.tasks ?? []) {
             next[task.task_id] = {
-              title: task.task_text ?? formatTaskId(task.task_id),
-              documentId: task.document_id,
+              title: task.title ?? formatTaskId(task.task_id),
+              documentId: task.document_id ?? null,
+              category: task.category ?? null,
+              rationale: task.rationale ?? null,
+              sourceText: task.original_text ?? null,
             };
           }
           return next;
         });
-      } catch (error) {
-        console.error('[TaskList] Failed to load task titles', error);
-        if (isMounted) {
-          setTaskError('Unable to load task titles. Showing task IDs instead.');
+
+        const fetchedIds = new Set((payload.tasks ?? []).map(task => task.task_id));
+        const missingLocked = Object.keys(lockedTasks).filter(taskId => !fetchedIds.has(taskId));
+        if (missingLocked.length > 0) {
+          updateLockedTasks(current => {
+            const next = { ...current };
+            missingLocked.forEach(taskId => {
+              delete next[taskId];
+            });
+            return next;
+          });
+          updatePriorityState(prev => {
+            const next: PriorityState = {
+              statuses: { ...prev.statuses },
+              reasons: { ...prev.reasons },
+              ranks: { ...prev.ranks },
+            };
+            missingLocked.forEach(taskId => {
+              delete next.statuses[taskId];
+              delete next.reasons[taskId];
+              delete next.ranks[taskId];
+            });
+            return next;
+          });
         }
+      } catch (error) {
+        if (
+          didUnmountRef.current ||
+          lastMetadataRequestKeyRef.current !== requestKey
+        ) {
+          return;
+        }
+        lastMetadataRequestKeyRef.current = null;
+        console.error('[TaskList] Failed to load task metadata', error);
+        setTaskError('Unable to load task details. Showing fallback task IDs.');
       } finally {
-        if (isMounted) {
+        if (
+          !didUnmountRef.current &&
+          lastMetadataRequestKeyRef.current === requestKey
+        ) {
           setIsLoadingTasks(false);
         }
       }
     };
 
-    loadTasks();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [trackedTaskIds]);
+    void loadTasks();
+  }, [trackedTaskIds, outcomeStatement, lockedTasks, updateLockedTasks, updatePriorityState]);
 
   const getTaskTitle = useCallback(
     (taskId: string) => taskLookup[taskId]?.title ?? formatTaskId(taskId),
@@ -597,11 +721,62 @@ export function TaskList({
     return map;
   }, [plan.dependencies]);
 
+  const handleRemoveDependency = useCallback(
+    (targetId: string, sourceId: string) => {
+      updateDependencyOverrides(current => {
+        const next = { ...current };
+        const targetEntry: DependencyOverrideEntry = { ...(next[targetId] ?? {}) };
+        const sourceEntry: DependencyOverrideEntry = { ...(next[sourceId] ?? {}) };
+        const baseDependencies = targetEntry.dependencies ?? dependenciesByTarget[targetId] ?? [];
+        const baseDependents = sourceEntry.dependents ?? dependentsBySource[sourceId] ?? [];
+        targetEntry.dependencies = baseDependencies.filter(dep => dep.source_task_id !== sourceId);
+        sourceEntry.dependents = baseDependents.filter(dep => dep.target_task_id !== targetId);
+        next[targetId] = targetEntry;
+        next[sourceId] = sourceEntry;
+        return next;
+      });
+    },
+    [updateDependencyOverrides, dependenciesByTarget, dependentsBySource]
+  );
+
+  const handleAddDependency = useCallback(
+    (targetId: string, sourceId: string, relationship: TaskDependency['relationship_type']) => {
+      if (!sourceId || targetId === sourceId) {
+        return;
+      }
+      updateDependencyOverrides(current => {
+        const next = { ...current };
+        const targetEntry: DependencyOverrideEntry = { ...(next[targetId] ?? {}) };
+        const sourceEntry: DependencyOverrideEntry = { ...(next[sourceId] ?? {}) };
+        const baseDependencies = targetEntry.dependencies ?? dependenciesByTarget[targetId] ?? [];
+        const alreadyLinked = baseDependencies.some(dep => dep.source_task_id === sourceId);
+        if (alreadyLinked) {
+          return next;
+        }
+        const newDependency: TaskDependency = {
+          source_task_id: sourceId,
+          target_task_id: targetId,
+          relationship_type: relationship,
+          confidence: 1,
+          detection_method: 'ai_inference',
+        };
+        targetEntry.dependencies = [...baseDependencies, newDependency];
+        const baseDependents = sourceEntry.dependents ?? dependentsBySource[sourceId] ?? [];
+        sourceEntry.dependents = [...baseDependents, newDependency];
+        next[targetId] = targetEntry;
+        next[sourceId] = sourceEntry;
+        return next;
+      });
+    },
+    [updateDependencyOverrides, dependenciesByTarget, dependentsBySource]
+  );
+
   const baseNodeMap = useMemo(() => {
     const map: Record<string, TaskRenderNode> = {};
     sanitizedTaskIds.forEach((taskId, index) => {
       const annotation = annotationById.get(taskId);
       const removal = removalById.get(taskId);
+      const lookup = taskLookup[taskId];
       const confidence =
         typeof annotation?.confidence === 'number'
           ? annotation.confidence
@@ -614,13 +789,17 @@ export function TaskList({
       const state = annotation?.state;
       const removalReason = annotation?.removal_reason ?? removal?.removal_reason ?? null;
 
+      const overrides = dependencyOverrides[taskId];
       map[taskId] = {
         id: taskId,
         title: getTaskTitle(taskId),
+        category: lookup?.category ?? null,
+        rationale: lookup?.rationale ?? null,
+        sourceText: lookup?.sourceText ?? null,
         confidence,
         confidenceDelta,
-        dependencies: dependenciesByTarget[taskId] ?? [],
-        dependents: dependentsBySource[taskId] ?? [],
+        dependencies: overrides?.dependencies ?? dependenciesByTarget[taskId] ?? [],
+        dependents: overrides?.dependents ?? dependentsBySource[taskId] ?? [],
         movement: movementMap[taskId],
         planRank: index + 1,
         reasoning,
@@ -640,6 +819,8 @@ export function TaskList({
     movementMap,
     annotationById,
     removalById,
+    taskLookup,
+    dependencyOverrides,
   ]);
 
   useEffect(() => {
@@ -666,9 +847,14 @@ export function TaskList({
       } else {
         const annotation = annotationById.get(taskId);
         const removal = removalById.get(taskId);
+        const lookup = taskLookup[taskId];
+        const overrides = dependencyOverrides[taskId];
         snapshot[taskId] = {
           id: taskId,
           title: getTaskTitle(taskId),
+          category: lookup?.category ?? null,
+          rationale: lookup?.rationale ?? null,
+          sourceText: lookup?.sourceText ?? null,
           confidence:
             typeof annotation?.confidence === 'number'
               ? annotation.confidence
@@ -677,13 +863,14 @@ export function TaskList({
             typeof annotation?.confidence_delta === 'number'
               ? annotation.confidence_delta
               : null,
-          dependencies: [],
-          dependents: [],
+          dependencies: overrides?.dependencies ?? [],
+          dependents: overrides?.dependents ?? [],
           movement: movementMap[taskId],
           planRank: null,
           reasoning: annotation?.reasoning ?? null,
           dependencyNotes: annotation?.dependency_notes ?? null,
-          manualOverride: annotation?.manual_override ?? !sanitizedTaskIds.includes(taskId),
+          manualOverride:
+            annotation?.manual_override ?? !sanitizedTaskIds.includes(taskId),
           state: annotation?.state,
           removalReason: annotation?.removal_reason ?? removal?.removal_reason ?? null,
         };
@@ -700,6 +887,8 @@ export function TaskList({
     plan.confidence_scores,
     removalById,
     sanitizedTaskIds,
+    taskLookup,
+    dependencyOverrides,
   ]);
 
   const activeIdsFromPlan = useMemo(
@@ -723,10 +912,73 @@ export function TaskList({
     return ids.map(item => item.id);
   }, [priorityState.statuses, priorityState.ranks, sanitizedTaskIds]);
 
-  const orderedActiveIds = useMemo(
-    () => [...activeIdsFromPlan, ...manuallyRestoredIds],
-    [activeIdsFromPlan, manuallyRestoredIds]
-  );
+  const orderedActiveIds = useMemo(() => {
+    const combinedIds = new Set<string>([
+      ...activeIdsFromPlan,
+      ...manuallyRestoredIds,
+      ...Object.keys(lockedTasks),
+    ]);
+
+    const sortable = Array.from(combinedIds).map(taskId => {
+      const lockOrder = lockedTasks[taskId]?.order ?? null;
+      const planIndex = sanitizedTaskIds.indexOf(taskId);
+      const fallbackRank =
+        planIndex >= 0 ? planIndex + 1 : priorityState.ranks[taskId] ?? Number.MAX_SAFE_INTEGER;
+      return {
+        taskId,
+        lockOrder,
+        fallbackRank,
+      };
+    });
+
+    sortable.sort((a, b) => {
+      if (a.lockOrder !== null && b.lockOrder !== null) {
+        if (a.lockOrder !== b.lockOrder) {
+          return a.lockOrder - b.lockOrder;
+        }
+      } else if (a.lockOrder !== null) {
+        return -1;
+      } else if (b.lockOrder !== null) {
+        return 1;
+      }
+
+      if (a.fallbackRank !== b.fallbackRank) {
+        return a.fallbackRank - b.fallbackRank;
+      }
+
+      return a.taskId.localeCompare(b.taskId);
+    });
+
+    return sortable.map(entry => entry.taskId);
+  }, [activeIdsFromPlan, manuallyRestoredIds, lockedTasks, sanitizedTaskIds, priorityState.ranks]);
+
+  useEffect(() => {
+    if (Object.keys(lockedTasks).length === 0) {
+      return;
+    }
+    const updated: Record<string, LockedTaskState> = {};
+    let changed = false;
+    orderedActiveIds.forEach((taskId, index) => {
+      if (lockedTasks[taskId]) {
+        const nextOrder = index + 1;
+        updated[taskId] = { order: nextOrder };
+        if (lockedTasks[taskId].order !== nextOrder) {
+          changed = true;
+        }
+      }
+    });
+    if (changed) {
+      updateLockedTasks(() => updated);
+    }
+  }, [lockedTasks, orderedActiveIds, updateLockedTasks]);
+
+  const taskOptions = useMemo<TaskOption[]>(() => {
+    const ids = Array.from(new Set([...sanitizedTaskIds, ...manuallyRestoredIds, ...Object.keys(lockedTasks)]));
+    return ids.map(id => ({
+      id,
+      title: getTaskTitle(id),
+    }));
+  }, [sanitizedTaskIds, manuallyRestoredIds, lockedTasks, getTaskTitle]);
 
   const activeTasks = orderedActiveIds
     .map((taskId, index) => {
@@ -750,8 +1002,10 @@ export function TaskList({
       return {
         id: taskId,
         title: node.title,
+        category: node.category ?? null,
+        isLocked: Boolean(lockedTasks[taskId]),
         movement,
-        dependencyLinks: buildDependencyLinks(node.dependencies, priorityState.ranks),
+        dependencyLinks: buildDependencyLinks(node.dependencies, priorityState.ranks, getTaskTitle),
         displayOrder: index + 1,
         checked: priorityState.statuses[taskId] === 'completed',
         isAiGenerated: Boolean(node.manualOverride),
@@ -760,12 +1014,43 @@ export function TaskList({
     .filter(Boolean) as Array<{
       id: string;
       title: string;
-      movement: MovementInfo;
+      category: 'leverage' | 'neutral' | 'overhead' | null;
+      isLocked: boolean;
+      movement: MovementInfo | undefined;
       dependencyLinks: ReturnType<typeof buildDependencyLinks>;
       displayOrder: number;
       checked: boolean;
       isAiGenerated: boolean;
     }>;
+
+  const topTaskHighlights = useMemo(
+    () =>
+      activeTasks.slice(0, 3).map(task => `#${task.displayOrder} ${task.title}`),
+    [activeTasks]
+  );
+
+  const normalizedOutcome = useMemo(() => {
+    if (!outcomeStatement) {
+      return null;
+    }
+    const trimmed = outcomeStatement.trim();
+    return trimmed.length > 180 ? `${trimmed.slice(0, 177)}…` : trimmed;
+  }, [outcomeStatement]);
+
+  const planNarrative = useMemo(() => {
+    const summary = plan.synthesis_summary?.trim();
+    const segments: string[] = [];
+    if (normalizedOutcome) {
+      segments.push(`Keeps focus on “${normalizedOutcome}”.`);
+    }
+    if (summary) {
+      segments.push(summary);
+    }
+    if (topTaskHighlights.length) {
+      segments.push(`Immediate next steps: ${topTaskHighlights.join(', ')}.`);
+    }
+    return segments.join(' ');
+  }, [normalizedOutcome, plan.synthesis_summary, topTaskHighlights]);
 
   const completedTasks = useMemo(
     () =>
@@ -854,6 +1139,35 @@ export function TaskList({
     [updatePriorityState, sanitizedTaskIds.length, flashTask]
   );
 
+  const handleToggleLock = useCallback(
+    (taskId: string, order: number) => {
+      updateLockedTasks(current => {
+        const next = { ...current };
+        if (next[taskId]) {
+          delete next[taskId];
+        } else {
+          next[taskId] = { order };
+        }
+        return next;
+      });
+      updatePriorityState(prev => {
+        const next: PriorityState = {
+          statuses: { ...prev.statuses },
+          reasons: { ...prev.reasons },
+          ranks: { ...prev.ranks },
+        };
+        if (!next.statuses[taskId]) {
+          next.statuses[taskId] = 'active';
+        }
+        if (!lockedTasks[taskId]) {
+          next.ranks[taskId] = order;
+        }
+        return next;
+      });
+    },
+    [lockedTasks, updateLockedTasks, updatePriorityState]
+  );
+
   const handleSelectTask = useCallback((taskId: string) => {
     setSelectedTaskId(taskId);
     setIsDrawerOpen(true);
@@ -867,6 +1181,7 @@ export function TaskList({
   const selectedConfidence = selectedNode?.confidence ?? null;
   const selectedMovement: MovementInfo | undefined =
     selectedNode?.movement ?? movementMap[selectedTaskId ?? ''];
+  const selectedIsLocked = selectedNode ? Boolean(lockedTasks[selectedNode.id]) : false;
 
   return (
     <div className="flex flex-col gap-8">
@@ -885,25 +1200,17 @@ export function TaskList({
                 {Math.round(executionMetadata.total_time_ms / 100) / 10}s runtime
               </span>
             )}
-            {onToggleTrace && stepCount > 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={onToggleTrace}
-                className="gap-2"
-              >
-                {isTraceExpanded ? (
-                  <ChevronUp className="h-4 w-4" />
-                ) : (
-                  <ChevronDown className="h-4 w-4" />
-                )}
-                View Reasoning ({stepCount} steps)
-              </Button>
-            )}
           </div>
         </div>
 
-        <p className="text-sm text-muted-foreground">{plan.synthesis_summary}</p>
+        {planNarrative && (
+          <div className="rounded-lg border border-border/70 bg-bg-layer-3/70 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Why these tasks are on top
+            </p>
+            <p className="mt-2 text-sm text-foreground">{planNarrative}</p>
+          </div>
+        )}
 
         {hasToolFailures && (
           <Alert className="border-amber-300 bg-amber-50">
@@ -950,30 +1257,33 @@ export function TaskList({
             </div>
           ) : (
             <ScrollArea className="max-h-[560px]">
-              <div className="sticky top-0 z-10 grid grid-cols-[48px_minmax(0,1fr)_120px_96px_48px] gap-2 border-b border-border/60 bg-background/95 px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground backdrop-blur">
+              <div className="sticky top-0 z-10 hidden grid-cols-[48px_minmax(0,1fr)_120px_96px_48px] gap-2 border-b border-border/60 bg-background/95 px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground backdrop-blur lg:grid">
                 <span>#</span>
                 <span className="text-left">Task</span>
                 <span className="text-left">Depends</span>
                 <span className="text-right">Movement</span>
                 <span className="text-right">Done</span>
               </div>
-              <div className="divide-y divide-border/60">
-                {activeTasks.map(task => (
-                  <TaskRow
-                    key={`active-${task.id}`}
-                    taskId={task.id}
-                    order={task.displayOrder}
-                    title={task.title}
-                    dependencyLinks={task.dependencyLinks}
-                    movement={task.movement}
-                    checked={task.checked}
-                    isAiGenerated={task.isAiGenerated}
-                    isSelected={selectedTaskId === task.id && isDrawerOpen}
-                    isHighlighted={highlightedIds.has(task.id)}
-                    onSelect={handleSelectTask}
-                    onToggleCompleted={handleToggleCompleted}
-                  />
-                ))}
+        <div className="flex flex-col gap-4 lg:gap-0 lg:divide-y lg:divide-border/60">
+          {activeTasks.map(task => (
+            <TaskRow
+              key={`active-${task.id}`}
+              taskId={task.id}
+              order={task.displayOrder}
+              title={task.title}
+              category={task.category}
+              isLocked={task.isLocked}
+              dependencyLinks={task.dependencyLinks}
+              movement={task.movement}
+              checked={task.checked}
+              isAiGenerated={task.isAiGenerated}
+              isSelected={selectedTaskId === task.id && isDrawerOpen}
+              isHighlighted={highlightedIds.has(task.id)}
+              onSelect={handleSelectTask}
+              onToggleCompleted={handleToggleCompleted}
+              onToggleLock={() => handleToggleLock(task.id, task.displayOrder)}
+            />
+          ))}
               </div>
             </ScrollArea>
           )}
@@ -1007,13 +1317,24 @@ export function TaskList({
                 movement: selectedMovement ?? null,
                 dependencies: selectedNode.dependencies,
                 dependents: selectedNode.dependents,
-                dependencyLinks: buildDependencyLinks(selectedNode.dependencies, priorityState.ranks),
-                dependentLinks: buildDependentLinks(selectedNode.dependents, priorityState.ranks),
+                dependencyLinks: buildDependencyLinks(
+                  selectedNode.dependencies,
+                  priorityState.ranks,
+                  getTaskTitle
+                ),
+                dependentLinks: buildDependentLinks(
+                  selectedNode.dependents,
+                  priorityState.ranks,
+                  getTaskTitle
+                ),
                 reasoning: selectedNode.reasoning ?? null,
                 dependencyNotes: selectedNode.dependencyNotes ?? null,
                 manualOverride:
                   selectedNode.manualOverride ?? !sanitizedTaskIds.includes(selectedNode.id),
                 state: selectedNode.state,
+                lnoCategory: selectedNode.category ?? null,
+                outcomeRationale: selectedNode.rationale ?? null,
+                sourceText: selectedNode.sourceText ?? null,
               }
             : null
         }
@@ -1039,7 +1360,11 @@ export function TaskList({
         }}
         onNavigateToTask={scrollToTask}
         getTaskTitle={getTaskTitle}
-        sessionId={sessionId}
+        outcomeStatement={outcomeStatement ?? null}
+        isLocked={selectedIsLocked}
+        onRemoveDependency={handleRemoveDependency}
+        onAddDependency={handleAddDependency}
+        taskOptions={taskOptions}
       />
     </div>
   );

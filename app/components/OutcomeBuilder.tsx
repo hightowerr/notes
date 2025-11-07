@@ -288,7 +288,7 @@ export function OutcomeBuilder({ open, onOpenChange, onSuccess, initialValues, i
   return (
     <>
       <Dialog open={open} onOpenChange={handleModalClose}>
-        <DialogContent className="sm:max-w-[600px] max-h-[90vh] flex flex-col p-4 sm:p-6">
+      <DialogContent className="sm:max-w-[600px] flex flex-col gap-4 p-3 sm:p-6">
           <DialogHeader className="flex-shrink-0">
             <DialogTitle>
               {isEditMode ? 'Edit Your Outcome Statement' : 'Set Your Outcome Statement'}
@@ -339,7 +339,7 @@ export function OutcomeBuilder({ open, onOpenChange, onSuccess, initialValues, i
                     <FormLabel>Direction</FormLabel>
                     <Select onValueChange={field.onChange} defaultValue={field.value}>
                       <FormControl>
-                        <SelectTrigger className="h-11 md:h-10">
+                        <SelectTrigger className="h-12 sm:h-10 text-base sm:text-sm">
                           <SelectValue placeholder="Select direction" />
                         </SelectTrigger>
                       </FormControl>
@@ -367,7 +367,7 @@ export function OutcomeBuilder({ open, onOpenChange, onSuccess, initialValues, i
                       <Input
                         placeholder="e.g., monthly recurring revenue"
                         maxLength={100}
-                        className="h-11 md:h-10"
+                        className="h-12 sm:h-10 text-base sm:text-sm"
                         enterKeyHint="next"
                         {...field}
                       />
@@ -391,7 +391,7 @@ export function OutcomeBuilder({ open, onOpenChange, onSuccess, initialValues, i
                       <Input
                         placeholder="e.g., 25% within 6 months"
                         maxLength={100}
-                        className="h-11 md:h-10"
+                        className="h-12 sm:h-10 text-base sm:text-sm"
                         enterKeyHint="next"
                         {...field}
                       />
@@ -416,7 +416,7 @@ export function OutcomeBuilder({ open, onOpenChange, onSuccess, initialValues, i
                         placeholder="e.g., enterprise customer acquisition"
                         maxLength={150}
                         rows={3}
-                        className="min-h-[88px] md:min-h-[72px]"
+                        className="min-h-[96px] sm:min-h-[80px]"
                         enterKeyHint="done"
                         {...field}
                       />
@@ -440,17 +440,17 @@ export function OutcomeBuilder({ open, onOpenChange, onSuccess, initialValues, i
                       <RadioGroup
                         onValueChange={field.onChange}
                         value={field.value}
-                        className="flex flex-row gap-4"
+                        className="flex flex-col gap-3 min-[475px]:flex-row min-[475px]:gap-4"
                       >
-                        <div className="flex items-center space-x-2">
+                        <div className="flex w-full items-center gap-3 rounded-lg border border-border/60 px-3 py-2 min-h-[44px] shadow-1layer-sm min-[475px]:w-auto">
                           <RadioGroupItem value="Energized" id="energized" />
-                          <Label htmlFor="energized" className="font-normal cursor-pointer">
+                          <Label htmlFor="energized" className="cursor-pointer text-sm font-medium">
                             Energized
                           </Label>
                         </div>
-                        <div className="flex items-center space-x-2">
+                        <div className="flex w-full items-center gap-3 rounded-lg border border-border/60 px-3 py-2 min-h-[44px] shadow-1layer-sm min-[475px]:w-auto">
                           <RadioGroupItem value="Low energy" id="low-energy" />
-                          <Label htmlFor="low-energy" className="font-normal cursor-pointer">
+                          <Label htmlFor="low-energy" className="cursor-pointer text-sm font-medium">
                             Low energy
                           </Label>
                         </div>
@@ -475,7 +475,7 @@ export function OutcomeBuilder({ open, onOpenChange, onSuccess, initialValues, i
                         min={0.25}
                         max={24}
                         step={0.25}
-                        className="h-11 md:h-10"
+                        className="h-12 sm:h-10 text-base sm:text-sm"
                         {...field}
                         value={field.value ?? ''}
                         onChange={(e) => {

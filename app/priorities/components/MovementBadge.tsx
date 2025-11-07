@@ -18,7 +18,7 @@ export type MovementInfo =
   | undefined;
 
 type MovementBadgeProps = {
-  movement: MovementInfo;
+  movement: MovementInfo | undefined;
 };
 
 export function MovementBadge({ movement }: MovementBadgeProps) {
@@ -26,29 +26,30 @@ export function MovementBadge({ movement }: MovementBadgeProps) {
     return null;
   }
 
-  const baseClass = 'text-xs font-medium text-muted-foreground';
+  const baseClass = 'text-xs font-medium text-muted-foreground whitespace-nowrap';
 
   if (movement.type === 'new') {
-    return <span className={`${baseClass}`}>new</span>;
+    return <span className={baseClass}>New task</span>;
   }
 
   if (movement.type === 'reintroduced') {
-    return <span className={baseClass}>↺</span>;
+    return <span className={baseClass}>Reintroduced</span>;
   }
 
   if (movement.type === 'manual') {
-    return <span className={baseClass}>manual</span>;
+    return <span className={baseClass}>Manual override</span>;
   }
 
   if (movement.type === 'confidence-drop') {
     const delta = Math.abs(movement.delta ?? 0);
-    return <span className={baseClass}>Δ-{delta.toFixed(2)}</span>;
+    return <span className={baseClass}>Confidence ↓{delta.toFixed(2)}</span>;
   }
 
-  const delta = Math.abs(movement.delta ?? 0);
-  const badgeContent = movement.type === 'up'
-    ? <span className={baseClass}>↑{delta}</span>
-    : <span className={baseClass}>↓{delta}</span>;
+  const delta = Math.max(1, Math.abs(movement.delta ?? 0));
+  const spotsLabel = `${delta} ${delta === 1 ? 'spot' : 'spots'}`;
+  const directionLabel =
+    movement.type === 'up' ? `Moved up ${spotsLabel}` : `Moved down ${spotsLabel}`;
+  const badgeContent = <span className={baseClass}>{directionLabel}</span>;
 
   // Show tooltip if reason exists (from context-based adjustment)
   const hasReason = (movement.type === 'up' || movement.type === 'down') &&

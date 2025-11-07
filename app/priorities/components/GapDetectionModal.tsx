@@ -13,14 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerTitle,
-} from '@/components/ui/drawer';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -38,7 +30,6 @@ import type { Gap } from '@/lib/schemas/gapSchema';
 import type { BridgingTask } from '@/lib/schemas/bridgingTaskSchema';
 
 import { BridgingTaskCard } from '@/app/priorities/components/BridgingTaskCard';
-import { useMediaQuery } from '@/lib/hooks/useMediaQuery';
 
 export type BridgingTaskWithSelection = BridgingTask & { checked: boolean };
 
@@ -438,7 +429,6 @@ export function GapDetectionModal({
   const [taskFetchError, setTaskFetchError] = useState<string | null>(null);
   const [editingTasks, setEditingTasks] = useState<Record<string, boolean>>({});
   const [openGapIds, setOpenGapIds] = useState<string[]>([]);
-  const isDesktop = useMediaQuery('(min-width: 768px)');
   const makeTaskKey = useCallback((gapId: string, taskId: string) => `${gapId}:${taskId}`, []);
 
   const handleToggleTaskEditing = useCallback(
@@ -965,38 +955,17 @@ export function GapDetectionModal({
     </div>
   );
 
-  if (!isDesktop) {
-    return (
-      <Drawer open={open} onOpenChange={onOpenChange}>
-        <DrawerContent className="max-h-[85vh]">
-          <DrawerHeader>
-            <DrawerTitle>{modalTitle}</DrawerTitle>
-            <DrawerDescription>{modalDescription}</DrawerDescription>
-          </DrawerHeader>
-          <div className="px-4 pb-4 overflow-y-auto">
-            <ScrollArea className="h-full max-h-[calc(85vh-200px)]">
-              {content}
-            </ScrollArea>
-          </div>
-          <DrawerFooter className="border-t border-border/60">
-            {footer}
-          </DrawerFooter>
-        </DrawerContent>
-      </Drawer>
-    );
-  }
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col p-0">
-        <DialogHeader className="px-6 pt-6 pb-4 shrink-0 border-b border-border/60">
+      <DialogContent className="max-w-4xl flex flex-col gap-4 p-3 sm:p-6">
+        <DialogHeader className="px-0 pt-0">
           <DialogTitle>{modalTitle}</DialogTitle>
           <DialogDescription>{modalDescription}</DialogDescription>
         </DialogHeader>
-        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
+        <div className="flex-1 min-h-0 overflow-y-auto">
           {content}
         </div>
-        <DialogFooter className="px-6 pb-6 pt-4 shrink-0 border-t border-border/60">
+        <DialogFooter className="px-0 pb-0 pt-0">
           {footer}
         </DialogFooter>
       </DialogContent>

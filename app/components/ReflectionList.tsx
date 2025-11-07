@@ -96,10 +96,10 @@ export function ReflectionList({
             <div
               key={reflection.id}
               className={cn(
-                'rounded-lg px-4 py-3 transition-all',
+                'rounded-lg px-4 py-3 transition-all shadow-2layer-sm-mobile sm:shadow-2layer-sm',
                 isActive
-                  ? 'bg-bg-layer-3 shadow-2layer-sm hover:shadow-2layer-md hover:bg-bg-layer-4'
-                  : 'bg-info-bg shadow-2layer-sm opacity-70',
+                  ? 'bg-bg-layer-3 hover:shadow-2layer-md hover:bg-bg-layer-4'
+                  : 'bg-info-bg opacity-70',
                 isDeleting && 'opacity-50'
               )}
               tabIndex={0}
