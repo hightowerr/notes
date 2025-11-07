@@ -7,6 +7,7 @@
 import { generateObject, embed } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { DocumentOutputSchema, type DocumentOutput, type Action } from '@/lib/schemas';
+import { z } from 'zod';
 import { createClient } from '@supabase/supabase-js';
 import { generateTaskId } from './embeddingService';
 import { embeddingQueue } from './embeddingQueue';
@@ -133,59 +134,30 @@ Your task is to identify:
 2. **Decisions**: Explicit decisions that were made or documented
 3. **Actions**: Action items, tasks, or next steps identified (with time/effort estimates)
 4. **LNO Tasks**: Categorize tasks into three priority levels:
-   - **Leverage**: High-impact strategic tasks that create significant value
-   - **Neutral**: Necessary operational tasks that maintain the business
-   - **Overhead**: Low-value administrative tasks that should be minimized
+   - **Leverage (L)**: High-impact strategic tasks that create disproportionate value
+   - **Neutral (N)**: Necessary operational tasks that maintain the business
+   - **Overhead (O)**: Low-value administrative tasks that should be minimized, automated, or batched
 
 Guidelines:
-- Extract actual content from the document, don't make assumptions
-- Be concise but specific in your extractions
+- Extract actual content from the document, do not invent tasks that are not mentioned or implied
+- Keep entries concise but specific
 - If a category has no items, return an empty array
-- Ensure all extracted items are meaningful strings
-- For LNO classification, consider impact vs effort ratio
+- For LNO classification, consider impact vs effort and provide outcome-aligned reasoning
 
-**Action Item Requirements** (NEW):
+**Action Item Requirements**
 For each action, estimate:
 - **estimated_hours**: Time required in hours (0.25 to 8.0)
-  * 0.25 = 15 minutes (quick email, simple update)
-  * 0.5 = 30 minutes (short meeting, basic task)
-  * 1.0 = 1 hour (standard task)
-  * 2-4 = Half to full day (complex task)
-  * 6-8 = Full working day (major project work)
-- **effort_level**: Cognitive load required
-  * "high" = Requires deep focus, complex problem-solving, critical thinking
-  * "low" = Routine task, straightforward execution, low cognitive load
-
+- **effort_level**: Cognitive load required ("high" or "low")
 Base estimates on typical professional work speeds. Consider task complexity, not urgency.
 
-**Task Extraction Strategy:**
-- For meeting notes/action-oriented docs: Extract explicit tasks and action items mentioned in the document
-- For informational docs (policies, guides, reports, reference materials): Infer actionable tasks that a reader would naturally need to do with this specific content
-  * Insurance document → Infer tasks like "Review [specific coverage types mentioned]", "Compare [specific policy options discussed]"
-  * Strategy document → Infer tasks like "Evaluate impact of [specific strategy mentioned]", "Align team on [specific objectives listed]"
-  * Reference/cheat sheet → Infer tasks like "Study and memorize [specific concepts covered]", "Apply [specific techniques/formulas shown]"
-  * Product documentation → Infer tasks like "Test [specific features described]", "Integrate [specific APIs documented]"
+**Task Extraction Strategy**
+- For meeting notes/action-oriented docs: extract explicit tasks and action items mentioned
+- For informational docs (policies, guides, reports, reference materials): infer actionable tasks a reader would perform with this specific content
+- If no meaningful tasks can be inferred, leave action/LNO arrays empty rather than fabricating unrelated items
 
-**Critical Rules for Task Generation:**
-- Base ALL tasks on actual content present in the document - reference specific topics, concepts, or items mentioned
-- DO NOT generate generic tasks like "Implement OCR" or "Develop strategy" unless the document explicitly discusses those topics
-- If the document is purely reference material (cheat sheet, glossary, formula list): infer study/application tasks based on the specific content
-- If no meaningful tasks can be inferred from the content, leave arrays empty rather than fabricating unrelated tasks
-- LNO classification should reflect the strategic value of tasks based on document context
-
-**Meta-Content Detection:**
-- If the document is a system notice, error message, or processing placeholder (e.g., "Document Processing Notice", "Unable to extract"), extract metadata about the notice itself, not fabricated tasks
-  * Topics: Document type/status (e.g., ["processing notice", "unreadable document"])
-  * Decisions: Empty array (no decisions in system messages)
-  * Actions: What user should do (e.g., ["Manual review required", "Provide text-based version"])
-  * LNO Tasks: Categorize the required action (usually Overhead for manual fixes)
-- DO NOT fabricate tasks about "implementing OCR" or "developing strategies" - these are system-level tasks, not user tasks from the document
-- Only extract content that would be actionable for the document's reader
-
-**LNO Classification:**
-- **Leverage**: High-impact tasks that drive key decisions or create significant value (e.g., strategic planning, critical evaluations)
-- **Neutral**: Standard operational tasks necessary for understanding or applying the content (e.g., reviewing details, studying concepts)
-- **Overhead**: Low-value administrative tasks (e.g., filing, archiving, basic documentation)
+**Meta-Content Detection**
+- If the document is a system notice, error message, or placeholder, extract metadata about the notice itself (e.g., "Manual review required")
+- Do not fabricate engineering tasks like "implement OCR" unless the document itself requests them
 
 Document Content:
 ${markdown}
@@ -464,18 +436,123 @@ export async function scoreActions(
     });
   }
 
-  // P0: Return original LNO classifications unchanged
-  // Future: Use AI to reclassify tasks based on outcome alignment + reflection context
-  // Example: Tasks aligned with "Increase revenue" might move from Neutral → Leverage
-  // Example: If reflection says "burnt out", prioritize low-effort tasks
+  const actionEntries = document.structured_output.actions ?? [];
+  const actionTexts = actionEntries
+    .map((action, index) => {
+      if (typeof action === 'string') {
+        return { id: `action-${index + 1}`, text: action.trim() };
+      }
+      if (action && typeof action.text === 'string' && action.text.trim().length > 0) {
+        return { id: `action-${index + 1}`, text: action.text.trim() };
+      }
+      return null;
+    })
+    .filter((entry): entry is { id: string; text: string } => Boolean(entry));
 
-  console.log('[ScoreActions] P0 implementation: returning original classifications');
+  if (actionTexts.length === 0) {
+    console.log('[ScoreActions] No action texts found; returning original classifications');
+    return {
+      leverage: document.structured_output.lno_tasks?.leverage || [],
+      neutral: document.structured_output.lno_tasks?.neutral || [],
+      overhead: document.structured_output.lno_tasks?.overhead || [],
+    };
+  }
 
-  return {
-    leverage: document.structured_output.lno_tasks?.leverage || [],
-    neutral: document.structured_output.lno_tasks?.neutral || [],
-    overhead: document.structured_output.lno_tasks?.overhead || [],
-  };
+  const lnoSchema = z.object({
+    leverage: z.array(z.string()).default([]),
+    neutral: z.array(z.string()).default([]),
+    overhead: z.array(z.string()).default([]),
+  });
+
+  const actionList = actionTexts
+    .map((action, idx) => `${idx + 1}. ${action.text}`)
+    .join('\n');
+
+  const prompt = [
+    'You are reprioritizing action items for an outcome-driven planning agent.',
+    `USER OUTCOME: ${outcomeText}`,
+    reflectionContext ? `RECENT REFLECTIONS:\n${reflectionContext}\n` : '',
+    'ACTION ITEMS:',
+    actionList,
+    '\nGroup each action into one of three categories:',
+    '- Leverage: High strategic impact tied directly to the outcome.',
+    '- Neutral: Necessary operational or supporting work.',
+    '- Overhead: Administrative / low-leverage work that should be minimized.',
+    'ONLY return actions that were provided. If an action feels ambiguous, choose the best-fitting bucket.',
+    'Respond using JSON with arrays: { "leverage": [], "neutral": [], "overhead": [] } listing the action text verbatim.',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  try {
+    const { object } = await generateObject({
+      model: openai('gpt-4o-mini'),
+      schema: lnoSchema,
+      prompt,
+      temperature: 0.3,
+      maxTokens: 800,
+    });
+
+    // Helper to match returned strings to known actions
+    const normalize = (text: string) => text.trim().toLowerCase();
+    const actionMap = new Map(actionTexts.map(({ text }) => [normalize(text), text]));
+
+    const remap = (items: string[]) => {
+      const mapped: string[] = [];
+      items.forEach(item => {
+        const normalized = normalize(item);
+        const match =
+          actionMap.get(normalized) ||
+          actionTexts.find(action => normalize(action.text) === normalized)?.text;
+        if (match && !mapped.includes(match)) {
+          mapped.push(match);
+        }
+      });
+      return mapped;
+    };
+
+    const leverage = remap(object.leverage);
+    const neutral = remap(object.neutral);
+    const overhead = remap(object.overhead);
+
+    const allAssigned = new Set([...leverage, ...neutral, ...overhead]);
+    const unassigned = actionTexts
+      .map(entry => entry.text)
+      .filter(text => !allAssigned.has(text));
+
+    // Place any unassigned tasks back into their original buckets to avoid loss
+    const original = document.structured_output.lno_tasks ?? {
+      leverage: [],
+      neutral: [],
+      overhead: [],
+    };
+    unassigned.forEach(taskText => {
+      if (original.leverage?.includes(taskText)) {
+        leverage.push(taskText);
+      } else if (original.overhead?.includes(taskText)) {
+        overhead.push(taskText);
+      } else {
+        neutral.push(taskText);
+      }
+    });
+
+    console.log('[ScoreActions] Reclassification complete', {
+      leverage: leverage.length,
+      neutral: neutral.length,
+      overhead: overhead.length,
+    });
+
+    return { leverage, neutral, overhead };
+  } catch (error) {
+    console.error('[ScoreActions] Reclassification failed, returning original buckets', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      leverage: document.structured_output.lno_tasks?.leverage || [],
+      neutral: document.structured_output.lno_tasks?.neutral || [],
+      overhead: document.structured_output.lno_tasks?.overhead || [],
+    };
+  }
 }
 
 /**
@@ -487,6 +564,24 @@ export async function scoreActions(
  * @param actions - Extracted actions from document
  * @returns Success/failure counts and embedding status
  */
+export function extractActionTextsFromOutput(output: DocumentOutput): string[] {
+  if (!Array.isArray(output.actions)) {
+    return [];
+  }
+
+  return output.actions
+    .map(action => {
+      if (typeof action === 'string') {
+        return action.trim();
+      }
+      if (action && typeof action.text === 'string') {
+        return action.text.trim();
+      }
+      return '';
+    })
+    .filter(text => text.length > 0);
+}
+
 export async function generateAndStoreEmbeddings(
   documentId: string,
   output: DocumentOutput
@@ -500,6 +595,7 @@ export async function generateAndStoreEmbeddings(
     documentId,
     leverageCount: output.lno_tasks?.leverage?.length ?? 0,
     neutralCount: output.lno_tasks?.neutral?.length ?? 0,
+    overheadCount: output.lno_tasks?.overhead?.length ?? 0,
   });
 
   const leverageTasks = Array.isArray(output.lno_tasks?.leverage)
@@ -510,17 +606,30 @@ export async function generateAndStoreEmbeddings(
     ? output.lno_tasks!.neutral.filter(task => typeof task === 'string' && task.trim().length > 0)
     : [];
 
-  const taskTexts = Array.from(
-    new Set(
-      [...leverageTasks, ...neutralTasks].map(task =>
-        task.trim()
-      )
-    )
+  const overheadTasks = Array.isArray(output.lno_tasks?.overhead)
+    ? output.lno_tasks!.overhead.filter(task => typeof task === 'string' && task.trim().length > 0)
+    : [];
+
+  const taskTextsSet = new Set(
+    [...leverageTasks, ...neutralTasks, ...overheadTasks].map(task => task.trim())
   );
 
-  // If no leverage/neutral tasks, skip embedding generation
+  if (taskTextsSet.size === 0) {
+    const actionFallback = extractActionTextsFromOutput(output);
+    if (actionFallback.length > 0) {
+      console.warn('[GenerateEmbeddings] LNO buckets empty, falling back to action list for embeddings', {
+        documentId,
+        actionCount: actionFallback.length,
+      });
+      actionFallback.forEach(text => taskTextsSet.add(text));
+    }
+  }
+
+  const taskTexts = Array.from(taskTextsSet);
+
+  // If we still have no tasks, skip embedding generation
   if (taskTexts.length === 0) {
-    console.log('[GenerateEmbeddings] No leverage/neutral LNO tasks to process, skipping embedding generation');
+    console.log('[GenerateEmbeddings] No tasks available for embedding generation after fallback');
     return {
       success: 0,
       failed: 0,

@@ -1,11 +1,9 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
 import { parsePlanFromAgentResponse } from '@/lib/mastra/services/resultParser';
+import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = getSupabaseAdminClient();
 
 type RouteParams = {
   sessionId: string;

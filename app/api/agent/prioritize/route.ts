@@ -5,6 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 
 import { orchestrateTaskPriorities } from '@/lib/mastra/services/agentOrchestration';
+import type { TaskDependency } from '@/lib/types/agent';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
@@ -27,11 +28,18 @@ export async function POST(request: Request) {
   try {
     const payload = await request.json();
 
-    const requestSchema = z.object({
-      outcome_id: z.string().uuid(),
-      user_id: z.string().min(1),
-      active_reflection_ids: z.array(z.string().uuid()).max(50).optional(),
-    });
+const dependencyOverrideSchema = z.object({
+  source_task_id: z.string().min(1),
+  target_task_id: z.string().min(1),
+  relationship_type: z.enum(['prerequisite', 'blocks', 'related']),
+});
+
+const requestSchema = z.object({
+  outcome_id: z.string().uuid(),
+  user_id: z.string().min(1),
+  active_reflection_ids: z.array(z.string().uuid()).max(50).optional(),
+  dependency_overrides: z.array(dependencyOverrideSchema).optional(),
+});
 
     const parsed = requestSchema.safeParse(payload);
     if (!parsed.success) {
@@ -43,6 +51,14 @@ export async function POST(request: Request) {
 
     const { outcome_id: outcomeId, user_id: userId } = parsed.data;
     const activeReflectionIds = parsed.data.active_reflection_ids ?? [];
+    const dependencyOverrideEdges = parsed.data.dependency_overrides ?? [];
+    const dependencyOverrides: TaskDependency[] = dependencyOverrideEdges.map(edge => ({
+      source_task_id: edge.source_task_id,
+      target_task_id: edge.target_task_id,
+      relationship_type: edge.relationship_type,
+      confidence: 1,
+      detection_method: 'stored_relationship',
+    }));
 
     if (userId !== DEFAULT_USER_ID) {
       return NextResponse.json(
@@ -132,6 +148,7 @@ export async function POST(request: Request) {
         userId: DEFAULT_USER_ID,
         outcomeId,
         activeReflectionIds,
+        dependencyOverrides,
       }).catch((error) => {
         console.error('[Agent Prioritize API] Background orchestration failed', error);
       });

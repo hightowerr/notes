@@ -72,6 +72,9 @@ export interface TaskSummary {
   previous_state?: 'active' | 'completed' | 'discarded' | 'manual_override' | 'reintroduced';
   removal_reason?: string | null;
   manual_override?: boolean;
+  lnoCategory?: 'leverage' | 'neutral' | 'overhead';
+  outcomeAlignment?: string | null;
+  sourceText?: string | null;
 }
 
 export interface AgentRuntimeContext {

@@ -239,16 +239,16 @@ export default function SummaryPanel({
 
         <CardContent className="pt-2">
           <Tabs defaultValue="overview" className="w-full">
-            <TabsList className="grid w-full grid-cols-3 mb-6">
-              <TabsTrigger value="overview" className="flex items-center gap-2">
+            <TabsList className="mb-6 flex w-full flex-wrap gap-2 sm:gap-3">
+              <TabsTrigger value="overview" className="flex min-w-[140px] flex-1 items-center gap-2 sm:min-w-0">
                 <Activity className="h-4 w-4" />
                 <span>Overview</span>
               </TabsTrigger>
-              <TabsTrigger value="actions" className="flex items-center gap-2">
+              <TabsTrigger value="actions" className="flex min-w-[140px] flex-1 items-center gap-2 sm:min-w-0">
                 <MoveRight className="h-4 w-4" />
                 <span>Actions</span>
               </TabsTrigger>
-              <TabsTrigger value="tasks" className="flex items-center gap-2">
+              <TabsTrigger value="tasks" className="flex min-w-[140px] flex-1 items-center gap-2 sm:min-w-0">
                 <ListTodo className="h-4 w-4" />
                 <span>Tasks (LNO)</span>
               </TabsTrigger>

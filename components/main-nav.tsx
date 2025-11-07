@@ -21,10 +21,10 @@ export function MainNav({ actions }: MainNavProps) {
 
   return (
     <header className="sticky top-0 z-40 border-b border-border/60 bg-bg-layer-2/95 shadow-2layer-md backdrop-blur-sm">
-      <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-4 px-6 py-4">
+      <div className="mx-auto flex w-full max-w-7xl flex-col items-stretch gap-4 px-4 py-4 sm:flex-row sm:flex-wrap sm:items-center sm:gap-6 sm:px-6">
         <Link
           href="/"
-          className="flex items-center gap-3 text-left text-foreground transition-colors hover:text-primary-2"
+          className="flex w-full items-start gap-3 text-left text-foreground transition-colors hover:text-primary-2 sm:w-auto sm:items-center"
         >
           <FileText className="h-7 w-7 text-primary-2" aria-hidden="true" />
           <div className="leading-tight">
@@ -35,7 +35,7 @@ export function MainNav({ actions }: MainNavProps) {
           </div>
         </Link>
 
-        <nav className="flex flex-1 flex-wrap items-center gap-2">
+        <nav className="flex w-full flex-wrap items-center gap-2 sm:flex-1">
           {NAV_ITEMS.map((item) => {
             const isActive =
               pathname === item.href ||
@@ -60,7 +60,7 @@ export function MainNav({ actions }: MainNavProps) {
         </nav>
 
         {actions ? (
-          <div className="flex flex-1 items-center justify-end gap-3">
+          <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:flex-1 sm:flex-row sm:items-center sm:justify-end sm:gap-3">
             {actions}
           </div>
         ) : null}
