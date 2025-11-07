@@ -181,7 +181,35 @@ export const CleanupResponseSchema = z.object({
 export type CleanupResponse = z.infer<typeof CleanupResponseSchema>;
 
 // File validation helper
-export function validateFileUpload(file: File): { valid: boolean; error?: string; code?: ErrorCodeType } {
+const MARKDOWN_FALLBACK_MIME_TYPES = new Set([
+  '',
+  'text/plain',
+  'application/octet-stream',
+  'text/x-markdown',
+]);
+
+const EXTENSION_TO_MIME: Record<typeof ALLOWED_FILE_EXTENSIONS[number], typeof ALLOWED_MIME_TYPES[number]> = {
+  '.pdf': 'application/pdf',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+};
+
+type FileValidationSuccess = {
+  valid: true;
+  normalizedMimeType: typeof ALLOWED_MIME_TYPES[number];
+  extension: typeof ALLOWED_FILE_EXTENSIONS[number];
+};
+
+type FileValidationFailure = {
+  valid: false;
+  error: string;
+  code: ErrorCodeType;
+};
+
+export type FileValidationResult = FileValidationSuccess | FileValidationFailure;
+
+export function validateFileUpload(file: File): FileValidationResult {
   console.log('[VALIDATE_FILE]', { name: file.name, type: file.type, size: file.size });
   // Check file size
   if (file.size > MAX_FILE_SIZE) {
@@ -203,22 +231,8 @@ export function validateFileUpload(file: File): { valid: boolean; error?: string
     };
   }
 
-  // Check MIME type with proper type narrowing
-  const isAllowedMimeType = (type: string): type is typeof ALLOWED_MIME_TYPES[number] => {
-    return (ALLOWED_MIME_TYPES as readonly string[]).includes(type);
-  };
-
-  if (!isAllowedMimeType(file.type)) {
-    console.log('[VALIDATE_FILE] Invalid MIME type');
-    return {
-      valid: false,
-      error: `Unsupported file format: ${file.type}. Supported formats: PDF, DOCX, TXT, MD`,
-      code: 'UNSUPPORTED_FORMAT',
-    };
-  }
-
-  // Check file extension as additional validation
-  const extension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+  // Check file extension first (more reliable than MIME type for .md files)
+  const extension = file.name.includes('.') ? file.name.substring(file.name.lastIndexOf('.')).toLowerCase() : '';
   const isAllowedExtension = (ext: string): ext is typeof ALLOWED_FILE_EXTENSIONS[number] => {
     return (ALLOWED_FILE_EXTENSIONS as readonly string[]).includes(ext);
   };
@@ -232,8 +246,68 @@ export function validateFileUpload(file: File): { valid: boolean; error?: string
     };
   }
 
-  console.log('[VALIDATE_FILE] File is valid');
-  return { valid: true };
+  const normalizedType = (file.type || '').toLowerCase();
+  let normalizedMimeType: typeof ALLOWED_MIME_TYPES[number] | null = null;
+
+  if (extension === '.md') {
+    const allowedMarkdownTypes = new Set(['text/markdown', ...MARKDOWN_FALLBACK_MIME_TYPES]);
+    if (normalizedType && !allowedMarkdownTypes.has(normalizedType)) {
+      console.log('[VALIDATE_FILE] Invalid MIME type for markdown', { type: normalizedType });
+      return {
+        valid: false,
+        error: `Unsupported file format: ${file.type}. Supported formats: PDF, DOCX, TXT, MD`,
+        code: 'UNSUPPORTED_FORMAT',
+      };
+    }
+    normalizedMimeType = 'text/markdown';
+  } else if (extension === '.txt') {
+    if (normalizedType && normalizedType !== 'text/plain') {
+      console.log('[VALIDATE_FILE] Invalid MIME type for text file', { type: normalizedType });
+      return {
+        valid: false,
+        error: `Unsupported file format: ${file.type}. Supported formats: PDF, DOCX, TXT, MD`,
+        code: 'UNSUPPORTED_FORMAT',
+      };
+    }
+    normalizedMimeType = 'text/plain';
+  } else {
+    const expectedMime = EXTENSION_TO_MIME[extension];
+    if (!expectedMime) {
+      console.log('[VALIDATE_FILE] Missing MIME mapping for extension', { extension });
+      return {
+        valid: false,
+        error: `Unsupported file format: ${file.type}. Supported formats: PDF, DOCX, TXT, MD`,
+        code: 'UNSUPPORTED_FORMAT',
+      };
+    }
+
+    if (normalizedType && normalizedType !== expectedMime) {
+      console.log('[VALIDATE_FILE] MIME type mismatch', { type: normalizedType, expected: expectedMime });
+      return {
+        valid: false,
+        error: `Unsupported file format: ${file.type}. Supported formats: PDF, DOCX, TXT, MD`,
+        code: 'UNSUPPORTED_FORMAT',
+      };
+    }
+
+    normalizedMimeType = expectedMime;
+  }
+
+  if (!normalizedMimeType) {
+    console.log('[VALIDATE_FILE] Failed to normalize MIME type', { name: file.name });
+    return {
+      valid: false,
+      error: `Unsupported file format: ${file.type}. Supported formats: PDF, DOCX, TXT, MD`,
+      code: 'UNSUPPORTED_FORMAT',
+    };
+  }
+
+  console.log('[VALIDATE_FILE] File is valid', { normalizedMimeType, extension });
+  return {
+    valid: true,
+    normalizedMimeType,
+    extension,
+  };
 }
 
 // Generate content hash (SHA-256) from file buffer

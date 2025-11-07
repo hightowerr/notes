@@ -1,0 +1,426 @@
+openapi: 3.0.3
+info:
+  title: Task Gap Filling API
+  description: API endpoints for detecting logical gaps in task plans and generating bridging task suggestions
+  version: 1.0.0
+  contact:
+    name: AI Note Synthesiser Team
+
+servers:
+  - url: http://localhost:3000/api
+    description: Development server
+  - url: https://app.example.com/api
+    description: Production server
+
+paths:
+  /agent/suggest-gaps:
+    post:
+      summary: Detect gaps and generate bridging task suggestions
+      description: |
+        Analyzes a prioritized task plan from an agent session to detect logical gaps
+        using 4 heuristics (time, action type, dependency, skill). For each detected gap
+        with confidence ≥75%, generates 1-3 bridging tasks using AI and semantic search.
+      operationId: suggestGaps
+      tags:
+        - Agent
+        - Gap Detection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                session_id:
+                  type: string
+                  format: uuid
+                  description: Agent session ID from latest prioritization run
+                  example: "550e8400-e29b-41d4-a716-446655440000"
+              required:
+                - session_id
+            examples:
+              validRequest:
+                summary: Valid session ID
+                value:
+                  session_id: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        '200':
+          description: Suggestions generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  gaps:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Gap'
+                    description: Detected gaps with confidence ≥75%
+                  suggestions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TaskSuggestion'
+                    description: AI-generated bridging tasks (1-3 per gap)
+                  analysis_session_id:
+                    type: string
+                    format: uuid
+                    description: ID of gap analysis session for tracking
+                required:
+                  - gaps
+                  - suggestions
+                  - analysis_session_id
+              examples:
+                withGaps:
+                  summary: Gaps detected
+                  value:
+                    gaps:
+                      - predecessor_id: "task-002"
+                        successor_id: "task-005"
+                        gap_type: "action_type"
+                        confidence: 0.75
+                        indicators:
+                          time_gap: true
+                          action_type_jump: true
+                          no_dependency: true
+                          skill_jump: false
+                    suggestions:
+                      - id: "suggestion-001"
+                        task_text: "Build MVP frontend with authentication"
+                        estimated_hours: 80
+                        cognition_level: "medium"
+                        confidence_percentage: 82
+                        checked: true
+                        gap_context:
+                          predecessor_id: "task-002"
+                          successor_id: "task-005"
+                          gap_type: "action_type"
+                    analysis_session_id: "660e8400-e29b-41d4-a716-446655440000"
+                noGaps:
+                  summary: No gaps detected
+                  value:
+                    gaps: []
+                    suggestions: []
+                    analysis_session_id: "660e8400-e29b-41d4-a716-446655440000"
+        '400':
+          description: Invalid request (missing session_id or no active outcome)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                missingSessionId:
+                  summary: Missing session_id
+                  value:
+                    error: "session_id is required"
+                noOutcome:
+                  summary: No active outcome
+                  value:
+                    error: "No active outcome found. Please set an outcome first."
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Agent session not found"
+        '500':
+          description: AI generation failure or server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                aiFailure:
+                  summary: AI generation error
+                  value:
+                    error: "Unable to generate suggestions. Please try again."
+                serverError:
+                  summary: Generic server error
+                  value:
+                    error: "Internal server error"
+
+  /agent/accept-suggestions:
+    post:
+      summary: Insert accepted bridging tasks into plan
+      description: |
+        Takes user-accepted bridging tasks, validates for circular dependencies,
+        and inserts them into the prioritized task plan with updated dependency
+        relationships. Rollbacks on validation failure.
+      operationId: acceptSuggestions
+      tags:
+        - Agent
+        - Task Insertion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                analysis_session_id:
+                  type: string
+                  format: uuid
+                  description: Gap analysis session ID from suggest-gaps response
+                accepted_task_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: IDs of suggestions user accepted
+                  minItems: 1
+                  maxItems: 9
+                edited_tasks:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      task_text:
+                        type: string
+                        minLength: 10
+                        maxLength: 200
+                      estimated_hours:
+                        type: number
+                        minimum: 8
+                        maximum: 160
+                    required:
+                      - id
+                      - task_text
+                      - estimated_hours
+                  description: Edited suggestions with modified text/hours
+              required:
+                - analysis_session_id
+                - accepted_task_ids
+            examples:
+              acceptAll:
+                summary: Accept all suggestions without edits
+                value:
+                  analysis_session_id: "660e8400-e29b-41d4-a716-446655440000"
+                  accepted_task_ids:
+                    - "suggestion-001"
+                    - "suggestion-002"
+                  edited_tasks: []
+              acceptWithEdits:
+                summary: Accept with inline edits
+                value:
+                  analysis_session_id: "660e8400-e29b-41d4-a716-446655440000"
+                  accepted_task_ids:
+                    - "suggestion-001"
+                  edited_tasks:
+                    - id: "suggestion-001"
+                      task_text: "Build MVP frontend with core screens only"
+                      estimated_hours: 60
+      responses:
+        '200':
+          description: Tasks inserted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  inserted_task_ids:
+                    type: array
+                    items:
+                      type: string
+                      format: uuid
+                    description: UUIDs of newly inserted tasks
+                  updated_plan:
+                    type: object
+                    description: Refreshed task plan with new tasks and updated dependencies
+                    additionalProperties: true
+                required:
+                  - success
+                  - inserted_task_ids
+                  - updated_plan
+              example:
+                success: true
+                inserted_task_ids:
+                  - "task-003"
+                  - "task-004"
+                updated_plan:
+                  tasks:
+                    - id: "task-002"
+                      text: "Design app mockups"
+                      depends_on: ["task-001"]
+                    - id: "task-003"
+                      text: "Build MVP frontend with authentication"
+                      depends_on: ["task-002"]
+                      source: "ai_generated"
+                    - id: "task-004"
+                      text: "Implement backend API"
+                      depends_on: ["task-003"]
+                      source: "ai_generated"
+                    - id: "task-005"
+                      text: "Launch on app store"
+                      depends_on: ["task-004"]
+        '400':
+          description: Validation error (circular dependency or invalid input)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                circularDependency:
+                  summary: Circular dependency detected
+                  value:
+                    error: "Cannot insert tasks - would create circular dependency chain"
+                invalidInput:
+                  summary: Invalid task IDs
+                  value:
+                    error: "One or more accepted_task_ids not found in analysis session"
+        '404':
+          description: Analysis session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Gap analysis session not found"
+        '500':
+          description: Insertion failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Failed to insert tasks into plan"
+
+components:
+  schemas:
+    Gap:
+      type: object
+      description: Detected logical discontinuity in task sequence
+      properties:
+        predecessor_id:
+          type: string
+          format: uuid
+          description: Task ID before the gap
+        successor_id:
+          type: string
+          format: uuid
+          description: Task ID after the gap
+        gap_type:
+          type: string
+          enum: [time, action_type, skill, dependency]
+          description: Primary gap characteristic
+        confidence:
+          type: number
+          format: float
+          minimum: 0.75
+          maximum: 1.0
+          description: Composite confidence score (3+ indicators = 0.75-1.0)
+        indicators:
+          type: object
+          description: Boolean flags for each heuristic
+          properties:
+            time_gap:
+              type: boolean
+              description: Estimated hours jump >40 hours
+            action_type_jump:
+              type: boolean
+              description: Skips 2+ phases in workflow
+            no_dependency:
+              type: boolean
+              description: Successor doesn't depend on predecessor
+            skill_jump:
+              type: boolean
+              description: Different skill domains
+          required:
+            - time_gap
+            - action_type_jump
+            - no_dependency
+            - skill_jump
+      required:
+        - predecessor_id
+        - successor_id
+        - gap_type
+        - confidence
+        - indicators
+
+    TaskSuggestion:
+      type: object
+      description: User-facing bridging task suggestion
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Suggestion ID (for React keys, edits, acceptance tracking)
+        task_text:
+          type: string
+          minLength: 10
+          maxLength: 200
+          description: Task description (editable)
+          example: "Build MVP frontend with authentication"
+        estimated_hours:
+          type: number
+          format: float
+          minimum: 8
+          maximum: 160
+          description: Time estimate in hours (1-4 weeks)
+          example: 80
+        cognition_level:
+          type: string
+          enum: [low, medium, high]
+          description: Required cognitive effort level
+          example: "medium"
+        confidence_percentage:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: AI confidence as percentage
+          example: 82
+        checked:
+          type: boolean
+          description: Acceptance state (default true for opt-out UX)
+          default: true
+        gap_context:
+          type: object
+          description: Gap this suggestion fills
+          properties:
+            predecessor_id:
+              type: string
+              format: uuid
+            successor_id:
+              type: string
+              format: uuid
+            gap_type:
+              type: string
+              enum: [time, action_type, skill, dependency]
+          required:
+            - predecessor_id
+            - successor_id
+            - gap_type
+      required:
+        - id
+        - task_text
+        - estimated_hours
+        - cognition_level
+        - confidence_percentage
+        - checked
+        - gap_context
+
+    Error:
+      type: object
+      description: Standard error response
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+          example: "Invalid request"
+      required:
+        - error
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Supabase JWT token (if auth implemented)
+
+security: []  # No auth required for P0 (uses Supabase anon key)

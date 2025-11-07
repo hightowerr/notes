@@ -133,7 +133,7 @@ export function useTaskDiff(taskIds: string[], options?: TaskDiffOptions): TaskD
       timeoutRef.current = window.setTimeout(() => {
         setHighlightedIds(new Set());
         timeoutRef.current = null;
-      }, 1800);
+      }, 3000);
     } else {
       setHighlightedIds(new Set());
     }
@@ -152,7 +152,7 @@ export function useTaskDiff(taskIds: string[], options?: TaskDiffOptions): TaskD
         next.delete(taskId);
         return next;
       });
-    }, 1200);
+    }, 3000);
   };
 
   useEffect(() => {

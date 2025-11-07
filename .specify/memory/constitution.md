@@ -1,15 +1,15 @@
 <!--
 SYNC IMPACT REPORT
 ===================
-Version Change: 1.1.5 → 1.1.6
-Rationale: PATCH version bump - Updated plan-template.md version references from v1.1.4
-to v1.1.6 to maintain consistency. The plan template on lines 50 and 228 still referenced
-the outdated v1.1.4 constitution version. This is a non-semantic consistency fix triggered
-by the /constitution command validation process to ensure all templates reference the
-current constitution version.
+Version Change: 1.1.6 → 1.1.7
+Rationale: PATCH version bump - Clarifications and consistency improvements only:
+  1. Updated last amended date to 2025-11-05 (constitution review via /constitution command)
+  2. Added clarification note about Phase 5 Cloud Sync implementation status in Development Workflow
+  3. No semantic changes to principles, requirements, or governance
+  4. All existing code remains compliant without modifications
 
 Modified Principles:
-  - None (clarification and formatting improvements only)
+  - None (clarification improvements only)
 
 Added Sections:
   - None
@@ -18,10 +18,10 @@ Removed Sections:
   - None
 
 Templates Requiring Updates:
-  ✅ .specify/templates/plan-template.md - Updated version references (v1.1.4 → v1.1.6)
-  ✅ .specify/templates/tasks-template.md - No changes needed (no version references found)
-  ✅ .specify/templates/spec-template.md - No changes needed (no version references)
-  ✅ .specify/templates/agent-file-template.md - No changes needed (template placeholders only)
+  ✅ .specify/templates/plan-template.md - Version references will be updated in next /plan execution
+  ✅ .specify/templates/tasks-template.md - No version references found
+  ✅ .specify/templates/spec-template.md - No version references found
+  ✅ .specify/templates/agent-file-template.md - Template placeholders only
   ✅ CLAUDE.md - No changes needed (documents principles, not version)
   ✅ README.md - No changes needed (no constitution version references)
   ✅ .claude/SYSTEM_RULES.md - No changes needed (implementation protocol, not version-dependent)
@@ -29,6 +29,7 @@ Templates Requiring Updates:
 Follow-up TODOs:
   - Next MINOR version: Consider adding principle for AI safety/security patterns
   - Next constitution review: Validate Test-First Development exception status (automated testing resolution)
+  - Monitor Phase 5 Cloud Sync adoption and refine guidance based on operational learnings
 -->
 
 # AI Note Synthesiser Constitution
@@ -150,6 +151,14 @@ slices (backend without UI) create integration risk and delay validation.
 5. **Implementation**: Build minimum code to pass tests, following modular architecture
 6. **Validation**: Execute quickstart.md scenarios, verify performance targets, review logs
 
+**Tool Usage Note**: This project uses `pnpm` as the package manager (not `npm`).
+All dependency installation and script execution commands should use `pnpm`.
+See `CLAUDE.md` for complete development command reference.
+
+**Phase 5 Status**: Cloud Sync (Google Drive integration + text input) is
+implemented and operational. See `docs/shape-up-pitches/phase-5-cloud-sync.md`
+for architecture and `lib/services/googleDriveService.ts` for implementation.
+
 ### Code Review Gates
 All changes must verify:
 - [ ] Tests written before implementation (TDD compliance - Principle IV)
@@ -204,4 +213,4 @@ task failing the Three Laws (SEE, DO, VERIFY) is rejected and restructured.
 root for agent-specific development instructions and slice enforcement protocol.
 
 ---
-**Version**: 1.1.6 | **Ratified**: 2025-10-05 | **Last Amended**: 2025-10-31
+**Version**: 1.1.7 | **Ratified**: 2025-10-05 | **Last Amended**: 2025-11-05

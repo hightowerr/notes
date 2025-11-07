@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
@@ -21,16 +21,15 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from '@/components/ui/drawer';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
@@ -83,6 +82,13 @@ type GapDetectionModalProps = {
   acceptError: GapAcceptanceErrorInfo | null;
   generationProgress: number;
   generationDurationMs: number | null;
+  onRetryAnalysis?: () => void;
+  performanceMetrics?: {
+    detection_ms: number;
+    generation_ms: number;
+    total_ms: number;
+    search_query_count?: number;
+  } | null;
 };
 
 type TaskLookup = Record<string, string>;
@@ -278,6 +284,8 @@ function GapContent({
   onSkipExamples,
   onRetryGeneration, // T005: Manual retry for AI failures
   isAccepting,
+  editingLookup,
+  onToggleTaskEditing,
 }: {
   suggestion: GapSuggestionState;
   taskTitles: TaskLookup;
@@ -293,6 +301,8 @@ function GapContent({
   onSkipExamples: (gapId: string) => void;
   onRetryGeneration: (gapId: string) => void; // T005: Manual retry for AI failures
   isAccepting: boolean;
+  editingLookup: Record<string, boolean>;
+  onToggleTaskEditing: (gapId: string, taskId: string, next: boolean) => void;
 }) {
   const gap = suggestion.gap;
   const predecessorTitle = formatTaskTitle(gap.predecessor_task_id, taskTitles);
@@ -368,16 +378,21 @@ function GapContent({
 
       {suggestion.status === 'success' && suggestion.tasks.length > 0 && (
         <div className="space-y-3">
-          {suggestion.tasks.map(task => (
-            <BridgingTaskCard
-              key={task.id}
-              task={task}
-              checked={task.checked}
-              onCheckedChange={checked => onToggleTask(gap.id, task.id, checked)}
-              onEditTask={(updates) => onEditTask(gap.id, task.id, updates)}
-              disableEdits={isAccepting}
-            />
-          ))}
+          {suggestion.tasks.map(task => {
+            const taskKey = `${gap.id}:${task.id}`;
+            return (
+              <BridgingTaskCard
+                key={task.id}
+                task={task}
+                checked={task.checked}
+                onCheckedChange={checked => onToggleTask(gap.id, task.id, checked)}
+                onEditTask={updates => onEditTask(gap.id, task.id, updates)}
+                disableEdits={isAccepting}
+                isEditing={Boolean(editingLookup[taskKey])}
+                onToggleEdit={next => onToggleTaskEditing(gap.id, task.id, next)}
+              />
+            );
+          })}
           {suggestion.metadata && (
             <p className="text-xs text-muted-foreground">
               Semantic search context: {suggestion.metadata.search_results_count} result
@@ -393,106 +408,6 @@ function GapContent({
           <p className="text-sm text-muted-foreground">No bridging tasks suggested for this gap.</p>
         </div>
       )}
-    </div>
-  );
-}
-
-function GapNavigator({
-  currentIndex,
-  totalGaps,
-  onPrevious,
-  onNext,
-  gaps,
-  taskTitles,
-  onChange,
-  isMobile = false,
-}: {
-  currentIndex: number;
-  totalGaps: number;
-  onPrevious: () => void;
-  onNext: () => void;
-  gaps: Gap[];
-  taskTitles: TaskLookup;
-  onChange: (index: number) => void;
-  isMobile?: boolean;
-}) {
-  if (isMobile) {
-    return (
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-layer-2 px-4 py-3 shadow-sm">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onPrevious}
-          disabled={currentIndex === 0}
-          className="h-9 shrink-0"
-        >
-          <ChevronLeft className="h-4 w-4" />
-          <span className="sr-only">Previous gap</span>
-        </Button>
-        <div className="flex flex-col items-center gap-1 min-w-0 flex-1">
-          <span className="text-xs font-medium text-muted-foreground">
-            Gap {currentIndex + 1} of {totalGaps}
-          </span>
-          <span className="text-xs text-foreground truncate max-w-full">
-            {formatTaskTitle(gaps[currentIndex]?.predecessor_task_id, taskTitles)} → {formatTaskTitle(gaps[currentIndex]?.successor_task_id, taskTitles)}
-          </span>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onNext}
-          disabled={currentIndex === totalGaps - 1}
-          className="h-9 shrink-0"
-        >
-          <ChevronRight className="h-4 w-4" />
-          <span className="sr-only">Next gap</span>
-        </Button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-center gap-3">
-      <Label htmlFor="gap-selector" className="text-sm font-medium shrink-0">
-        Viewing:
-      </Label>
-      <Select
-        value={currentIndex.toString()}
-        onValueChange={(value) => onChange(parseInt(value, 10))}
-      >
-        <SelectTrigger id="gap-selector" className="w-full max-w-md">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {gaps.map((gap, index) => (
-            <SelectItem key={gap.id} value={index.toString()}>
-              Gap {index + 1}: {formatTaskTitle(gap.predecessor_task_id, taskTitles)} → {formatTaskTitle(gap.successor_task_id, taskTitles)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <div className="flex items-center gap-1 shrink-0">
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={onPrevious}
-          disabled={currentIndex === 0}
-          className="h-9 w-9"
-        >
-          <ChevronLeft className="h-4 w-4" />
-          <span className="sr-only">Previous gap</span>
-        </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={onNext}
-          disabled={currentIndex === totalGaps - 1}
-          className="h-9 w-9"
-        >
-          <ChevronRight className="h-4 w-4" />
-          <span className="sr-only">Next gap</span>
-        </Button>
-      </div>
     </div>
   );
 }
@@ -515,12 +430,37 @@ export function GapDetectionModal({
   acceptError,
   generationProgress,
   generationDurationMs,
+  onRetryAnalysis,
+  performanceMetrics,
 }: GapDetectionModalProps) {
   const [taskTitles, setTaskTitles] = useState<TaskLookup>({});
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
   const [taskFetchError, setTaskFetchError] = useState<string | null>(null);
-  const [activeGapIndex, setActiveGapIndex] = useState(0);
+  const [editingTasks, setEditingTasks] = useState<Record<string, boolean>>({});
+  const [openGapIds, setOpenGapIds] = useState<string[]>([]);
   const isDesktop = useMediaQuery('(min-width: 768px)');
+  const makeTaskKey = useCallback((gapId: string, taskId: string) => `${gapId}:${taskId}`, []);
+
+  const handleToggleTaskEditing = useCallback(
+    (gapId: string, taskId: string, next: boolean) => {
+      const key = makeTaskKey(gapId, taskId);
+      setEditingTasks(prev => {
+        if (next) {
+          if (prev[key]) {
+            return prev;
+          }
+          return { ...prev, [key]: true };
+        }
+        if (!prev[key]) {
+          return prev;
+        }
+        const copy = { ...prev };
+        delete copy[key];
+        return copy;
+      });
+    },
+    [makeTaskKey]
+  );
 
   useEffect(() => {
     if (!open || !detectionResult || detectionResult.gaps.length === 0) {
@@ -596,12 +536,75 @@ export function GapDetectionModal({
     if (!detectionResult) {
       return [];
     }
-    return detectionResult.gaps.map(gap => suggestionLookup.get(gap.id) ?? {
+
+    const sortedGaps = [...detectionResult.gaps].sort((a, b) => b.confidence - a.confidence);
+
+    return sortedGaps.map(gap => suggestionLookup.get(gap.id) ?? {
       gap,
       status: 'loading' as const,
       tasks: [],
     });
   }, [detectionResult, suggestionLookup]);
+
+  useEffect(() => {
+    if (orderedSuggestions.length === 0) {
+      setEditingTasks(prev => (Object.keys(prev).length > 0 ? {} : prev));
+      return;
+    }
+
+    const activeKeys = new Set<string>();
+    for (const suggestion of orderedSuggestions) {
+      if (suggestion.status !== 'success') {
+        continue;
+      }
+      for (const task of suggestion.tasks) {
+        activeKeys.add(makeTaskKey(suggestion.gap.id, task.id));
+      }
+    }
+
+    setEditingTasks(prev => {
+      let changed = false;
+      const next = { ...prev };
+      for (const key of Object.keys(next)) {
+        if (!activeKeys.has(key)) {
+          delete next[key];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [orderedSuggestions, makeTaskKey]);
+
+  useEffect(() => {
+    if (!isAccepting) {
+      return;
+    }
+    setEditingTasks(prev => (Object.keys(prev).length > 0 ? {} : prev));
+  }, [isAccepting]);
+
+  useEffect(() => {
+    if (!open) {
+      setOpenGapIds(prev => (prev.length === 0 ? prev : []));
+      return;
+    }
+
+    if (orderedSuggestions.length === 0) {
+      setOpenGapIds(prev => (prev.length === 0 ? prev : []));
+      return;
+    }
+
+    setOpenGapIds(prev => {
+      const validPrev = prev.filter(id => orderedSuggestions.some(suggestion => suggestion.gap.id === id));
+      if (validPrev.length > 0) {
+        if (validPrev.length === prev.length && validPrev.every((id, index) => id === prev[index])) {
+          return prev;
+        }
+        return validPrev;
+      }
+      const firstGapId = orderedSuggestions[0]?.gap.id;
+      return firstGapId ? [firstGapId] : [];
+    });
+  }, [open, orderedSuggestions]);
 
   const processedGaps = useMemo(() => {
     return orderedSuggestions.filter(suggestion => suggestion.status !== 'loading').length;
@@ -623,18 +626,124 @@ export function GapDetectionModal({
     }, 0);
   }, [orderedSuggestions]);
 
+  const suggestedTaskCount = useMemo(() => {
+    return orderedSuggestions.reduce((count, suggestion) => {
+      if (suggestion.status !== 'success') {
+        return count;
+      }
+      return count + suggestion.tasks.length;
+    }, 0);
+  }, [orderedSuggestions]);
+
+  const isAnyTaskEditing = useMemo(() => {
+    return Object.values(editingTasks).some(Boolean);
+  }, [editingTasks]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onOpenChange(false);
+        return;
+      }
+
+      if (
+        event.key === 'Enter' &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.shiftKey
+      ) {
+        const target = event.target as HTMLElement | null;
+        const tagName = target?.tagName?.toLowerCase();
+        const isTextInput =
+          target?.isContentEditable ||
+          tagName === 'input' ||
+          tagName === 'textarea' ||
+          tagName === 'select';
+        const isButtonLike =
+          tagName === 'button' ||
+          tagName === 'a' ||
+          Boolean(target?.closest('[role="button"]'));
+
+        if (isTextInput || isButtonLike || isAnyTaskEditing) {
+          return;
+        }
+
+        if (selectedCount === 0 || isAccepting) {
+          return;
+        }
+
+        event.preventDefault();
+        onAcceptSelected();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open, onOpenChange, isAnyTaskEditing, selectedCount, isAccepting, onAcceptSelected]);
+
+  const hasGaps = Boolean(detectionResult?.gaps.length);
+  const isEmptyState = detectionStatus === 'success' && !hasGaps;
+
+  const gapCount = detectionResult?.gaps.length ?? 0;
+  const modalTitle =
+    detectionStatus === 'success'
+      ? hasGaps
+        ? `${gapCount} gap${gapCount === 1 ? '' : 's'} detected · ${suggestedTaskCount} task${suggestedTaskCount === 1 ? '' : 's'} suggested`
+        : 'No gaps detected'
+      : 'Gap Analysis';
+
+  const modalDescription = (() => {
+    if (detectionStatus === 'error') {
+      return detectionError ?? 'An error occurred while analyzing your plan. Please try again.';
+    }
+    if (detectionStatus === 'success') {
+      if (!hasGaps) {
+        return 'Your plan appears complete. All tasks have a clear, logical progression.';
+      }
+      if (isGenerating) {
+        return 'Generating bridging tasks for each detected gap…';
+      }
+      return 'Review AI-generated bridging tasks grouped by gap.';
+    }
+    if (detectionStatus === 'detecting') {
+      return 'Analyzing your plan for gaps and missing work.';
+    }
+    return 'Run a gap analysis to identify missing tasks in your plan.';
+  })();
+
+  const metricsDisplay = useMemo(() => {
+    if (!performanceMetrics || detectionStatus !== 'success') {
+      return null;
+    }
+    const toSeconds = (ms: number) => (ms / 1000).toFixed(1);
+    const detectionSeconds = toSeconds(Math.max(0, performanceMetrics.detection_ms ?? 0));
+    const generationSeconds = toSeconds(Math.max(0, performanceMetrics.generation_ms ?? 0));
+    const totalSeconds = toSeconds(Math.max(0, performanceMetrics.total_ms ?? 0));
+    return `Analysis completed in ${totalSeconds}s (Detection: ${detectionSeconds}s, Generation: ${generationSeconds}s)`;
+  }, [performanceMetrics, detectionStatus]);
+
   const isDuplicateAcceptanceError = acceptError?.code === 'DUPLICATE_TASK';
-  const alertTitle = acceptError?.code ? acceptError.message : 'Unable to accept tasks';
+  const isCycleError = acceptError?.code === 'CYCLE_DETECTED';
+  const alertTitle = isCycleError
+    ? 'Circular dependency detected'
+    : acceptError?.code
+      ? acceptError.message
+      : 'Unable to accept tasks';
   const shouldShowPrimaryMessage =
-    !acceptError?.code || (acceptError?.details?.length ?? 0) === 0;
-
-  const handlePreviousGap = () => {
-    setActiveGapIndex(prev => Math.max(0, prev - 1));
-  };
-
-  const handleNextGap = () => {
-    setActiveGapIndex(prev => Math.min(orderedSuggestions.length - 1, prev + 1));
-  };
+    !acceptError?.code || (acceptError?.details?.length ?? 0) === 0 || isCycleError;
 
   const content = (
     <>
@@ -647,11 +756,34 @@ export function GapDetectionModal({
           </div>
         )}
 
-        {detectionStatus === 'error' && detectionError && (
-          <Alert variant="destructive">
-            <AlertTitle>Gap detection failed</AlertTitle>
-            <AlertDescription>{detectionError}</AlertDescription>
-          </Alert>
+        {detectionStatus === 'error' && (
+          <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-destructive/40 bg-destructive/10 px-8 py-10 text-center dark:border-red-500/30 dark:bg-red-500/10">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-destructive/20 text-destructive dark:bg-red-500/20 dark:text-red-200">
+              <AlertTriangle className="h-8 w-8" aria-hidden="true" />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-lg font-semibold text-destructive dark:text-red-200">
+                Unable to generate suggestions
+              </h3>
+              <p className="text-sm text-destructive/80 dark:text-red-100/70">
+                {detectionError ?? 'An error occurred while analyzing your plan. Please try again.'}
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-center">
+              {typeof onRetryAnalysis === 'function' && (
+                <Button onClick={() => onRetryAnalysis()} className="sm:min-w-[140px]">
+                  Try Again
+                </Button>
+              )}
+              <Button
+                variant="secondary"
+                onClick={() => onOpenChange(false)}
+                className="sm:min-w-[140px]"
+              >
+                Close
+              </Button>
+            </div>
+          </div>
         )}
 
         {detectionStatus === 'success' && detectionResult && (
@@ -664,7 +796,7 @@ export function GapDetectionModal({
             )}
 
             {/* Progress Indicator */}
-            {detectionResult.gaps.length > 0 && (
+            {hasGaps && (
               <GapProgressIndicator
                 totalGaps={detectionResult.gaps.length}
                 processedGaps={processedGaps}
@@ -675,44 +807,91 @@ export function GapDetectionModal({
               />
             )}
 
-            {detectionResult.gaps.length === 0 ? (
-              <div className="rounded-lg border border-border/70 bg-muted/30 px-6 py-8 text-center">
-                <p className="text-sm font-medium text-muted-foreground">
-                  Your plan is complete — no gaps detected between consecutive tasks.
-                </p>
+            {!hasGaps ? (
+              <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-emerald-300/50 bg-emerald-100/30 px-8 py-10 text-center dark:border-emerald-300/20 dark:bg-emerald-500/10">
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-700 dark:bg-emerald-400/20 dark:text-emerald-200">
+                  <CheckCircle className="h-8 w-8" aria-hidden="true" />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-lg font-semibold text-emerald-800 dark:text-emerald-200">
+                    No gaps detected
+                  </h3>
+                  <p className="text-sm text-emerald-900/80 dark:text-emerald-100/70">
+                    Your plan appears complete. All tasks have a clear, logical progression.
+                  </p>
+                </div>
+                <Button onClick={() => onOpenChange(false)} size="sm">
+                  Close
+                </Button>
               </div>
             ) : (
-              <div className="space-y-4">
-                {/* Gap Navigator */}
-                <GapNavigator
-                  currentIndex={activeGapIndex}
-                  totalGaps={orderedSuggestions.length}
-                  onPrevious={handlePreviousGap}
-                  onNext={handleNextGap}
-                  gaps={detectionResult.gaps}
-                  taskTitles={taskTitles}
-                  onChange={setActiveGapIndex}
-                  isMobile={!isDesktop}
-                />
+              <Accordion
+                type="multiple"
+                value={openGapIds}
+                onValueChange={value => setOpenGapIds(value)}
+                className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border/60 bg-layer-2"
+              >
+                {orderedSuggestions.map((suggestion, index) => {
+                  const { gap } = suggestion;
+                  const predecessorTitle = formatTaskTitle(gap.predecessor_task_id, taskTitles);
+                  const successorTitle = formatTaskTitle(gap.successor_task_id, taskTitles);
+                  const confidencePercent = Math.round(gap.confidence * 100);
 
-                {/* Gap Content */}
-                <div className="min-h-[300px]">
-                  {orderedSuggestions[activeGapIndex] && (
-                    <GapContent
-                      suggestion={orderedSuggestions[activeGapIndex]}
-                      taskTitles={taskTitles}
-                      isLoadingTasks={isLoadingTasks}
-                      isGenerating={isGenerating}
-                      onToggleTask={onToggleTask}
-                      onEditTask={onEditTask}
-                      onRetryWithExamples={onRetryWithExamples}
-                      onSkipExamples={onSkipExamples}
-                      onRetryGeneration={onRetryGeneration}
-                      isAccepting={isAccepting}
-                    />
-                  )}
-                </div>
-              </div>
+                  const statusSummary = (() => {
+                    if (suggestion.status === 'loading') {
+                      return 'Generating suggestions…';
+                    }
+                    if (suggestion.status === 'error') {
+                      return 'Generation failed';
+                    }
+                    if (suggestion.status === 'requires_examples') {
+                      return 'Provide manual examples to continue';
+                    }
+                    const taskCount = suggestion.tasks.length;
+                    const taskLabel = taskCount === 1 ? 'task' : 'tasks';
+                    return `${taskCount} ${taskLabel} suggested`;
+                  })();
+
+                  const indicatorCount = Object.values(gap.indicators).filter(Boolean).length;
+
+                  return (
+                    <AccordionItem key={gap.id} value={gap.id}>
+                      <AccordionTrigger className="px-4">
+                        <div className="flex w-full flex-col gap-1 text-left">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-sm font-semibold text-foreground">
+                              Gap {index + 1}: "{predecessorTitle}" → "{successorTitle}"
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            <span>{confidencePercent}% confidence</span>
+                            <span aria-hidden="true">•</span>
+                            <span>{indicatorCount}/4 indicators triggered</span>
+                            <span aria-hidden="true">•</span>
+                            <span>{statusSummary}</span>
+                          </div>
+                        </div>
+                      </AccordionTrigger>
+                      <AccordionContent className="px-4 pt-0">
+                        <GapContent
+                          suggestion={suggestion}
+                          taskTitles={taskTitles}
+                          isLoadingTasks={isLoadingTasks}
+                          isGenerating={isGenerating}
+                          onToggleTask={onToggleTask}
+                          onEditTask={onEditTask}
+                          onRetryWithExamples={onRetryWithExamples}
+                          onSkipExamples={onSkipExamples}
+                          onRetryGeneration={onRetryGeneration}
+                          isAccepting={isAccepting}
+                          editingLookup={editingTasks}
+                          onToggleTaskEditing={handleToggleTaskEditing}
+                        />
+                      </AccordionContent>
+                    </AccordionItem>
+                  );
+                })}
+              </Accordion>
             )}
           </div>
         )}
@@ -722,12 +901,23 @@ export function GapDetectionModal({
 
   const footer = (
     <div className="space-y-3">
-      {acceptError && (
+      {metricsDisplay && (
+        <div className="text-xs text-muted-foreground" aria-live="polite">
+          {metricsDisplay}
+        </div>
+      )}
+      {hasGaps && acceptError && (
         <Alert variant="destructive">
           <AlertTitle>{alertTitle}</AlertTitle>
           <AlertDescription>
             <div className="space-y-2">
-              {shouldShowPrimaryMessage && <p>{acceptError.message}</p>}
+              {shouldShowPrimaryMessage && (
+                <p>
+                  {isCycleError
+                    ? 'Accepting the selected tasks would create a circular dependency in your plan. Adjust your selection or update existing relationships before trying again.'
+                    : acceptError.message}
+                </p>
+              )}
               {acceptError.details && acceptError.details.length > 0 && (
                 <ul className="list-disc space-y-1 pl-5 text-sm">
                   {acceptError.details.map((detail, index) => (
@@ -744,29 +934,34 @@ export function GapDetectionModal({
           </AlertDescription>
         </Alert>
       )}
-      <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-sm text-muted-foreground" aria-live="polite" aria-atomic="true">
-          {detectionResult?.gaps.length
-            ? `${selectedCount} task${selectedCount === 1 ? '' : 's'} selected`
-            : null}
+      {hasGaps ? (
+        <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm text-muted-foreground" aria-live="polite" aria-atomic="true">
+            {`${selectedCount} task${selectedCount === 1 ? '' : 's'} selected`}
+          </div>
+          <div className="flex items-center justify-end gap-3">
+            <Button
+              variant="secondary"
+              onClick={() => onOpenChange(false)}
+              disabled={isAccepting}
+            >
+              Cancel
+            </Button>
+            <div className="flex flex-col items-end gap-1">
+              <Button
+                onClick={onAcceptSelected}
+                disabled={isAccepting || selectedCount === 0}
+              >
+                {isAccepting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {isAccepting ? `Accepting ${selectedCount}…` : `Accept Selected (${selectedCount})`}
+              </Button>
+              {selectedCount > 0 && !isAccepting && (
+                <span className="text-xs text-muted-foreground">Press Enter to accept</span>
+              )}
+            </div>
+          </div>
         </div>
-        <div className="flex items-center justify-end gap-3">
-          <Button
-            variant="secondary"
-            onClick={() => onOpenChange(false)}
-            disabled={isAccepting}
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={onAcceptSelected}
-            disabled={isAccepting || selectedCount === 0}
-          >
-            {isAccepting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {isAccepting ? 'Accepting…' : 'Accept Selected'}
-          </Button>
-        </div>
-      </div>
+      ) : null}
     </div>
   );
 
@@ -775,10 +970,8 @@ export function GapDetectionModal({
       <Drawer open={open} onOpenChange={onOpenChange}>
         <DrawerContent className="max-h-[85vh]">
           <DrawerHeader>
-            <DrawerTitle>Gap Analysis</DrawerTitle>
-            <DrawerDescription>
-              Review AI-generated tasks to bridge gaps in your plan.
-            </DrawerDescription>
+            <DrawerTitle>{modalTitle}</DrawerTitle>
+            <DrawerDescription>{modalDescription}</DrawerDescription>
           </DrawerHeader>
           <div className="px-4 pb-4 overflow-y-auto">
             <ScrollArea className="h-full max-h-[calc(85vh-200px)]">
@@ -797,10 +990,8 @@ export function GapDetectionModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col p-0">
         <DialogHeader className="px-6 pt-6 pb-4 shrink-0 border-b border-border/60">
-          <DialogTitle>Gap Analysis</DialogTitle>
-          <DialogDescription>
-            Detect missing tasks between consecutive steps and review AI-generated bridging suggestions.
-          </DialogDescription>
+          <DialogTitle>{modalTitle}</DialogTitle>
+          <DialogDescription>{modalDescription}</DialogDescription>
         </DialogHeader>
         <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
           {content}

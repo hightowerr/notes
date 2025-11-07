@@ -754,6 +754,7 @@ export function TaskList({
         dependencyLinks: buildDependencyLinks(node.dependencies, priorityState.ranks),
         displayOrder: index + 1,
         checked: priorityState.statuses[taskId] === 'completed',
+        isAiGenerated: Boolean(node.manualOverride),
       };
     })
     .filter(Boolean) as Array<{
@@ -763,6 +764,7 @@ export function TaskList({
       dependencyLinks: ReturnType<typeof buildDependencyLinks>;
       displayOrder: number;
       checked: boolean;
+      isAiGenerated: boolean;
     }>;
 
   const completedTasks = useMemo(
@@ -965,6 +967,7 @@ export function TaskList({
                     dependencyLinks={task.dependencyLinks}
                     movement={task.movement}
                     checked={task.checked}
+                    isAiGenerated={task.isAiGenerated}
                     isSelected={selectedTaskId === task.id && isDrawerOpen}
                     isHighlighted={highlightedIds.has(task.id)}
                     onSelect={handleSelectTask}

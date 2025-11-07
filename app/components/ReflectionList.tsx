@@ -3,7 +3,7 @@
 import type { ReflectionWithWeight } from '@/lib/schemas/reflectionSchema';
 import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Trash2 } from 'lucide-react';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -11,14 +11,18 @@ interface ReflectionListProps {
   reflections: ReflectionWithWeight[];
   isLoading?: boolean;
   onToggle?: (reflectionId: string, isActive: boolean) => void;
+  onDelete?: (reflectionId: string) => void;
   pendingIds?: Set<string>;
+  deletingIds?: Set<string>;
 }
 
 export function ReflectionList({
   reflections,
   isLoading,
   onToggle,
+  onDelete,
   pendingIds,
+  deletingIds,
 }: ReflectionListProps) {
   if (isLoading) {
     return (
@@ -34,22 +38,35 @@ export function ReflectionList({
 
   if (reflections.length === 0) {
     return (
-      <div className="space-y-4 py-8 text-center">
-        <p className="text-2xl">💭</p>
-        <div className="space-y-2">
-          <p className="font-medium text-text-heading">Add your first reflection</p>
-          <p className="mx-auto max-w-xs text-sm text-text-muted">
-            Quick capture of your current context:
+      <div className="space-y-6 py-8 px-4">
+        <div className="text-center space-y-2">
+          <p className="text-4xl" role="img" aria-label="Thinking bubble">💭</p>
+          <h3 className="font-semibold text-text-heading">No reflections yet</h3>
+          <p className="text-sm text-text-muted max-w-xs mx-auto">
+            Capture your current context to help AI prioritize tasks effectively.
           </p>
-          <ul className="mx-auto max-w-xs list-inside list-disc space-y-1 text-left text-sm text-text-muted">
-            <li>Energy levels</li>
-            <li>Time constraints</li>
-            <li>Current blockers</li>
-            <li>Momentum state</li>
+        </div>
+
+        <div className="bg-info-bg rounded-lg p-4 space-y-3 shadow-2layer-sm">
+          <p className="text-xs font-medium text-info-text">Examples to get started:</p>
+          <ul className="space-y-2 text-sm">
+            <li className="flex items-start gap-2">
+              <span className="text-base" role="img" aria-label="Battery">🔋</span>
+              <span className="text-text-body flex-1">&quot;High energy after exercise, ready for complex tasks&quot;</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-base" role="img" aria-label="Clock">⏱️</span>
+              <span className="text-text-body flex-1">&quot;Only 30 mins before meeting, need quick wins&quot;</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-base" role="img" aria-label="Roadblock">🚧</span>
+              <span className="text-text-body flex-1">&quot;Blocked on design review, focusing on backend work&quot;</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-base" role="img" aria-label="Target">🎯</span>
+              <span className="text-text-body flex-1">&quot;Deep work mode, tackling the hardest problem first&quot;</span>
+            </li>
           </ul>
-          <p className="mx-auto mt-3 max-w-xs text-xs italic text-text-muted">
-            Example: &quot;Feeling energized after client win, ready to tackle hard problems&quot;
-          </p>
         </div>
       </div>
     );
@@ -66,33 +83,57 @@ export function ReflectionList({
 
       <div className="space-y-2">
         {reflections.map((reflection) => {
-          const opacity = Math.max(0.4, reflection.weight);
           const isActive =
             typeof reflection.is_active_for_prioritization === 'boolean'
               ? reflection.is_active_for_prioritization
               : true;
           const isPending = pendingIds?.has(reflection.id) ?? false;
+          const isDeleting = deletingIds?.has(reflection.id) ?? false;
           const canToggle = UUID_PATTERN.test(reflection.id);
+          const canDelete = UUID_PATTERN.test(reflection.id);
 
           return (
             <div
               key={reflection.id}
               className={cn(
-                'rounded-lg border px-3 py-2 transition-all hover:shadow-2layer-sm',
-                isActive ? 'border-border bg-bg-layer-3' : 'border-dashed border-border/60 bg-muted/30'
+                'rounded-lg px-4 py-3 transition-all',
+                isActive
+                  ? 'bg-bg-layer-3 shadow-2layer-sm hover:shadow-2layer-md hover:bg-bg-layer-4'
+                  : 'bg-info-bg shadow-2layer-sm opacity-70',
+                isDeleting && 'opacity-50'
               )}
-              style={{ opacity }}
+              tabIndex={0}
+              role="article"
+              aria-label={`Reflection: ${reflection.text}`}
             >
               <div className="flex items-start justify-between gap-3">
-                <p className="text-sm leading-relaxed text-text-body">{reflection.text}</p>
-                <div className="flex flex-col items-end gap-1">
+                <p className="text-sm leading-relaxed text-text-body flex-1 break-words">{reflection.text}</p>
+                <div className="flex items-start gap-2 flex-shrink-0">
+                  {/* Delete button */}
+                  {canDelete && (
+                    <button
+                      onClick={() => onDelete?.(reflection.id)}
+                      disabled={isDeleting || isPending}
+                      className="p-1.5 hover:bg-destructive-bg rounded transition-all disabled:opacity-50 disabled:cursor-not-allowed group"
+                      aria-label={`Delete reflection "${reflection.text}"`}
+                    >
+                      {isDeleting ? (
+                        <Loader2 className="h-4 w-4 text-destructive-text animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4 text-text-muted group-hover:text-destructive-text" />
+                      )}
+                    </button>
+                  )}
+
+                  {/* Toggle switch */}
+                  <div className="flex flex-col items-end gap-1">
                     <Switch
                       checked={isActive}
                       onCheckedChange={(checked) => {
                         void onToggle?.(reflection.id, checked);
                       }}
                       aria-label={`Toggle reflection "${reflection.text}"`}
-                      disabled={isPending || !canToggle}
+                      disabled={isPending || !canToggle || isDeleting}
                     />
                     <span className="text-[11px] uppercase tracking-wide text-text-muted">
                       {isPending ? (
@@ -106,11 +147,11 @@ export function ReflectionList({
                         'View only'
                       )}
                     </span>
+                  </div>
                 </div>
               </div>
-              <div className="mt-2 flex items-center justify-between text-xs text-text-muted">
-                <span>{reflection.relative_time}</span>
-                <span>weight: {reflection.weight.toFixed(2)}</span>
+              <div className="mt-2">
+                <span className="text-xs text-text-muted">{reflection.relative_time}</span>
               </div>
             </div>
           );

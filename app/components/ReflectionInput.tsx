@@ -116,12 +116,20 @@ export function ReflectionInput({ onReflectionAdded, onMobileClose, onMobileReop
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      e.preventDefault();
+      void handleSubmit(e as unknown as React.FormEvent);
+    }
+  };
+
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
       <div className="relative">
         <textarea
           value={text}
           onChange={handleChange}
+          onKeyDown={handleKeyDown}
           maxLength={500} // Hard limit at 500
           placeholder="What's your current context? (energy level, constraints, blockers, momentum...)"
           className="w-full h-32 px-4 py-3 bg-bg-layer-3 text-text-body rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary-3 transition-all"

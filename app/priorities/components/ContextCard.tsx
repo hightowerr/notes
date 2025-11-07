@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, MessageSquare, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronUp, Loader2, MessageSquare, RefreshCw } from 'lucide-react';
 import type { ReflectionWithWeight } from '@/lib/schemas/reflectionSchema';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -53,6 +53,8 @@ const prepareReflections = (entries: ReflectionWithWeight[]): ReflectionWithLoca
     }));
 };
 
+const SHOULD_CLAMP_CHARACTER_COUNT = 220;
+
 export function ContextCard({
   reflections,
   isLoading,
@@ -71,6 +73,7 @@ export function ContextCard({
     () => prepareReflections(reflections)
   );
   const [pendingToggleIds, setPendingToggleIds] = useState<Set<string>>(new Set());
+  const [expandedReflectionIds, setExpandedReflectionIds] = useState<string[]>([]);
   const disableToggles = Boolean(togglesDisabled);
   const disabledMessage = toggleDisabledLabel ?? 'Baseline plan too old. Run a full analysis to adjust context.';
   const showExpiredBanner = Boolean(isBaselineExpired);
@@ -85,6 +88,7 @@ export function ContextCard({
 
   useEffect(() => {
     setLocalReflections(prepareReflections(reflections));
+    setExpandedReflectionIds((prev) => prev.filter((id) => reflections.some((reflection) => reflection.id === id)));
   }, [reflections]);
 
   const setTogglePending = useCallback((reflectionId: string, pending: boolean) => {
@@ -174,6 +178,18 @@ export function ContextCard({
   }, [debouncedActiveReflections, onActiveReflectionsChange]);
 
   const hasReflections = localReflections.length > 0;
+  const expandedReflectionSet = useMemo(() => new Set(expandedReflectionIds), [expandedReflectionIds]);
+  const activeReflections = localReflections.filter((reflection) => reflection.is_active_for_prioritization);
+  const inactiveReflections = localReflections.filter((reflection) => !reflection.is_active_for_prioritization);
+
+  const toggleExpanded = useCallback((reflectionId: string) => {
+    setExpandedReflectionIds((prev) => {
+      if (prev.includes(reflectionId)) {
+        return prev.filter((id) => id !== reflectionId);
+      }
+      return [...prev, reflectionId];
+    });
+  }, []);
 
   return (
     <Card className="border-border/60 shadow-1layer-sm">
@@ -259,16 +275,31 @@ export function ContextCard({
             </div>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-5">
             {disableToggles && !showExpiredBanner && (
               <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
                 {disabledMessage}
               </div>
             )}
 
-            {localReflections.map((reflection) => {
+            {(activeReflections.length > 0 ? [{ label: 'Active for prioritization', reflections: activeReflections }] : [])
+              .concat(inactiveReflections.length > 0 ? [{ label: 'Available to reuse', reflections: inactiveReflections }] : [])
+              .map((group) => (
+                <div key={group.label} className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {group.label}
+                    </h3>
+                    <span className="text-xs text-muted-foreground">
+                      {group.reflections.length} {group.reflections.length === 1 ? 'entry' : 'entries'}
+                    </span>
+                  </div>
+                  <div className="space-y-3">
+                    {group.reflections.map((reflection) => {
               const isPending = pendingToggleIds.has(reflection.id);
               const canToggle = UUID_PATTERN.test(reflection.id);
+              const isExpanded = expandedReflectionSet.has(reflection.id);
+              const shouldClamp = !isExpanded && reflection.text.length > SHOULD_CLAMP_CHARACTER_COUNT;
 
               return (
                 <div
@@ -277,12 +308,19 @@ export function ContextCard({
                     'rounded-lg border px-4 py-3 shadow-sm transition-all',
                     reflection.is_active_for_prioritization
                       ? 'border-border-subtle bg-background'
-                      : 'border-dashed border-border/60 bg-muted/30 opacity-75'
+                      : 'border-dashed border-border/60 bg-muted/40'
                   )}
                 >
-                  <div className="flex items-start justify-between gap-4">
-                    <p className="text-sm text-foreground leading-relaxed">{reflection.text}</p>
-                    <div className="flex flex-col items-end gap-1">
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-start justify-between gap-4">
+                      <p
+                        className={cn(
+                          'text-sm leading-relaxed text-foreground',
+                          shouldClamp && 'line-clamp-3'
+                        )}
+                      >
+                        {reflection.text}
+                      </p>
                       <Switch
                         checked={reflection.is_active_for_prioritization}
                         onCheckedChange={(checked) => {
@@ -291,33 +329,67 @@ export function ContextCard({
                         aria-label={`Toggle reflection "${reflection.text}"`}
                         disabled={disableToggles || isPending || !canToggle}
                       />
-                      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                        {disableToggles ? (
-                          'Locked'
-                        ) : isPending ? (
-                          <span className="flex items-center gap-1 text-muted-foreground">
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                            Saving…
-                          </span>
-                        ) : canToggle ? (
-                          reflection.is_active_for_prioritization ? 'Active' : 'Inactive'
-                        ) : (
-                          'View only'
-                        )}
-                      </span>
                     </div>
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <span>{reflection.relative_time}</span>
-                    {typeof reflection.recency_weight === 'number' && (
-                      <Badge variant="outline" className="border-primary/30 text-primary">
-                        Recency&nbsp;{reflection.recency_weight.toFixed(2)}
-                      </Badge>
+
+                    {(shouldClamp || expandedReflectionSet.has(reflection.id)) && reflection.text.length > SHOULD_CLAMP_CHARACTER_COUNT && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-fit px-2 text-xs text-muted-foreground"
+                        onClick={() => toggleExpanded(reflection.id)}
+                      >
+                        {isExpanded ? (
+                          <>
+                            Show less
+                            <ChevronUp className="ml-1 h-3.5 w-3.5" />
+                          </>
+                        ) : (
+                          <>
+                            Show more
+                            <ChevronDown className="ml-1 h-3.5 w-3.5" />
+                          </>
+                        )}
+                      </Button>
                     )}
+
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span>{reflection.relative_time}</span>
+                      {typeof reflection.recency_weight === 'number' && (
+                        <Badge variant="outline" className="border-primary/30 text-primary">
+                          Recency&nbsp;{reflection.recency_weight.toFixed(2)}
+                        </Badge>
+                      )}
+                      {disableToggles ? (
+                        <Badge variant="outline" className="border-muted-foreground/30 text-muted-foreground">
+                          Locked while baseline is stale
+                        </Badge>
+                      ) : isPending ? (
+                        <span className="flex items-center gap-1 text-muted-foreground">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          Saving…
+                        </span>
+                      ) : !canToggle ? (
+                        <Badge variant="secondary" className="bg-muted/80 text-muted-foreground">
+                          View only
+                        </Badge>
+                      ) : reflection.is_active_for_prioritization ? (
+                        <Badge variant="secondary" className="bg-primary/10 text-primary">
+                          Included in analysis
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="border-border-subtle text-muted-foreground">
+                          Not included
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
-            })}
+                    })}
+                  </div>
+                </div>
+              ))}
           </div>
         )}
       </CardContent>

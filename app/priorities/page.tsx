@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Loader2, ExternalLink, RefreshCw } from 'lucide-react';
+import { Loader2, ExternalLink, RefreshCw, Lightbulb } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -15,7 +15,7 @@ import { ContextCard } from '@/app/priorities/components/ContextCard';
 import { ReflectionPanel } from '@/app/components/ReflectionPanel';
 import { prioritizedPlanSchema } from '@/lib/schemas/prioritizedPlanSchema';
 import { executionMetadataSchema } from '@/lib/schemas/executionMetadataSchema';
-import type { Gap, GapDetectionResponse } from '@/lib/schemas/gapSchema';
+import { gapDetectionResponseSchema, type GapDetectionResponse } from '@/lib/schemas/gapSchema';
 import type { BridgingTask } from '@/lib/schemas/bridgingTaskSchema';
 import { reflectionWithWeightSchema } from '@/lib/schemas/reflectionSchema';
 import type { ExecutionMetadata, PrioritizedTaskPlan } from '@/lib/types/agent';
@@ -31,6 +31,10 @@ import {
 } from '@/app/priorities/components/GapDetectionModal';
 import { useReflectionShortcut } from '@/lib/hooks/useReflectionShortcut';
 import { toast } from 'sonner';
+import {
+  integrateAcceptedTasksIntoPlan,
+  type AcceptedSuggestionForPlan,
+} from '@/lib/services/planIntegration';
 
 const DEFAULT_USER_ID = 'default-user';
 const POLL_INTERVAL_MS = 2000;
@@ -196,130 +200,6 @@ const normalizeReflection = (raw: unknown, index: number): ReflectionWithWeight 
   return null;
 };
 
-type AcceptedSuggestionForPlan = {
-  task: BridgingTask;
-  gap: Gap;
-  finalText: string;
-  finalHours: number;
-};
-
-function integrateAcceptedTasksIntoPlan(
-  plan: PrioritizedTaskPlan,
-  accepted: AcceptedSuggestionForPlan[]
-): PrioritizedTaskPlan {
-  if (accepted.length === 0) {
-    return plan;
-  }
-
-  const nextPlan: PrioritizedTaskPlan = JSON.parse(JSON.stringify(plan));
-
-  const seenOrder = new Set<string>();
-  accepted.forEach(entry => {
-    const { task, gap } = entry;
-    const newTaskId = task.id;
-    const predecessorIndex = nextPlan.ordered_task_ids.indexOf(gap.predecessor_task_id);
-    const successorIndex = nextPlan.ordered_task_ids.indexOf(gap.successor_task_id);
-    let insertIndex = successorIndex;
-
-    if (insertIndex === -1 && predecessorIndex !== -1) {
-      insertIndex = predecessorIndex + 1;
-    }
-    if (insertIndex === -1) {
-      insertIndex = nextPlan.ordered_task_ids.length;
-    }
-
-    nextPlan.ordered_task_ids.splice(insertIndex, 0, newTaskId);
-    seenOrder.add(newTaskId);
-  });
-
-  // Ensure ordered_task_ids remains unique while preserving new ordering
-  const dedupedOrder: string[] = [];
-  const encountered = new Set<string>();
-  nextPlan.ordered_task_ids.forEach(id => {
-    if (!encountered.has(id)) {
-      dedupedOrder.push(id);
-      encountered.add(id);
-    }
-  });
-  nextPlan.ordered_task_ids = dedupedOrder;
-
-  nextPlan.dependencies ??= [];
-  accepted.forEach(entry => {
-    const { task, gap } = entry;
-    const dependencyCandidates = [
-      { source: gap.predecessor_task_id, target: task.id },
-      { source: task.id, target: gap.successor_task_id },
-    ];
-
-    dependencyCandidates.forEach(({ source, target }) => {
-      const alreadyExists = nextPlan.dependencies.some(
-        dependency =>
-          dependency.source_task_id === source && dependency.target_task_id === target
-      );
-      if (!alreadyExists) {
-        nextPlan.dependencies.push({
-          source_task_id: source,
-          target_task_id: target,
-          relationship_type: 'prerequisite',
-          confidence: task.confidence,
-          detection_method: 'stored_relationship',
-        });
-      }
-    });
-  });
-
-  nextPlan.confidence_scores ??= {};
-  accepted.forEach(entry => {
-    nextPlan.confidence_scores[entry.task.id] = entry.task.confidence;
-  });
-
-  nextPlan.execution_waves ??= [];
-  if (nextPlan.execution_waves.length === 0) {
-    nextPlan.execution_waves.push({
-      wave_number: 1,
-      task_ids: [],
-      parallel_execution: false,
-      estimated_duration_hours: null,
-    });
-  }
-
-  accepted.forEach(entry => {
-    const { task, gap } = entry;
-    const targetWaveIndex = nextPlan.execution_waves.findIndex(wave =>
-      wave.task_ids.includes(gap.successor_task_id)
-    );
-    if (targetWaveIndex !== -1) {
-      const targetWave = nextPlan.execution_waves[targetWaveIndex];
-      const successorPosition = targetWave.task_ids.indexOf(gap.successor_task_id);
-      const insertionIndex = successorPosition === -1 ? targetWave.task_ids.length : successorPosition;
-      targetWave.task_ids.splice(insertionIndex, 0, task.id);
-    } else {
-      const lastWave = nextPlan.execution_waves[nextPlan.execution_waves.length - 1];
-      if (!lastWave.task_ids.includes(task.id)) {
-        lastWave.task_ids.push(task.id);
-      }
-    }
-  });
-
-  nextPlan.task_annotations ??= [];
-  accepted.forEach(entry => {
-    const annotationExists = nextPlan.task_annotations?.some(
-      annotation => annotation.task_id === entry.task.id
-    );
-    if (!annotationExists) {
-      nextPlan.task_annotations?.push({
-        task_id: entry.task.id,
-        state: 'active',
-        reasoning: entry.task.reasoning,
-        dependency_notes: `Estimated effort: ${entry.finalHours} hours`,
-        manual_override: true,
-      });
-    }
-  });
-
-  return nextPlan;
-}
-
 type OutcomeResponse = {
   id: string;
   assembled_text: string;
@@ -377,6 +257,14 @@ export default function TaskPrioritiesPage() {
   const [gapAnalysisRunId, setGapAnalysisRunId] = useState(0);
   const [isAcceptingGapTasks, setIsAcceptingGapTasks] = useState(false);
   const [gapAcceptanceError, setGapAcceptanceError] = useState<GapAcceptanceErrorInfo | null>(null);
+  const [gapAnalysisSessionId, setGapAnalysisSessionId] = useState<string | null>(null);
+  const [isSuggestingGaps, setIsSuggestingGaps] = useState(false);
+  const [gapPerformanceMetrics, setGapPerformanceMetrics] = useState<{
+    detection_ms: number;
+    generation_ms: number;
+    total_ms: number;
+    search_query_count?: number;
+  } | null>(null);
 
   // T005: Reasoning trace discoverability
   const [hasSeenTrace, setHasSeenTrace] = useSessionStorage('trace-first-visit', false);
@@ -387,6 +275,8 @@ export default function TaskPrioritiesPage() {
   const reflectionsFetchRef = useRef<{ hasFetched: boolean }>({ hasFetched: false });
   const lastActiveReflectionIdsRef = useRef<string[]>([]);
   const adjustmentControllerRef = useRef<AbortController | null>(null);
+  const preloadedSuggestionsRef = useRef<Record<string, GapSuggestionState> | null>(null);
+  const preloadedGenerationInfoRef = useRef<{ completed: number; durationMs: number } | null>(null);
 
   // Fetch active outcome on mount
   useEffect(() => {
@@ -951,8 +841,26 @@ export default function TaskPrioritiesPage() {
     return hasPlan ? 'Recalculate priorities' : 'Analyze Tasks';
   };
 
-  const isDetectingGaps = gapAnalysisStatus === 'detecting';
   const isGeneratingGaps = gapGenerationRunning;
+
+  const analyzeButtonHelper = useMemo(() => {
+    if (sessionStatus === 'running') {
+      return 'Task analysis is currently running. You can monitor progress below.';
+    }
+    if (isTriggering) {
+      return 'Initializing prioritization… this only takes a moment.';
+    }
+    if (isInstantAdjusting) {
+      return 'Finish applying instant adjustments before running a new analysis.';
+    }
+    if (!activeOutcome && !outcomeLoading) {
+      return 'Create an active outcome to unlock prioritization.';
+    }
+    if (outcomeLoading) {
+      return 'Loading your active outcome…';
+    }
+    return null;
+  }, [activeOutcome, outcomeLoading, isInstantAdjusting, isTriggering, sessionStatus]);
 
   const handleDiffSummary = useCallback(
     ({ hasChanges, isInitial }: { hasChanges: boolean; isInitial: boolean }) => {
@@ -966,25 +874,32 @@ export default function TaskPrioritiesPage() {
   );
 
   const handleDetectGaps = useCallback(async () => {
-    if (!prioritizedPlan) {
+    const openModalWithError = (message: string) => {
       setGapAnalysisStatus('error');
-      setGapAnalysisError('Run prioritization to generate a task plan before detecting gaps.');
+      setGapAnalysisError(message);
       setGapAnalysisResult(null);
       setGapSuggestions({});
       setGapGenerationRunning(false);
+      setGapGenerationProgress(0);
+      setGapGenerationDurationMs(null);
+      setGapAcceptanceError(null);
+      setIsAcceptingGapTasks(false);
       setIsGapModalOpen(true);
+    };
+
+    if (!prioritizedPlan) {
+      openModalWithError('Run prioritization to generate a task plan before detecting gaps.');
+      return;
+    }
+
+    if (!currentSessionId) {
+      openModalWithError('Active prioritization session not found. Run the analysis again to detect gaps.');
       return;
     }
 
     const uniqueTaskIds = Array.from(new Set(prioritizedPlan.ordered_task_ids));
-
     if (uniqueTaskIds.length < 2) {
-      setGapAnalysisStatus('error');
-      setGapAnalysisError('At least two tasks are required to analyze gaps.');
-      setGapAnalysisResult(null);
-      setGapSuggestions({});
-      setGapGenerationRunning(false);
-      setIsGapModalOpen(true);
+      openModalWithError('At least two tasks are required to analyze gaps.');
       return;
     }
 
@@ -995,17 +910,21 @@ export default function TaskPrioritiesPage() {
     setGapGenerationRunning(false);
     setGapGenerationProgress(0);
     setGapGenerationDurationMs(null);
-    setIsGapModalOpen(true);
     setGapAcceptanceError(null);
     setIsAcceptingGapTasks(false);
+    setIsGapModalOpen(true);
+    setIsSuggestingGaps(true);
+    setGapPerformanceMetrics(null);
 
     try {
-      const response = await fetch('/api/gaps/detect', {
+      const response = await fetch('/api/agent/suggest-gaps', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ task_ids: uniqueTaskIds }),
+        body: JSON.stringify({
+          session_id: currentSessionId,
+        }),
       });
 
       if (!response.ok) {
@@ -1017,17 +936,166 @@ export default function TaskPrioritiesPage() {
         throw new Error(message);
       }
 
-      const data: GapDetectionResponse = await response.json();
-      setGapAnalysisResult(data);
+      const payload = await response.json();
+      const parsedResult = gapDetectionResponseSchema.safeParse({
+        gaps: payload.gaps,
+        metadata: payload.metadata,
+      });
+
+      if (!parsedResult.success) {
+        throw new Error('Invalid response from gap analysis service.');
+      }
+
+      const detectionData = parsedResult.data;
+
+      if (typeof payload.analysis_session_id === 'string') {
+        setGapAnalysisSessionId(payload.analysis_session_id);
+      } else {
+        setGapAnalysisSessionId(null);
+      }
+
+      const suggestionEntries = Array.isArray(payload.suggestions) ? payload.suggestions : [];
+
+      const metrics = payload.generation_metrics;
+      const performanceSource =
+        (payload.performance_metrics && typeof payload.performance_metrics === 'object'
+          ? payload.performance_metrics
+          : null) ??
+        (metrics && typeof metrics === 'object' ? metrics : null);
+      if (performanceSource) {
+        const detectionMs = Number(
+          (performanceSource as { detection_ms?: unknown }).detection_ms ?? 0
+        );
+        const generationMs = Number(
+          (performanceSource as { generation_ms?: unknown }).generation_ms ?? 0
+        );
+        const totalMs = Number(
+          (performanceSource as { total_ms?: unknown }).total_ms ?? detectionMs + generationMs
+        );
+        const searchQueryCount = Number(
+          (performanceSource as { search_query_count?: unknown }).search_query_count ??
+            suggestionEntries.length
+        );
+        setGapPerformanceMetrics({
+          detection_ms: Number.isFinite(detectionMs) ? detectionMs : 0,
+          generation_ms: Number.isFinite(generationMs) ? generationMs : 0,
+          total_ms: Number.isFinite(totalMs) ? totalMs : Math.max(detectionMs + generationMs, 0),
+          search_query_count: Number.isFinite(searchQueryCount) ? searchQueryCount : undefined,
+        });
+      } else {
+        setGapPerformanceMetrics(null);
+      }
+
+      if (suggestionEntries.length > 0) {
+        const suggestionMap: Record<string, GapSuggestionState> = {};
+
+        detectionData.gaps.forEach(gap => {
+          const entry = suggestionEntries.find(
+            (candidate: unknown): candidate is Record<string, unknown> =>
+              !!candidate && typeof candidate === 'object' && 'gap_id' in candidate && (candidate as { gap_id?: unknown }).gap_id === gap.id
+          );
+
+          if (!entry) {
+            suggestionMap[gap.id] = {
+              gap,
+              status: 'loading',
+              tasks: [],
+            };
+            return;
+          }
+
+          const rawStatus = typeof entry.status === 'string' ? entry.status : 'error';
+          let status: GapSuggestionState['status'] = 'error';
+          if (rawStatus === 'success') {
+            status = 'success';
+          } else if (rawStatus === 'requires_examples') {
+            status = 'requires_examples';
+          } else if (rawStatus === 'error') {
+            status = 'error';
+          }
+
+          const tasks: BridgingTaskWithSelection[] =
+            status === 'success' && Array.isArray(entry.tasks)
+              ? (entry.tasks as BridgingTask[]).map(task => ({
+                  ...task,
+                  checked: true,
+                }))
+              : [];
+
+          const metadataValue =
+            status === 'success' && entry.metadata && typeof entry.metadata === 'object'
+              ? {
+                  search_results_count: Number(
+                    (entry.metadata as { search_results_count?: unknown }).search_results_count ?? 0
+                  ),
+                  generation_duration_ms: Number(
+                    (entry.metadata as { generation_duration_ms?: unknown }).generation_duration_ms ?? 0
+                  ),
+                }
+              : undefined;
+
+          suggestionMap[gap.id] = {
+            gap,
+            status,
+            tasks,
+            ...(metadataValue ? { metadata: metadataValue } : {}),
+            ...(typeof entry.error === 'string' ? { error: entry.error } : {}),
+            ...(entry.requires_manual_examples
+              ? { requiresManualExamples: Boolean(entry.requires_manual_examples) }
+              : {}),
+          };
+        });
+
+        preloadedSuggestionsRef.current = suggestionMap;
+
+        const metrics = payload.generation_metrics;
+        const durationMs =
+          metrics && typeof metrics.total_ms === 'number'
+            ? Math.max(0, Math.round(metrics.total_ms))
+            : 0;
+
+        preloadedGenerationInfoRef.current = {
+          completed: detectionData.gaps.length,
+          durationMs,
+        };
+      } else {
+        preloadedSuggestionsRef.current = null;
+        preloadedGenerationInfoRef.current = null;
+      }
+
+      setGapAnalysisResult(detectionData);
       setGapAnalysisStatus('success');
+      setGapAnalysisError(null);
       setGapAnalysisRunId(prev => prev + 1);
     } catch (error) {
       console.error('[Task Priorities] Gap detection failed:', error);
       setGapAnalysisStatus('error');
-      setGapAnalysisError(error instanceof Error ? error.message : 'Gap detection failed.');
+      const rawMessage = error instanceof Error ? error.message : '';
+      const fallbackMessage = 'Unable to generate suggestions. Please try again.';
+      const shouldUseFallback =
+        !rawMessage ||
+        /ai service error/i.test(rawMessage) ||
+        /task generation failed/i.test(rawMessage) ||
+        /failed to fetch/i.test(rawMessage);
+      const resolvedMessage = shouldUseFallback ? fallbackMessage : rawMessage;
+      setGapAnalysisError(resolvedMessage);
+      setGapAnalysisResult(null);
+      setGapAnalysisSessionId(null);
+      setGapSuggestions({});
+      setGapGenerationProgress(0);
+      setGapGenerationDurationMs(null);
+      preloadedSuggestionsRef.current = null;
+      preloadedGenerationInfoRef.current = null;
+      setGapPerformanceMetrics(null);
       setGapGenerationRunning(false);
+    } finally {
+      setIsSuggestingGaps(false);
     }
-  }, [prioritizedPlan]);
+  }, [currentSessionId, prioritizedPlan]);
+
+  const handleRetryGapAnalysis = useCallback(() => {
+    void handleDetectGaps();
+  }, [handleDetectGaps]);
 
   useEffect(() => {
     if (!isGapModalOpen) {
@@ -1041,10 +1109,38 @@ export default function TaskPrioritiesPage() {
       return;
     }
 
-  if (gapAnalysisResult.gaps.length === 0) {
-    setGapSuggestions({});
-    setGapGenerationRunning(false);
-    setGapGenerationProgress(0);
+    const preloadedSuggestions = preloadedSuggestionsRef.current;
+    if (
+      preloadedSuggestions &&
+      Object.keys(preloadedSuggestions).length === gapAnalysisResult.gaps.length
+    ) {
+      preloadedSuggestionsRef.current = null;
+      setGapSuggestions(preloadedSuggestions);
+      setGapAcceptanceError(null);
+      setIsAcceptingGapTasks(false);
+      setGapGenerationRunning(false);
+
+      const generationInfo = preloadedGenerationInfoRef.current;
+      if (generationInfo) {
+        setGapGenerationProgress(generationInfo.completed);
+        setGapGenerationDurationMs(generationInfo.durationMs);
+      } else {
+        setGapGenerationProgress(gapAnalysisResult.gaps.length);
+        setGapGenerationDurationMs(0);
+      }
+      preloadedGenerationInfoRef.current = null;
+      return;
+    }
+
+    if (preloadedSuggestionsRef.current) {
+      preloadedSuggestionsRef.current = null;
+      preloadedGenerationInfoRef.current = null;
+    }
+
+    if (gapAnalysisResult.gaps.length === 0) {
+      setGapSuggestions({});
+      setGapGenerationRunning(false);
+      setGapGenerationProgress(0);
     setGapGenerationDurationMs(0);
     return;
   }
@@ -1444,19 +1540,39 @@ export default function TaskPrioritiesPage() {
       return;
     }
 
+    if (!gapAnalysisSessionId) {
+      setGapAcceptanceError({
+        message:
+          'Gap analysis session expired. Run "Find Missing Tasks" again before accepting suggestions.',
+      });
+      return;
+    }
+
+    if (!currentSessionId) {
+      setGapAcceptanceError({
+        message:
+          'Active prioritization session missing. Rerun prioritization before accepting suggestions.',
+      });
+      return;
+    }
+
     setGapAcceptanceError(null);
     setIsAcceptingGapTasks(true);
 
     const acceptedForPlan: AcceptedSuggestionForPlan[] = selectedEntries.map(entry => ({
       task: entry.task,
-      gap: entry.gap,
+      gap: {
+        predecessor_task_id: entry.gap.predecessor_task_id,
+        successor_task_id: entry.gap.successor_task_id,
+      },
       finalText: (entry.task.edited_task_text ?? entry.task.task_text).trim(),
       finalHours: entry.task.edited_estimated_hours ?? entry.task.estimated_hours,
     }));
 
     const payload = selectedEntries.map(entry => {
       const { task, gap } = entry;
-      const { checked, ...rest } = task;
+      const { checked: _unusedChecked, ...rest } = task;
+      void _unusedChecked;
       const baseTask = rest as BridgingTask;
       const trimmedEdit = baseTask.edited_task_text?.trim();
       const normalizedTask: BridgingTask = {
@@ -1483,17 +1599,21 @@ export default function TaskPrioritiesPage() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ accepted_tasks: payload }),
+        body: JSON.stringify({
+          analysis_session_id: gapAnalysisSessionId,
+          agent_session_id: currentSessionId,
+          accepted_tasks: payload,
+        }),
       });
 
       // Log the raw response for debugging
       console.log('[GapAcceptance] Response status:', response.status, response.statusText);
 
-      let body: any = null;
+      let rawBody: unknown = null;
       try {
         const text = await response.text();
         console.log('[GapAcceptance] Response body:', text.substring(0, 500));
-        body = text ? JSON.parse(text) : null;
+        rawBody = text ? JSON.parse(text) : null;
       } catch (parseError) {
         console.error('[GapAcceptance] Failed to parse response as JSON:', parseError);
         setGapAcceptanceError({
@@ -1502,19 +1622,50 @@ export default function TaskPrioritiesPage() {
         return;
       }
 
+      const parsedBody =
+        rawBody && typeof rawBody === 'object' && !Array.isArray(rawBody)
+          ? (rawBody as Record<string, unknown>)
+          : null;
+      const responseBody: Record<string, unknown> = parsedBody ?? {};
+
       if (!response.ok) {
-        const validationErrors = Array.isArray(body?.validation_errors)
-          ? body.validation_errors.filter((item: unknown): item is string => typeof item === 'string')
+        const validationErrorsValue = responseBody['validation_errors'];
+        const validationErrors = Array.isArray(validationErrorsValue)
+          ? validationErrorsValue.filter((item): item is string => typeof item === 'string')
           : [];
         const message =
-          typeof body?.error === 'string'
-            ? body.error
+          typeof responseBody['error'] === 'string'
+            ? (responseBody['error'] as string)
             : `Request failed with status ${response.status}`;
-        const code = typeof body?.code === 'string' ? body.code : undefined;
+        const code =
+          typeof responseBody['code'] === 'string' ? (responseBody['code'] as string) : undefined;
         setGapAcceptanceError({
           message,
           details: validationErrors.length > 0 ? validationErrors : undefined,
           code,
+        });
+        return;
+      }
+
+      let nextPlan: PrioritizedTaskPlan | null = null;
+      const updatedPlanCandidate = responseBody['updated_plan'];
+      if (updatedPlanCandidate) {
+        const parsedPlan = prioritizedPlanSchema.safeParse(updatedPlanCandidate);
+        if (parsedPlan.success) {
+          nextPlan = parsedPlan.data;
+        } else {
+          console.warn('[GapAcceptance] Updated plan failed validation, falling back to client integration', parsedPlan.error.flatten());
+        }
+      }
+
+      if (!nextPlan && prioritizedPlan) {
+        nextPlan = integrateAcceptedTasksIntoPlan(prioritizedPlan, acceptedForPlan);
+      }
+
+      if (!nextPlan) {
+        setGapAcceptanceError({
+          message:
+            'Server response missing updated plan. Refresh the page or rerun prioritization.',
         });
         return;
       }
@@ -1526,17 +1677,21 @@ export default function TaskPrioritiesPage() {
       setGapGenerationRunning(false);
       setGapSuggestions({});
 
-      setPrioritizedPlan(prev => {
-        if (!prev) {
-          return prev;
-        }
-        return integrateAcceptedTasksIntoPlan(prev, acceptedForPlan);
-      });
+      setPrioritizedPlan(nextPlan);
       setPlanVersion(prev => prev + 1);
+      setGapAnalysisSessionId(
+        typeof responseBody['gap_analysis_session_id'] === 'string'
+          ? (responseBody['gap_analysis_session_id'] as string)
+          : null
+      );
 
       // Show success toast with cycle resolution info
       const taskCount = acceptedForPlan.length;
-      const cyclesResolved = body?.cycles_resolved ?? 0;
+      const cyclesResolvedValue = responseBody['cycles_resolved'];
+      const cyclesResolved =
+        typeof cyclesResolvedValue === 'number' && Number.isFinite(cyclesResolvedValue)
+          ? cyclesResolvedValue
+          : 0;
 
       if (cyclesResolved > 0) {
         toast.success(
@@ -1561,7 +1716,13 @@ export default function TaskPrioritiesPage() {
     } finally {
       setIsAcceptingGapTasks(false);
     }
-  }, [gapSuggestionList, isAcceptingGapTasks]);
+  }, [
+    gapSuggestionList,
+    isAcceptingGapTasks,
+    gapAnalysisSessionId,
+    currentSessionId,
+    prioritizedPlan,
+  ]);
 
   useEffect(() => {
     if (!activeOutcome || prioritizedPlan || hasFetchedInitialPlan) {
@@ -1760,20 +1921,25 @@ export default function TaskPrioritiesPage() {
                         </div>
                       </div>
                     ) : (
-                      <Alert>
-                        <AlertTitle>Active outcome required</AlertTitle>
-                        <AlertDescription className="flex flex-col gap-2 text-sm">
-                          <span>
-                            Create an outcome before running prioritization. This provides the agent with context for ranking your tasks.
-                          </span>
-                          <Button asChild variant="link" className="px-0 text-base">
+                      <div className="space-y-3 rounded-xl border border-primary/40 bg-primary/5 p-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="space-y-1">
+                            <p className="text-sm font-semibold text-primary">Active outcome required</p>
+                            <p className="text-sm text-muted-foreground">
+                              Create an outcome so the agent knows what you&apos;re working toward before ranking tasks.
+                            </p>
+                          </div>
+                          <Button asChild className="sm:w-auto">
                             <Link href="/?openOutcome=1" prefetch>
                               Open outcome builder
-                              <ExternalLink className="ml-2 inline h-4 w-4" />
+                              <ExternalLink className="ml-2 h-4 w-4" />
                             </Link>
                           </Button>
-                        </AlertDescription>
-                      </Alert>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Outcomes establish the focus, guardrails, and time expectations the prioritization run uses to build your plan.
+                        </p>
+                      </div>
                     )}
                   </div>
                 )}
@@ -1794,6 +1960,12 @@ export default function TaskPrioritiesPage() {
                       analyzeButtonLabel()
                     )}
                   </Button>
+
+                  {analyzeButtonHelper && (
+                    <p className="text-xs text-muted-foreground">
+                      {analyzeButtonHelper}
+                    </p>
+                  )}
 
                   {triggerError && (
                     <p className="text-sm text-destructive">{triggerError}</p>
@@ -1870,35 +2042,6 @@ export default function TaskPrioritiesPage() {
                 <AlertDescription>{planStatusMessage}</AlertDescription>
               </Alert>
             )}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <span>Need to verify the sequence?</span>
-              </div>
-              <Button
-                variant="secondary"
-                onClick={handleDetectGaps}
-                disabled={
-                  isDetectingGaps ||
-                  isGeneratingGaps ||
-                  sessionStatus === 'running' ||
-                  isLoadingResults
-                }
-              >
-                {isDetectingGaps ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Analyzing…
-                  </>
-                ) : isGeneratingGaps ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Generating…
-                  </>
-                ) : (
-                  'Find Missing Tasks'
-                )}
-              </Button>
-            </div>
             {!planStatusMessage && !isRecalculating && !isInstantAdjusting && adjustmentPerformance && (
               <Alert>
                 <AlertDescription>
@@ -1918,6 +2061,24 @@ export default function TaskPrioritiesPage() {
               isTraceExpanded={isTraceExpanded}
               stepCount={executionMetadata?.steps_taken ?? 0}
             />
+            <div className="mt-6 flex justify-end">
+              <Button
+                onClick={handleDetectGaps}
+                disabled={isSuggestingGaps || !prioritizedPlan}
+              >
+                {isSuggestingGaps ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Analyzing…
+                  </>
+                ) : (
+                  <>
+                    <Lightbulb className="mr-2 h-4 w-4" />
+                    Find Missing Tasks
+                  </>
+                )}
+              </Button>
+            </div>
           </>
         ) : (
           !isLoadingResults &&
@@ -1963,6 +2124,8 @@ export default function TaskPrioritiesPage() {
           acceptError={gapAcceptanceError}
           generationProgress={gapGenerationProgress}
           generationDurationMs={gapGenerationDurationMs}
+          onRetryAnalysis={handleRetryGapAnalysis}
+          performanceMetrics={gapPerformanceMetrics}
         />
       </main>
 
