@@ -192,16 +192,62 @@ Each pitch has a **fixed appetite** (time budget). We shape the solution to fit 
 
 ---
 
-## Total Timeline: 5-6 Weeks (vs 6+ weeks custom)
+### Phase 7: Reflection-Driven Task Coherence
+**Appetite:** 2 weeks
+
+**Problem:** Tasks extracted from isolated documents lack coherence with user's workflow
+
+**Solution:** Reflection-based context system + pre-prioritization context
+
+**Key unlock:** AI understands user's current reality when prioritizing
+
+[Read Full Pitch →](./phase-7-reflection-driven-task-coherence.md)
+
+---
+
+### Phase 8: Mobile-First Transformation
+**Appetite:** 1.5 weeks
+
+**Problem:** Mobile users face critical usability issues (header overflow, small touch targets, horizontal scrolling)
+
+**Solution:** Mobile-first responsive design with 44px touch targets, optimized grids, and enhanced modals
+
+**Components:**
+- Fix header overflow on 320-375px screens
+- Universal 44px touch targets on mobile
+- Responsive grid breakpoints (md: → lg:)
+- Mobile-optimized modals and forms
+- Touch feedback and enhanced shadows
+
+**Key unlock:** Confident mobile deployment without compromising desktop experience
+
+**Features:**
+- ✅ No horizontal scrolling on any viewport (320px+)
+- ✅ WCAG 2.1 touch target compliance (44x44px)
+- ✅ Mobile-first CSS with progressive enhancement
+- ✅ Tailwind xs: breakpoint (475px) for fine-grained control
+- ✅ Tap highlights and visual feedback
+- ❌ No native mobile apps (web-responsive only)
+- ❌ No PWA features (Phase 9 if needed)
+
+**Time Investment:** Pure CSS changes, no logic modifications, low risk
+
+[Read Full Pitch →](./phase-8-mobile-first-transformation.md)
+
+---
+
+## Total Timeline: 7-8 Weeks (vs 8+ weeks custom)
 
 Each phase is:
 - **Independently shippable** (can ship Phase 1 without Phase 2)
 - **Fixed scope** (rabbit holes explicitly cut)
-- **Time-boxed** (1-1.5 week appetite, no extensions)
+- **Time-boxed** (1-2 week appetite, no extensions)
 
 **Overall Time Savings with Mastra:** 25-40% reduction (1-2 weeks saved)
 **Phase 5 adds:** Autonomous cloud sync capability
 **Phase 6 adds:** Document reprocessing capability (1-2 days)
+**Phase 7 adds:** Reflection-driven context awareness (2 weeks)
+**Phase 8 adds:** Mobile-first responsive design (1.5 weeks)
 
 ---
 
