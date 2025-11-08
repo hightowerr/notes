@@ -31,6 +31,15 @@ export async function POST(request: Request) {
       .map(taskId => metadata[taskId])
       .filter((task): task is NonNullable<typeof task> => Boolean(task));
 
+    // 🔍 DIAGNOSTIC: Log response payload
+    console.log('[TaskMetadata API] Request:', { taskIdsCount: taskIds.length, outcome });
+    console.log('[TaskMetadata API] Response:', {
+      tasksReturned: tasks.length,
+      metadataKeys: Object.keys(metadata).length,
+      sampleTaskIds: taskIds.slice(0, 3),
+      sampleMetadata: Object.entries(metadata).slice(0, 2).map(([id, data]) => ({ id: id.slice(0, 16), hasTitle: !!data?.title }))
+    });
+
     return NextResponse.json({ tasks }, { status: 200 });
   } catch (error) {
     console.error('[TaskMetadata API] Failed to build metadata', error);

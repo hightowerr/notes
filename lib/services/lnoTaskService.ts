@@ -115,6 +115,12 @@ export async function resolveOutcomeAlignedTasks(
     return {};
   }
 
+  // 🔍 DIAGNOSTIC: Log input task IDs
+  console.log('[LNOTaskService] Input:', {
+    taskIdsCount: taskIds.length,
+    sampleIds: taskIds.slice(0, 3).map(id => id.slice(0, 16) + '...')
+  });
+
   const { data: taskRows, error: taskError } = await supabase
     .from('task_embeddings')
     .select('task_id, task_text, document_id')
@@ -124,6 +130,16 @@ export async function resolveOutcomeAlignedTasks(
   if (taskError) {
     throw new Error(`Failed to load task embeddings: ${taskError.message}`);
   }
+
+  // 🔍 DIAGNOSTIC: Log query results
+  console.log('[LNOTaskService] Task embeddings query:', {
+    rowsReturned: taskRows?.length ?? 0,
+    sampleRows: (taskRows ?? []).slice(0, 2).map(row => ({
+      id: row.task_id?.slice(0, 16) + '...',
+      hasText: !!row.task_text,
+      hasDocId: !!row.document_id
+    }))
+  });
 
   const documentIds = Array.from(
     new Set(
@@ -146,6 +162,16 @@ export async function resolveOutcomeAlignedTasks(
     }
 
     lnoIndex = buildLnoIndex(docs ?? []);
+
+    // 🔍 DIAGNOSTIC: Log LNO index contents
+    console.log('[LNOTaskService] LNO index built:', {
+      indexSize: lnoIndex.size,
+      sampleEntries: Array.from(lnoIndex.entries()).slice(0, 2).map(([id, data]) => ({
+        id: id.slice(0, 16) + '...',
+        category: data.category,
+        textLength: data.text.length
+      }))
+    });
   }
 
   const outcome = options.outcome;

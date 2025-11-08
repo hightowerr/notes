@@ -420,6 +420,9 @@ export function TaskList({
   }, []);
 
   useEffect(() => {
+    // Reset unmount flag on mount (important for HMR)
+    didUnmountRef.current = false;
+
     return () => {
       didUnmountRef.current = true;
       if (discardTimeoutRef.current) {
@@ -586,7 +589,15 @@ export function TaskList({
   );
 
   useEffect(() => {
+    // 🔍 DIAGNOSTIC: Log useEffect trigger
+    console.log('[TaskList] Metadata useEffect triggered:', {
+      trackedTaskIdsCount: trackedTaskIds.length,
+      outcomeStatement: outcomeStatement?.slice(0, 50) + '...',
+      sampleTaskIds: trackedTaskIds.slice(0, 2).map(id => id.slice(0, 16) + '...')
+    });
+
     if (trackedTaskIds.length === 0) {
+      console.log('[TaskList] ⚠️ No tracked task IDs - skipping metadata fetch');
       setTaskLookup({});
       lastMetadataRequestKeyRef.current = null;
       setIsLoadingTasks(false);
@@ -594,10 +605,19 @@ export function TaskList({
     }
 
     const requestKey = `${trackedTaskIds.join('|')}::${outcomeStatement ?? ''}`;
+
+    // 🔍 DIAGNOSTIC: Log cache check
+    console.log('[TaskList] Cache check:', {
+      requestKeySample: requestKey.slice(0, 100) + '...',
+      cachedKeySample: (lastMetadataRequestKeyRef.current || 'null').slice(0, 100) + '...',
+      isMatch: lastMetadataRequestKeyRef.current === requestKey,
+      willSkip: lastMetadataRequestKeyRef.current === requestKey
+    });
+
     if (lastMetadataRequestKeyRef.current === requestKey) {
+      console.log('[TaskList] ⚠️ SKIPPING metadata API call - request key matches cache');
       return;
     }
-    lastMetadataRequestKeyRef.current = requestKey;
 
     const loadTasks = async () => {
       try {
@@ -630,13 +650,21 @@ export function TaskList({
           }>;
         };
 
-        if (
-          didUnmountRef.current ||
-          lastMetadataRequestKeyRef.current !== requestKey
-        ) {
+        console.log('[TaskList] 🔍 API response parsed:', {
+          taskCount: payload.tasks?.length ?? 0,
+          didUnmount: didUnmountRef.current,
+          sampleTitles: (payload.tasks || []).slice(0, 2).map(t => t.title?.slice(0, 40))
+        });
+
+        if (didUnmountRef.current) {
+          console.log('[TaskList] ⚠️ Component unmounted, skipping state update');
           return;
         }
 
+        // ✅ FIX: Only set cache key AFTER successful data load
+        lastMetadataRequestKeyRef.current = requestKey;
+
+        console.log('[TaskList] 📝 About to call setTaskLookup...');
         setTaskLookup(prev => {
           const next = { ...prev };
           for (const task of payload.tasks ?? []) {
@@ -648,6 +676,18 @@ export function TaskList({
               sourceText: task.original_text ?? null,
             };
           }
+
+          // 🔍 DIAGNOSTIC: Log taskLookup state
+          console.log('[TaskList] TaskLookup updated:', {
+            totalTasks: Object.keys(next).length,
+            newTasks: payload.tasks?.length ?? 0,
+            sampleTasks: Object.entries(next).slice(0, 2).map(([id, data]) => ({
+              id: id.slice(0, 16) + '...',
+              title: data.title?.slice(0, 30) + '...',
+              hasCategory: !!data.category
+            }))
+          });
+
           return next;
         });
 
@@ -676,27 +716,22 @@ export function TaskList({
           });
         }
       } catch (error) {
-        if (
-          didUnmountRef.current ||
-          lastMetadataRequestKeyRef.current !== requestKey
-        ) {
+        if (didUnmountRef.current) {
           return;
         }
-        lastMetadataRequestKeyRef.current = null;
+        // ✅ FIX: Don't cache failed requests - allow retry
         console.error('[TaskList] Failed to load task metadata', error);
         setTaskError('Unable to load task details. Showing fallback task IDs.');
       } finally {
-        if (
-          !didUnmountRef.current &&
-          lastMetadataRequestKeyRef.current === requestKey
-        ) {
+        if (!didUnmountRef.current) {
           setIsLoadingTasks(false);
         }
       }
     };
 
     void loadTasks();
-  }, [trackedTaskIds, outcomeStatement, lockedTasks, updateLockedTasks, updatePriorityState]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackedTaskIds, outcomeStatement]);
 
   const getTaskTitle = useCallback(
     (taskId: string) => taskLookup[taskId]?.title ?? formatTaskId(taskId),
