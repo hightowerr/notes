@@ -1,0 +1,284 @@
+openapi: 3.0.3
+info:
+  title: Manual Task Management API
+  version: 1.0.0
+  description: API for creating and editing manually added tasks
+
+paths:
+  /api/tasks/manual:
+    post:
+      summary: Create a new manual task
+      description: |
+        Creates a user-defined task, generates its embedding, checks for duplicates,
+        and optionally triggers re-prioritization if an outcome exists.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - task_text
+              properties:
+                task_text:
+                  type: string
+                  minLength: 10
+                  maxLength: 500
+                  description: Task description (10-500 characters, trimmed)
+                  example: "Email legal department about contract review"
+                estimated_hours:
+                  type: integer
+                  minimum: 8
+                  maximum: 160
+                  default: 40
+                  description: Estimated hours to complete (8-160 range)
+                  example: 16
+                outcome_id:
+                  type: string
+                  format: uuid
+                  description: If provided, triggers automatic re-prioritization
+                  example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      responses:
+        '201':
+          description: Manual task created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - task_id
+                  - success
+                  - prioritization_triggered
+                properties:
+                  task_id:
+                    type: string
+                    description: Unique identifier for the created task
+                    example: "task-manual-2025-01-08-abc123"
+                  success:
+                    type: boolean
+                    example: true
+                  prioritization_triggered:
+                    type: boolean
+                    description: Whether re-prioritization was initiated
+                    example: true
+                  message:
+                    type: string
+                    example: "Task created and prioritization started"
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Invalid input"
+                  code:
+                    type: string
+                    enum: [INVALID_INPUT, DUPLICATE_TASK]
+                  details:
+                    type: object
+                    description: Zod validation errors
+              examples:
+                invalidLength:
+                  value:
+                    error: "Invalid input"
+                    code: "INVALID_INPUT"
+                    details:
+                      task_text: ["String must contain at least 10 character(s)"]
+                duplicateTask:
+                  value:
+                    error: "Similar task already exists"
+                    code: "DUPLICATE_TASK"
+                    existing_task:
+                      task_id: "task-abc123"
+                      task_text: "Email legal about contract"
+                      similarity: 0.94
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Failed to create task"
+                  code:
+                    type: string
+                    example: "INTERNAL_ERROR"
+
+  /api/tasks/{id}:
+    patch:
+      summary: Edit an existing task
+      description: |
+        Updates task text and/or estimated hours. Regenerates embedding if text
+        changes significantly (>10%). Triggers re-prioritization if outcome exists.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Task ID from task_embeddings.task_id
+          example: "task-abc123"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                task_text:
+                  type: string
+                  minLength: 10
+                  maxLength: 500
+                  description: Updated task description
+                  example: "Send email to legal department about NDA review"
+                estimated_hours:
+                  type: integer
+                  minimum: 8
+                  maximum: 160
+                  description: Updated estimated hours
+                  example: 24
+      responses:
+        '200':
+          description: Task updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - task
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  task:
+                    type: object
+                    properties:
+                      task_id:
+                        type: string
+                        example: "task-abc123"
+                      task_text:
+                        type: string
+                        example: "Send email to legal department about NDA review"
+                      estimated_hours:
+                        type: integer
+                        example: 24
+                      is_manual:
+                        type: boolean
+                        example: true
+                      updated_at:
+                        type: string
+                        format: date-time
+                        example: "2025-01-08T14:30:00Z"
+                  embedding_regenerated:
+                    type: boolean
+                    description: Whether a new embedding was generated
+                    example: true
+                  prioritization_triggered:
+                    type: boolean
+                    example: true
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  code:
+                    type: string
+                    enum: [INVALID_INPUT, NO_FIELDS_PROVIDED]
+              examples:
+                noFields:
+                  value:
+                    error: "At least one field must be provided"
+                    code: "NO_FIELDS_PROVIDED"
+        '403':
+          description: Permission denied
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "You can only edit your own manual tasks"
+                  code:
+                    type: string
+                    example: "PERMISSION_DENIED"
+        '404':
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Task not found"
+                  code:
+                    type: string
+                    example: "TASK_NOT_FOUND"
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Failed to update task"
+                  code:
+                    type: string
+                    example: "INTERNAL_ERROR"
+
+components:
+  schemas:
+    ManualTaskInput:
+      type: object
+      required:
+        - task_text
+      properties:
+        task_text:
+          type: string
+          minLength: 10
+          maxLength: 500
+        estimated_hours:
+          type: integer
+          minimum: 8
+          maximum: 160
+          default: 40
+        outcome_id:
+          type: string
+          format: uuid
+
+    TaskEditInput:
+      type: object
+      minProperties: 1
+      properties:
+        task_text:
+          type: string
+          minLength: 10
+          maxLength: 500
+        estimated_hours:
+          type: integer
+          minimum: 8
+          maximum: 160
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+        details:
+          type: object

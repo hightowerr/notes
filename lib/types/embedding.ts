@@ -17,6 +17,8 @@ export interface TaskEmbedding {
   embedding: number[];  // 1536-dimension array
   status: EmbeddingStatus;
   error_message: string | null;
+  is_manual?: boolean;
+  created_by?: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -31,6 +33,8 @@ export interface TaskEmbeddingInsert {
   embedding: number[];
   status: EmbeddingStatus;
   error_message?: string | null;
+  is_manual?: boolean;
+  created_by?: string | null;
 }
 
 /**

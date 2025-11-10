@@ -5,3 +5,9 @@ args = ["shadcn@latest", "mcp"]
 [mcp_servers.playwright]
 command = "npx"
 args = ["@playwright/mcp@latest"]
+
+[mcp_servers.context7]
+args = ["-y", "@upstash/context7-mcp", "--api-key", "ctx7sk-a6245a13-ebcc-42d5-bbb6-50dd511a551a"]
+command = "npx"
+startup_timeout_sec = 60
+startup_timeout_ms = 20_000
