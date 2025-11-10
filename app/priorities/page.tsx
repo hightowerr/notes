@@ -39,6 +39,7 @@ import {
 
 const DEFAULT_USER_ID = 'default-user';
 const POLL_INTERVAL_MS = 2000;
+const MAX_SESSION_DURATION_MS = 120_000;
 const DEFAULT_RELATIVE_TIME = 'just now';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MINUTE_IN_MS = 60 * 1000;
@@ -219,6 +220,7 @@ export default function TaskPrioritiesPage() {
   const [outcomeLoading, setOutcomeLoading] = useState(true);
   const [activeOutcome, setActiveOutcome] = useState<OutcomeResponse | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [showOutcomePrompt, setShowOutcomePrompt] = useState(true);
 
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>('idle');
   const [triggerError, setTriggerError] = useState<string | null>(null);
@@ -276,14 +278,22 @@ export default function TaskPrioritiesPage() {
   }, [activeOutcome?.id]);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollStartRef = useRef<number | null>(null);
   const reflectionsFetchRef = useRef<{ hasFetched: boolean }>({ hasFetched: false });
   const lastActiveReflectionIdsRef = useRef<string[]>([]);
   const adjustmentControllerRef = useRef<AbortController | null>(null);
   const preloadedSuggestionsRef = useRef<Record<string, GapSuggestionState> | null>(null);
   const preloadedGenerationInfoRef = useRef<{ completed: number; durationMs: number } | null>(null);
 
-  // Fetch active outcome on mount
+  // Check localStorage for dismissal and fetch active outcome on mount
   useEffect(() => {
+    // Check if prompt was dismissed
+    if (typeof window !== 'undefined') {
+      const isDismissed = localStorage.getItem('outcome-prompt-dismissed') === 'true';
+      setShowOutcomePrompt(!isDismissed);
+    }
+
     const fetchOutcome = async () => {
       try {
         setOutcomeLoading(true);
@@ -316,6 +326,10 @@ export default function TaskPrioritiesPage() {
       if (pollRef.current) {
         clearInterval(pollRef.current);
       }
+      if (pollTimeoutRef.current) {
+        clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
     };
   }, []);
 
@@ -324,6 +338,11 @@ export default function TaskPrioritiesPage() {
       clearInterval(pollRef.current);
       pollRef.current = null;
     }
+    if (pollTimeoutRef.current) {
+      clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = null;
+    }
+    pollStartRef.current = null;
   };
 
   const applySessionResults = useCallback((session: unknown) => {
@@ -654,6 +673,22 @@ export default function TaskPrioritiesPage() {
   const pollSessionStatus = (id: string) => {
     stopPolling();
 
+    const handleTimeout = () => {
+      console.warn('[Task Priorities] Prioritization timed out');
+      stopPolling();
+      setSessionStatus('failed');
+      setTriggerError('Prioritization timed out after 2 minutes. Please rerun.');
+      setIsLoadingResults(false);
+      setIsRecalculating(false);
+      setCurrentSessionId(null);
+    };
+
+    pollStartRef.current = Date.now();
+    if (pollTimeoutRef.current) {
+      clearTimeout(pollTimeoutRef.current);
+    }
+    pollTimeoutRef.current = setTimeout(handleTimeout, MAX_SESSION_DURATION_MS);
+
     const poll = async () => {
       try {
         const res = await fetch(`/api/agent/sessions/${id}`);
@@ -809,6 +844,13 @@ export default function TaskPrioritiesPage() {
     }
     return null;
   }, [activeOutcome, outcomeLoading, isInstantAdjusting, isTriggering, sessionStatus]);
+
+  const canAutoTriggerPrioritization =
+    Boolean(activeOutcome) &&
+    !outcomeLoading &&
+    !isTriggering &&
+    sessionStatus !== 'running' &&
+    !isInstantAdjusting;
 
   const handleDiffSummary = useCallback(
     ({ hasChanges, isInitial }: { hasChanges: boolean; isInitial: boolean }) => {
@@ -1761,6 +1803,41 @@ export default function TaskPrioritiesPage() {
           disableRecalculate={disableRecalculate}
         />
 
+        {/* Banner for when no active outcome exists - T012 requirement */}
+        {!activeOutcome && !outcomeLoading && showOutcomePrompt && (
+          <Alert className="border-amber-300 bg-amber-50">
+            <Lightbulb className="h-5 w-5 text-amber-600" />
+            <AlertTitle>Set an outcome to enable automatic task prioritization</AlertTitle>
+            <AlertDescription className="mt-2 flex items-center gap-3 text-foreground">
+              <span>Set an outcome to enable automatic task prioritization.</span>
+              <Button 
+                size="sm" 
+                variant="default"
+                onClick={() => {
+                  // Navigate to outcome builder as the link does elsewhere in the code
+                  window.location.href = '/?openOutcome=1';
+                }}
+              >
+                Create Outcome
+              </Button>
+              <Button 
+                size="sm" 
+                variant="ghost"
+                onClick={() => {
+                  // Dismissible via localStorage as per requirement
+                  if (typeof window !== 'undefined') {
+                    localStorage.setItem('outcome-prompt-dismissed', 'true');
+                    setShowOutcomePrompt(false);
+                  }
+                }}
+                className="ml-auto"
+              >
+                Dismiss
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
+
         <Card className={showCollapsedPrimaryCard ? 'border-border/70 shadow-1layer-sm' : undefined}>
           {showCollapsedPrimaryCard ? (
             <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1990,6 +2067,9 @@ export default function TaskPrioritiesPage() {
               outcomeStatement={activeOutcome?.assembled_text ?? null}
               adjustedPlan={latestAdjustment}
               onDiffSummary={handleDiffSummary}
+              sessionStatus={sessionStatus}
+              canTriggerPrioritization={canAutoTriggerPrioritization}
+              onRequestPrioritization={handleAnalyzeTasks}
             />
             <div className="mt-6 flex justify-end">
               <Button

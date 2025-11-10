@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
+import { toast } from 'sonner';
 
 import type {
   ExecutionMetadata,
@@ -12,6 +13,7 @@ import type {
 } from '@/lib/types/agent';
 import type { AdjustedPlan } from '@/lib/types/adjustment';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TaskRow } from '@/app/priorities/components/TaskRow';
@@ -21,6 +23,8 @@ import { TaskDetailsDrawer } from '@/app/priorities/components/TaskDetailsDrawer
 import { useTaskDiff } from '@/app/priorities/components/useTaskDiff';
 import { useScrollToTask } from '@/app/priorities/components/useScrollToTask';
 import type { MovementInfo } from '@/app/priorities/components/MovementBadge';
+import { ManualTaskModal } from '@/app/components/ManualTaskModal';
+import { DiscardReviewModal, type DiscardCandidate } from '@/app/components/DiscardReviewModal';
 import {
   DEPENDENCY_OVERRIDE_STORAGE_KEY,
   type DependencyOverrideEntry,
@@ -44,6 +48,7 @@ type TaskLookup = Record<
     category?: 'leverage' | 'neutral' | 'overhead' | null;
     rationale?: string | null;
     sourceText?: string | null;
+    isManual?: boolean;
   }
 >;
 
@@ -62,6 +67,7 @@ type TaskRenderNode = {
   reasoning?: string | null;
   dependencyNotes?: string | null;
   manualOverride?: boolean;
+  isManual?: boolean;
   state?: 'active' | 'completed' | 'discarded' | 'manual_override' | 'reintroduced';
   removalReason?: string | null;
 };
@@ -75,6 +81,13 @@ type TaskOption = {
   title: string;
 };
 
+type SessionStatus = 'idle' | 'running' | 'completed' | 'failed';
+
+type CachedManualTask = {
+  id: string;
+  title: string;
+};
+
 type TaskListProps = {
   plan: PrioritizedTaskPlan;
   executionMetadata?: ExecutionMetadata | null;
@@ -83,6 +96,9 @@ type TaskListProps = {
   outcomeStatement?: string | null;
   adjustedPlan?: AdjustedPlan | null;
   onDiffSummary?: (summary: { hasChanges: boolean; isInitial: boolean }) => void;
+  sessionStatus?: SessionStatus;
+  canTriggerPrioritization?: boolean;
+  onRequestPrioritization?: () => void | Promise<void>;
 };
 
 const DEFAULT_REMOVAL_REASON =
@@ -208,6 +224,9 @@ export function TaskList({
   outcomeStatement,
   adjustedPlan,
   onDiffSummary,
+  sessionStatus = 'idle',
+  canTriggerPrioritization = false,
+  onRequestPrioritization,
 }: TaskListProps) {
   const sanitizedTaskIds = useMemo(() => sanitizePlanOrder(plan), [plan]);
   const taskAnnotations = useMemo<TaskAnnotation[]>(() => plan.task_annotations ?? [], [plan.task_annotations]);
@@ -270,16 +289,40 @@ export function TaskList({
     reasons: {},
     ranks: {},
   });
+  const [manualTaskStore, setManualTaskStore] = useLocalStorage<
+    Record<string, CachedManualTask[]>
+  >('manual-task-cache', {});
+  const manualTaskCacheKey = outcomeId ?? 'global';
+  const cachedManualTasks = manualTaskStore[manualTaskCacheKey] ?? [];
+  const manualTaskIds = useMemo(() => {
+    const ids = new Set<string>();
+    cachedManualTasks.forEach(task => ids.add(task.id));
+    Object.entries(taskLookup).forEach(([taskId, metadata]) => {
+      if (metadata?.isManual) {
+        ids.add(taskId);
+      }
+    });
+    return Array.from(ids);
+  }, [cachedManualTasks, taskLookup]);
+  const [isManualTaskModalOpen, setIsManualTaskModalOpen] = useState(false);
+  const [prioritizingTasks, setPrioritizingTasks] = useState<Record<string, number>>({});
+  const autoPrioritizeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingAutoPrioritizationRef = useRef(false);
+  const previousSessionStatusRef = useRef<SessionStatus | null>(null);
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
   const [taskError, setTaskError] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [recentlyDiscarded, setRecentlyDiscarded] = useState<Set<string>>(new Set());
+  const [discardCandidates, setDiscardCandidates] = useState<DiscardCandidate[]>([]);
+  const [showDiscardReview, setShowDiscardReview] = useState(false);
   const [lockStore, setLockStore] = useLocalStorage<Record<string, Record<string, LockedTaskState>>>('locked-tasks', {});
   const [dependencyStore, setDependencyStore] = useLocalStorage<DependencyOverrideStore>(DEPENDENCY_OVERRIDE_STORAGE_KEY, {});
   const outcomeKey = outcomeId ?? 'global';
   const lockedTasks = lockStore[outcomeKey] ?? {};
   const dependencyOverrides = dependencyStore[outcomeKey] ?? {};
+  const rejectedDiscardIdsRef = useRef<Set<string>>(new Set());
+  const previousPlanVersionRef = useRef(planVersion);
 
   const updateLockedTasks = useCallback(
     (updater: (current: Record<string, LockedTaskState>) => Record<string, LockedTaskState>) => {
@@ -349,6 +392,256 @@ export function TaskList({
     [persistState]
   );
 
+  const attachManualTask = useCallback(
+    (taskId: string, taskText: string, { flash = true }: { flash?: boolean } = {}) => {
+      setTaskLookup(prev => {
+        const existing = prev[taskId];
+        const nextEntry = {
+          title: taskText,
+          documentId: existing?.documentId ?? null,
+          category: existing?.category ?? null,
+          rationale: existing?.rationale ?? null,
+          sourceText: existing?.sourceText ?? taskText,
+          isManual: true,
+        };
+        if (
+          existing &&
+          existing.title === nextEntry.title &&
+          existing.sourceText === nextEntry.sourceText &&
+          existing.isManual
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [taskId]: nextEntry,
+        };
+      });
+
+      const previousNode = metadataRef.current[taskId];
+      metadataRef.current[taskId] = {
+        id: taskId,
+        title: taskText,
+        category: previousNode?.category ?? null,
+        rationale: previousNode?.rationale ?? null,
+        sourceText: previousNode?.sourceText ?? taskText,
+        confidence: previousNode?.confidence ?? null,
+        confidenceDelta: previousNode?.confidenceDelta ?? null,
+        dependencies: previousNode?.dependencies ?? [],
+        dependents: previousNode?.dependents ?? [],
+        movement: previousNode?.movement ?? { type: 'manual' as const },
+        planRank: previousNode?.planRank ?? null,
+        reasoning: previousNode?.reasoning ?? null,
+        dependencyNotes: previousNode?.dependencyNotes ?? null,
+        manualOverride: true,
+        isManual: true,
+        state: previousNode?.state ?? 'manual_override',
+        removalReason: previousNode?.removalReason ?? null,
+      };
+
+      updatePriorityState(prev => {
+        if (prev.statuses[taskId] === 'active') {
+          return prev;
+        }
+        const next: PriorityState = {
+          statuses: { ...prev.statuses, [taskId]: 'active' },
+          reasons: { ...prev.reasons },
+          ranks: { ...prev.ranks },
+        };
+        if (!next.ranks[taskId]) {
+          const fallbackRank = sanitizedTaskIds.length + Object.keys(prev.ranks).length + 1;
+          next.ranks[taskId] = fallbackRank;
+        }
+        return next;
+      });
+
+      if (flash) {
+        flashTask(taskId);
+      }
+    },
+    [flashTask, sanitizedTaskIds.length, setTaskLookup, updatePriorityState]
+  );
+
+  const triggerAutoPrioritization = useCallback(() => {
+    if (!onRequestPrioritization) {
+      return;
+    }
+
+    if (!canTriggerPrioritization) {
+      pendingAutoPrioritizationRef.current = true;
+      return;
+    }
+
+    pendingAutoPrioritizationRef.current = false;
+
+    if (autoPrioritizeTimeoutRef.current) {
+      clearTimeout(autoPrioritizeTimeoutRef.current);
+    }
+
+    autoPrioritizeTimeoutRef.current = setTimeout(() => {
+      void onRequestPrioritization();
+      autoPrioritizeTimeoutRef.current = null;
+    }, 500);
+  }, [canTriggerPrioritization, onRequestPrioritization]);
+
+  const handleManualTaskCreated = useCallback(
+    ({
+      taskId,
+      taskText,
+      prioritizationTriggered,
+    }: {
+      taskId: string;
+      taskText: string;
+      prioritizationTriggered: boolean;
+    }) => {
+      attachManualTask(taskId, taskText);
+      setManualTaskStore(prev => {
+        const current = prev[manualTaskCacheKey] ?? [];
+        if (current.some(task => task.id === taskId)) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [manualTaskCacheKey]: [...current, { id: taskId, title: taskText }],
+        };
+      });
+      if (prioritizationTriggered && outcomeId) {
+        setPrioritizingTasks(prev => ({ ...prev, [taskId]: Date.now() }));
+        triggerAutoPrioritization();
+      } else if (!prioritizationTriggered) {
+        // Show info toast when no re-prioritization is triggered
+        toast.info('Task added. Set an outcome to enable auto-prioritization.');
+      }
+    },
+    [
+      attachManualTask,
+      manualTaskCacheKey,
+      outcomeId,
+      setManualTaskStore,
+      triggerAutoPrioritization,
+    ]
+  );
+
+  const handleDuplicateTaskFound = useCallback(
+    (taskId: string) => {
+      scrollToTask(taskId);
+    },
+    [scrollToTask]
+  );
+
+  const handleTaskTitleChange = useCallback(
+    (taskId: string, nextTitle: string) => {
+      if (!nextTitle) {
+        return;
+      }
+      setTaskLookup(prev => {
+        const current = prev[taskId];
+        if (current && current.title === nextTitle) {
+          return prev;
+        }
+        const nextEntry = {
+          ...current,
+          title: nextTitle,
+          sourceText: current?.sourceText ?? nextTitle,
+        };
+        return {
+          ...prev,
+          [taskId]: nextEntry,
+        };
+      });
+      metadataRef.current[taskId] = {
+        ...(metadataRef.current[taskId] ?? {
+          id: taskId,
+          title: nextTitle,
+          category: null,
+          rationale: null,
+          sourceText: nextTitle,
+          confidence: null,
+          confidenceDelta: null,
+          dependencies: [],
+          dependents: [],
+          movement: undefined,
+          planRank: null,
+          reasoning: null,
+          dependencyNotes: null,
+          manualOverride: false,
+          isManual: false,
+          state: 'active',
+          removalReason: null,
+        }),
+        title: nextTitle,
+        sourceText: metadataRef.current[taskId]?.sourceText ?? nextTitle,
+      };
+      setManualTaskStore(prev => {
+        const current = prev[manualTaskCacheKey] ?? [];
+        if (!current.length) {
+          return prev;
+        }
+        let changed = false;
+        const updated = current.map(entry => {
+          if (entry.id === taskId) {
+            changed = true;
+            return { ...entry, title: nextTitle };
+          }
+          return entry;
+        });
+        if (!changed) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [manualTaskCacheKey]: updated,
+        };
+      });
+    },
+    [manualTaskCacheKey, setManualTaskStore, setTaskLookup]
+  );
+
+  const handleTaskEditSuccess = useCallback(
+    (taskId: string, { prioritizationTriggered }: { prioritizationTriggered: boolean }) => {
+      if (prioritizationTriggered && outcomeId) {
+        setPrioritizingTasks(prev => ({ ...prev, [taskId]: Date.now() }));
+        triggerAutoPrioritization();
+      } else if (!prioritizationTriggered) {
+        // Show info toast when no re-prioritization is triggered after edit
+        toast.info('Task updated. Set an outcome to enable re-prioritization.');
+      }
+    },
+    [outcomeId, triggerAutoPrioritization]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (autoPrioritizeTimeoutRef.current) {
+        clearTimeout(autoPrioritizeTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (
+      previousSessionStatusRef.current === 'running' &&
+      sessionStatus !== 'running'
+    ) {
+      setPrioritizingTasks({});
+    }
+    previousSessionStatusRef.current = sessionStatus;
+  }, [sessionStatus]);
+
+  useEffect(() => {
+    if (!pendingAutoPrioritizationRef.current) {
+      return;
+    }
+    if (!canTriggerPrioritization) {
+      return;
+    }
+    triggerAutoPrioritization();
+  }, [canTriggerPrioritization, triggerAutoPrioritization]);
+
+  useEffect(() => {
+    setPrioritizingTasks({});
+  }, [planVersion]);
+
   useEffect(() => {
     if (previousStorageKeyRef.current !== storageKey) {
       previousStorageKeyRef.current = storageKey;
@@ -400,6 +693,30 @@ export function TaskList({
     hasLoadedStoredState.current = true;
   }, [storageKey]);
 
+  useEffect(() => {
+    if (!cachedManualTasks.length) {
+      return;
+    }
+    cachedManualTasks.forEach(task => {
+      attachManualTask(task.id, task.title, { flash: false });
+    });
+  }, [attachManualTask, cachedManualTasks]);
+
+  useEffect(() => {
+    if (!cachedManualTasks.length) {
+      return;
+    }
+    const planIds = new Set(sanitizedTaskIds);
+    const remaining = cachedManualTasks.filter(task => !planIds.has(task.id));
+    if (remaining.length === cachedManualTasks.length) {
+      return;
+    }
+    setManualTaskStore(prev => ({
+      ...prev,
+      [manualTaskCacheKey]: remaining,
+    }));
+  }, [cachedManualTasks, manualTaskCacheKey, sanitizedTaskIds, setManualTaskStore]);
+
   const flagRecentlyDiscarded = useCallback((ids: string[]) => {
     if (typeof window === 'undefined') {
       return;
@@ -419,6 +736,99 @@ export function TaskList({
     }, 2000);
   }, []);
 
+  const handleToggleDiscardCandidate = useCallback((taskId: string, approved: boolean) => {
+    setDiscardCandidates(prev =>
+      prev.map(candidate =>
+        candidate.taskId === taskId ? { ...candidate, approved } : candidate
+      )
+    );
+  }, []);
+
+  const handleApplyDiscardDecisions = useCallback(() => {
+    setDiscardCandidates(prev => {
+      if (prev.length === 0) {
+        setShowDiscardReview(false);
+        return prev;
+      }
+
+      const approved = prev.filter(candidate => candidate.approved);
+      const rejected = prev.filter(candidate => !candidate.approved);
+
+      if (approved.length === 0) {
+        toast.info('Select at least one task to discard, or Cancel All to keep everything.');
+        setShowDiscardReview(false);
+        const rejectionSet = rejectedDiscardIdsRef.current;
+        prev.forEach(candidate => rejectionSet.add(candidate.taskId));
+        return [];
+      }
+
+      updatePriorityState(current => {
+        const next: PriorityState = {
+          statuses: { ...current.statuses },
+          reasons: { ...current.reasons },
+          ranks: { ...current.ranks },
+        };
+
+        approved.forEach(candidate => {
+          next.statuses[candidate.taskId] = 'discarded';
+          next.reasons[candidate.taskId] = candidate.reason;
+          if (typeof candidate.previousRank === 'number') {
+            next.ranks[candidate.taskId] = candidate.previousRank;
+          } else if (!next.ranks[candidate.taskId]) {
+            next.ranks[candidate.taskId] = Object.keys(current.ranks).length + 1;
+          }
+        });
+
+        rejected.forEach(candidate => {
+          if (next.statuses[candidate.taskId] === 'discarded') {
+            next.statuses[candidate.taskId] = 'active';
+          }
+          if (next.reasons[candidate.taskId]) {
+            delete next.reasons[candidate.taskId];
+          }
+        });
+
+        return next;
+      });
+
+      const rejectionSet = rejectedDiscardIdsRef.current;
+      approved.forEach(candidate => rejectionSet.delete(candidate.taskId));
+      rejected.forEach(candidate => rejectionSet.add(candidate.taskId));
+
+      flagRecentlyDiscarded(approved.map(candidate => candidate.taskId));
+      toast.success(
+        `${approved.length} ${approved.length === 1 ? 'task' : 'tasks'} discarded, ${
+          rejected.length
+        } kept active`
+      );
+      setShowDiscardReview(false);
+      return [];
+    });
+  }, [flagRecentlyDiscarded, updatePriorityState]);
+
+  const handleCancelAllDiscards = useCallback(() => {
+    setDiscardCandidates(prev => {
+      if (prev.length > 0) {
+        toast.info('Discard cancelled. All tasks kept active.');
+        const rejectionSet = rejectedDiscardIdsRef.current;
+        prev.forEach(candidate => rejectionSet.add(candidate.taskId));
+      }
+      return [];
+    });
+    setShowDiscardReview(false);
+  }, []);
+
+  const handleDiscardModalOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (!nextOpen) {
+        handleCancelAllDiscards();
+      } else if (discardCandidates.length > 0) {
+        setShowDiscardReview(true);
+      }
+    },
+    [discardCandidates.length, handleCancelAllDiscards]
+  );
+
   useEffect(() => {
     // Reset unmount flag on mount (important for HMR)
     didUnmountRef.current = false;
@@ -437,6 +847,11 @@ export function TaskList({
       return;
     }
 
+    if (previousPlanVersionRef.current !== planVersion) {
+      rejectedDiscardIdsRef.current.clear();
+      previousPlanVersionRef.current = planVersion;
+    }
+
     const prevPlan = previousPlanRef.current ?? [];
     const currentState = priorityStateRef.current;
 
@@ -448,7 +863,10 @@ export function TaskList({
 
     let stateChanged = false;
     let ranksChanged = false;
-    const newlyDiscarded: string[] = [];
+    const newlyRemovedIds: string[] = [];
+    const manualTaskIdSet = new Set(manualTaskIds);
+    const planIdSet = new Set(sanitizedTaskIds);
+    const candidateIds = new Set<string>();
 
     sanitizedTaskIds.forEach((taskId, index) => {
       const annotation = annotationById.get(taskId);
@@ -467,9 +885,6 @@ export function TaskList({
       if (annotation?.state === 'discarded' && nextState.statuses[taskId] !== 'discarded') {
         nextState.statuses[taskId] = 'discarded';
         stateChanged = true;
-        if (!newlyDiscarded.includes(taskId)) {
-          newlyDiscarded.push(taskId);
-        }
       }
 
       const desiredRank = index + 1;
@@ -491,20 +906,20 @@ export function TaskList({
 
     if (prevPlan.length > 0) {
       prevPlan.forEach(taskId => {
-        if (!sanitizedTaskIds.includes(taskId)) {
-          const status = nextState.statuses[taskId];
-          if (status === 'active' || status === 'completed') {
-            nextState.statuses[taskId] = 'discarded';
-            const removal = removalById.get(taskId);
-            if (removal?.removal_reason) {
-              nextState.reasons[taskId] = removal.removal_reason;
-            } else if (!nextState.reasons[taskId]) {
-              const note = statusNote && statusNote.trim().length > 0 ? statusNote.trim() : null;
-              nextState.reasons[taskId] = note ?? DEFAULT_REMOVAL_REASON;
+        if (!planIdSet.has(taskId)) {
+          if (nextState.statuses[taskId] !== 'discarded') {
+            if (!nextState.ranks[taskId]) {
+              nextState.ranks[taskId] =
+                sanitizedTaskIds.length + manualTaskIdSet.size + Object.keys(nextState.ranks).length + 1;
+              ranksChanged = true;
             }
-            stateChanged = true;
-            if (!newlyDiscarded.includes(taskId)) {
-              newlyDiscarded.push(taskId);
+            if (nextState.reasons[taskId]) {
+              delete nextState.reasons[taskId];
+              stateChanged = true;
+            }
+            if (!candidateIds.has(taskId)) {
+              candidateIds.add(taskId);
+              newlyRemovedIds.push(taskId);
             }
           }
         }
@@ -512,25 +927,16 @@ export function TaskList({
     }
 
     removedTasksFromPlan.forEach(removal => {
-      const currentStatus = nextState.statuses[removal.task_id];
-      if (currentStatus !== 'discarded') {
-        nextState.statuses[removal.task_id] = 'discarded';
-        stateChanged = true;
-        if (!newlyDiscarded.includes(removal.task_id)) {
-          newlyDiscarded.push(removal.task_id);
-        }
+      if (planIdSet.has(removal.task_id)) {
+        return;
       }
-
-      if (removal.removal_reason) {
-        if (nextState.reasons[removal.task_id] !== removal.removal_reason) {
-          nextState.reasons[removal.task_id] = removal.removal_reason;
-          stateChanged = true;
-        }
-      } else if (!nextState.reasons[removal.task_id]) {
-        nextState.reasons[removal.task_id] = DEFAULT_REMOVAL_REASON;
-        stateChanged = true;
+      if (nextState.statuses[removal.task_id] === 'discarded') {
+        return;
       }
-
+      if (!candidateIds.has(removal.task_id)) {
+        candidateIds.add(removal.task_id);
+        newlyRemovedIds.push(removal.task_id);
+      }
       if (
         typeof removal.previous_rank === 'number' &&
         nextState.ranks[removal.task_id] !== removal.previous_rank
@@ -557,14 +963,88 @@ export function TaskList({
       updatePriorityState(() => nextState);
     }
 
-    if (newlyDiscarded.length > 0) {
-      flagRecentlyDiscarded(newlyDiscarded);
+    if (candidateIds.size > 0) {
+      const fallbackReason =
+        statusNote && statusNote.trim().length > 0 ? statusNote.trim() : DEFAULT_REMOVAL_REASON;
+      const rejectionSet = rejectedDiscardIdsRef.current;
+      const candidateDetails: DiscardCandidate[] = Array.from(candidateIds)
+        .map(taskId => {
+          const removal = removalById.get(taskId);
+          const annotation = annotationById.get(taskId);
+          const title =
+            taskLookup[taskId]?.title ??
+            metadataRef.current[taskId]?.title ??
+            formatTaskId(taskId);
+          const reason =
+            removal?.removal_reason ??
+            annotation?.removal_reason ??
+            fallbackReason ??
+            DEFAULT_REMOVAL_REASON;
+          const previousRank =
+            typeof removal?.previous_rank === 'number'
+              ? removal.previous_rank
+              : nextState.ranks[taskId] ?? null;
+          const isManual = taskLookup[taskId]?.isManual ?? manualTaskIdSet.has(taskId);
+          return {
+            taskId,
+            title,
+            reason,
+            previousRank: typeof previousRank === 'number' ? previousRank : null,
+            isManual,
+            approved: true,
+          };
+        })
+        .sort((a, b) => {
+          if (typeof a.previousRank === 'number' && typeof b.previousRank === 'number') {
+            return a.previousRank - b.previousRank;
+          }
+          if (typeof a.previousRank === 'number') {
+            return -1;
+          }
+          if (typeof b.previousRank === 'number') {
+            return 1;
+          }
+          return a.title.localeCompare(b.title);
+        });
+
+      const filteredCandidates = candidateDetails.filter(candidate => !rejectionSet.has(candidate.taskId));
+      if (filteredCandidates.length === 0) {
+        setDiscardCandidates(prev => (prev.length === 0 ? prev : []));
+        setShowDiscardReview(false);
+      } else {
+        setDiscardCandidates(prev => {
+          const approvalMap = new Map(prev.map(candidate => [candidate.taskId, candidate.approved]));
+          const merged = filteredCandidates.map(candidate => ({
+            ...candidate,
+            approved: approvalMap.get(candidate.taskId) ?? candidate.approved,
+          }));
+          const isSame =
+            merged.length === prev.length &&
+            merged.every((candidate, index) => {
+              const previous = prev[index];
+              return (
+                previous &&
+                previous.taskId === candidate.taskId &&
+                previous.reason === candidate.reason &&
+                previous.title === candidate.title &&
+                previous.previousRank === candidate.previousRank &&
+                previous.isManual === candidate.isManual &&
+                previous.approved === candidate.approved
+              );
+            });
+          return isSame ? prev : merged;
+        });
+        setShowDiscardReview(true);
+      }
+    } else {
+      setDiscardCandidates(prev => (prev.length === 0 ? prev : []));
+      setShowDiscardReview(false);
     }
 
     if (onDiffSummary) {
       const isInitial = planVersion <= 1;
       const orderChanged = prevPlan.length === 0 ? false : !arraysEqual(prevPlan, sanitizedTaskIds);
-      const hasChanges = isInitial ? false : orderChanged || newlyDiscarded.length > 0;
+      const hasChanges = isInitial ? false : orderChanged || newlyRemovedIds.length > 0;
       onDiffSummary({ hasChanges, isInitial });
     }
 
@@ -575,12 +1055,13 @@ export function TaskList({
     planVersion,
     onDiffSummary,
     updatePriorityState,
-    flagRecentlyDiscarded,
     statusNote,
     annotationById,
     removalById,
     removedTasksFromPlan,
     lockedTasks,
+    manualTaskIds,
+    taskLookup,
   ]);
 
   const trackedTaskIds = useMemo(
@@ -647,6 +1128,7 @@ export function TaskList({
             category?: 'leverage' | 'neutral' | 'overhead' | null;
             rationale?: string | null;
             original_text?: string | null;
+            is_manual?: boolean;
           }>;
         };
 
@@ -674,6 +1156,7 @@ export function TaskList({
               category: task.category ?? null,
               rationale: task.rationale ?? null,
               sourceText: task.original_text ?? null,
+              isManual: Boolean(task.is_manual),
             };
           }
 
@@ -840,6 +1323,7 @@ export function TaskList({
         reasoning,
         dependencyNotes,
         manualOverride,
+        isManual: Boolean(lookup?.isManual ?? manualOverride),
         state,
         removalReason,
       };
@@ -867,7 +1351,9 @@ export function TaskList({
 
     Object.keys(priorityState.statuses).forEach(taskId => {
       const existing = snapshot[taskId];
+      const lookup = taskLookup[taskId];
       if (existing) {
+        const annotation = annotationById.get(taskId);
         snapshot[taskId] = {
           ...existing,
           title: getTaskTitle(taskId),
@@ -876,13 +1362,18 @@ export function TaskList({
             existing.removalReason ?? removalById.get(taskId)?.removal_reason ?? null,
           manualOverride:
             existing.manualOverride ??
-            annotationById.get(taskId)?.manual_override ??
+            annotation?.manual_override ??
             !sanitizedTaskIds.includes(taskId),
+          isManual:
+            existing.isManual ??
+            lookup?.isManual ??
+            annotation?.manual_override ??
+            existing.manualOverride ??
+            false,
         };
       } else {
         const annotation = annotationById.get(taskId);
         const removal = removalById.get(taskId);
-        const lookup = taskLookup[taskId];
         const overrides = dependencyOverrides[taskId];
         snapshot[taskId] = {
           id: taskId,
@@ -906,6 +1397,10 @@ export function TaskList({
           dependencyNotes: annotation?.dependency_notes ?? null,
           manualOverride:
             annotation?.manual_override ?? !sanitizedTaskIds.includes(taskId),
+          isManual:
+            lookup?.isManual ??
+            annotation?.manual_override ??
+            !sanitizedTaskIds.includes(taskId),
           state: annotation?.state,
           removalReason: annotation?.removal_reason ?? removal?.removal_reason ?? null,
         };
@@ -1044,6 +1539,8 @@ export function TaskList({
         displayOrder: index + 1,
         checked: priorityState.statuses[taskId] === 'completed',
         isAiGenerated: Boolean(node.manualOverride),
+        isManual: Boolean(node.isManual),
+        isPrioritizing: Boolean(prioritizingTasks[taskId]),
       };
     })
     .filter(Boolean) as Array<{
@@ -1056,6 +1553,8 @@ export function TaskList({
       displayOrder: number;
       checked: boolean;
       isAiGenerated: boolean;
+      isManual: boolean;
+      isPrioritizing: boolean;
     }>;
 
   const topTaskHighlights = useMemo(
@@ -1229,6 +1728,9 @@ export function TaskList({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            <Button size="sm" onClick={() => setIsManualTaskModalOpen(true)}>
+              + Add Task
+            </Button>
             {executionMetadata && (
               <span className="text-xs text-muted-foreground">
                 {executionMetadata.steps_taken} steps •{' '}
@@ -1312,11 +1814,17 @@ export function TaskList({
               movement={task.movement}
               checked={task.checked}
               isAiGenerated={task.isAiGenerated}
+              isManual={task.isManual}
+              isPrioritizing={task.isPrioritizing}
               isSelected={selectedTaskId === task.id && isDrawerOpen}
               isHighlighted={highlightedIds.has(task.id)}
               onSelect={handleSelectTask}
               onToggleCompleted={handleToggleCompleted}
               onToggleLock={() => handleToggleLock(task.id, task.displayOrder)}
+              isEditingDisabled={sessionStatus === 'running'}
+              onTaskTitleChange={handleTaskTitleChange}
+              outcomeId={outcomeId}
+              onEditSuccess={handleTaskEditSuccess}
             />
           ))}
               </div>
@@ -1398,8 +1906,25 @@ export function TaskList({
         outcomeStatement={outcomeStatement ?? null}
         isLocked={selectedIsLocked}
         onRemoveDependency={handleRemoveDependency}
-        onAddDependency={handleAddDependency}
-        taskOptions={taskOptions}
+      onAddDependency={handleAddDependency}
+      taskOptions={taskOptions}
+      />
+
+      <ManualTaskModal
+        open={isManualTaskModalOpen}
+        onOpenChange={setIsManualTaskModalOpen}
+        outcomeId={outcomeId}
+        onTaskCreated={handleManualTaskCreated}
+        onDuplicateTaskFound={handleDuplicateTaskFound}
+      />
+
+      <DiscardReviewModal
+        open={showDiscardReview}
+        candidates={discardCandidates}
+        onOpenChange={handleDiscardModalOpenChange}
+        onToggleCandidate={handleToggleDiscardCandidate}
+        onApplyChanges={handleApplyDiscardDecisions}
+        onCancelAll={handleCancelAllDiscards}
       />
     </div>
   );

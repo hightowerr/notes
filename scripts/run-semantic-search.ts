@@ -5,7 +5,7 @@
 
   async function main() {
     const payload = {
-      query: 'increase app monthly revenue',
+      query: 'Increase the conversion rate by 20% through experimentation',
       limit: 20,
       threshold: 0.1,
     };

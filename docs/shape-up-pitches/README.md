@@ -228,7 +228,7 @@ Each pitch has a **fixed appetite** (time budget). We shape the solution to fit 
 - ✅ Tailwind xs: breakpoint (475px) for fine-grained control
 - ✅ Tap highlights and visual feedback
 - ❌ No native mobile apps (web-responsive only)
-- ❌ No PWA features (Phase 9 if needed)
+- ❌ No PWA features (future phase if needed)
 
 **Time Investment:** Pure CSS changes, no logic modifications, low risk
 
@@ -236,7 +236,38 @@ Each pitch has a **fixed appetite** (time budget). We shape the solution to fit 
 
 ---
 
-## Total Timeline: 7-8 Weeks (vs 8+ weeks custom)
+### Phase 9: Manual Task Control & Discard Approval
+**Appetite:** 2 weeks
+
+**Problem:** Users cannot add tasks, edit descriptions, or control which tasks get discarded during re-prioritization
+
+**Solution:** Manual task creation + inline editing + discard approval workflow
+
+**Components:**
+- "Add Task" button → quick-capture modal
+- Inline editing with debounced save
+- Discard review modal (approve/reject)
+- Auto re-prioritization after changes
+- Visual indicators ([MANUAL] badges, edit states)
+
+**Key unlock:** Users become collaborators instead of spectators
+
+**Features:**
+- ✅ Manual task creation with duplicate detection
+- ✅ Inline task text & hours editing
+- ✅ User approval required before discarding tasks
+- ✅ Automatic re-prioritization integration
+- ✅ Edit locking during prioritization
+- ❌ No batch operations (future phase if needed)
+- ❌ No task templates or dependencies UI
+
+**Time Investment:** 2 weeks (tightly coupled UX features)
+
+[Read Full Pitch →](./phase-9-manual-task-control.md)
+
+---
+
+## Total Timeline: 9-10 Weeks (vs 10+ weeks custom)
 
 Each phase is:
 - **Independently shippable** (can ship Phase 1 without Phase 2)
@@ -248,6 +279,7 @@ Each phase is:
 **Phase 6 adds:** Document reprocessing capability (1-2 days)
 **Phase 7 adds:** Reflection-driven context awareness (2 weeks)
 **Phase 8 adds:** Mobile-first responsive design (1.5 weeks)
+**Phase 9 adds:** Manual task control & discard approval (2 weeks)
 
 ---
 
@@ -389,6 +421,6 @@ const trace = await taskOrchestratorAgent.getExecutionTrace(executionId);
 
 ---
 
-**Last Updated:** 2025-11-05
-**Status:** Updated with Phase 6 (Document-Level Reprocessing)
+**Last Updated:** 2025-01-08
+**Status:** Updated with Phase 9 (Manual Task Control & Discard Approval)
 **Framework:** Mastra AI (TypeScript-first, YC-backed)

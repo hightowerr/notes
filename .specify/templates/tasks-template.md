@@ -1,306 +1,251 @@
+---
+
+description: "Task list template for feature implementation"
+---
+
 # Tasks: [FEATURE NAME]
 
 **Input**: Design documents from `/specs/[###-feature-name]/`
-**Prerequisites**: plan.md (required), spec.md, research.md, data-model.md, contracts/
+**Prerequisites**: plan.md (required), spec.md (required for user stories), research.md, data-model.md, contracts/
 
-## Execution Flow (Slice-Based)
-```
-1. Load plan.md from feature directory
-   → If not found: ERROR "No implementation plan found"
-   → Extract: tech stack, user stories, acceptance criteria
+**Tests**: The examples below include test tasks. Tests are OPTIONAL - only include them if explicitly requested in the feature specification.
 
-2. Load spec.md for user journeys:
-   → Extract: primary user actions, expected outcomes
-   → Identify: UI entry points, data flows, feedback mechanisms
+**Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
-3. Load optional design documents:
-   → contracts/: API endpoints for each user action
-   → data-model.md: Data structures needed for journeys
-   → research.md: Technical decisions affecting slices
+## Format: `[ID] [P?] [Story] Description`
 
-4. Generate VERTICAL SLICE tasks:
-   → Each user story = ONE complete slice task
-   → Slice includes: UI component + API endpoint + data layer + user feedback
-   → Validate: Can user SEE, DO, and VERIFY this?
-   → Reject: Backend-only, frontend-only, or infrastructure-only tasks
-
-5. Apply slice ordering rules:
-   → P0 user journeys first (must-have features)
-   → Setup tasks ONLY if blocking all P0 slices
-   → P1 journeys after P0 validated
-   → Polish after core journeys work
-
-6. Mark parallel execution:
-   → Different user journeys = [P] (parallel)
-   → Shared critical files = sequential
-
-7. Validate EVERY task:
-   → ✅ Includes user story?
-   → ✅ Specifies UI entry point?
-   → ✅ Includes backend work?
-   → ✅ Describes visible outcome?
-   → ✅ Has test scenario?
-   → ❌ Reject if any missing
-
-8. Return: SUCCESS (slice tasks ready for execution)
-```
-
-## Format: `[ID] [TYPE] [P?] User Story & Implementation Scope`
-- **[SLICE]**: Complete vertical slice (UI → Backend → Data → Feedback)
-- **[SETUP]**: Foundational work blocking ALL slices (avoid if possible)
-- **[POLISH]**: Enhancement to existing working slice
-- **[P]**: Can run in parallel with other [P] tasks
+- **[P]**: Can run in parallel (different files, no dependencies)
+- **[Story]**: Which user story this task belongs to (e.g., US1, US2, US3)
+- Include exact file paths in descriptions
 
 ## Path Conventions
+
 - **Single project**: `src/`, `tests/` at repository root
-- **Web app**: `app/` (Next.js), `lib/`, `components/`
-- **API**: `app/api/`, `lib/services/`
-- Paths shown below assume Next.js - adjust based on plan.md structure
+- **Web app**: `backend/src/`, `frontend/src/`
+- **Mobile**: `api/src/`, `ios/src/` or `android/src/`
+- Paths shown below assume single project - adjust based on plan.md structure
+
+<!-- 
+  ============================================================================
+  IMPORTANT: The tasks below are SAMPLE TASKS for illustration purposes only.
+  
+  The /speckit.tasks command MUST replace these with actual tasks based on:
+  - User stories from spec.md (with their priorities P1, P2, P3...)
+  - Feature requirements from plan.md
+  - Entities from data-model.md
+  - Endpoints from contracts/
+  
+  Tasks MUST be organized by user story so each story can be:
+  - Implemented independently
+  - Tested independently
+  - Delivered as an MVP increment
+  
+  DO NOT keep these sample tasks in the generated tasks.md file.
+  ============================================================================
+-->
+
+## Phase 1: Setup (Shared Infrastructure)
+
+**Purpose**: Project initialization and basic structure
+
+- [ ] T001 Create project structure per implementation plan
+- [ ] T002 Initialize [language] project with [framework] dependencies
+- [ ] T003 [P] Configure linting and formatting tools
 
 ---
 
-## Phase 1: P0 User Journeys (Must-Have Features)
+## Phase 2: Foundational (Blocking Prerequisites)
 
-### T001 [SLICE] User uploads note file and sees upload confirmation
-**User Story**: As a user, I can drag-and-drop a PDF/DOCX/TXT file to upload it and receive immediate confirmation
+**Purpose**: Core infrastructure that MUST be complete before ANY user story can be implemented
 
-**Implementation Scope**:
-- **UI**: File upload component with drag-drop zone (`app/components/FileUpload.tsx`)
-  - Visual feedback during upload (progress indicator)
-  - Success state with file name and size
-- **Backend**: POST `/api/upload` endpoint (`app/api/upload/route.ts`)
-  - Accept multipart/form-data
-  - Save to Supabase storage bucket `notes`
-  - Return file metadata (name, size, upload timestamp)
-- **Data**: Supabase storage persistence
-- **Feedback**: Success message displays "uploaded.pdf (2.3MB) uploaded successfully"
+**⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-**Test Scenario**:
-1. Navigate to home page
-2. Drag `test-note.pdf` to upload zone
-3. Observe progress indicator
-4. Verify success message shows file name and size
-5. Check Supabase storage for uploaded file
+Examples of foundational tasks (adjust based on your project):
 
-**Files Modified**:
-- `app/components/FileUpload.tsx` (create)
-- `app/api/upload/route.ts` (create)
-- `app/page.tsx` (integrate component)
+- [ ] T004 Setup database schema and migrations framework
+- [ ] T005 [P] Implement authentication/authorization framework
+- [ ] T006 [P] Setup API routing and middleware structure
+- [ ] T007 Create base models/entities that all stories depend on
+- [ ] T008 Configure error handling and logging infrastructure
+- [ ] T009 Setup environment configuration management
+
+**Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
 ---
 
-### T002 [P] [SLICE] User views uploaded files in dashboard
-**User Story**: As a user, I can navigate to a dashboard and see a list of all my uploaded files with preview information
+## Phase 3: User Story 1 - [Title] (Priority: P1) 🎯 MVP
 
-**Implementation Scope**:
-- **UI**: Dashboard page with file grid (`app/dashboard/page.tsx`)
-  - File cards showing: name, upload date, file type icon
-  - Responsive grid layout (shadcn Card components)
-- **Backend**: GET `/api/files` endpoint (`app/api/files/route.ts`)
-  - Retrieve file list from Supabase storage
-  - Return metadata array (name, size, upload_date, type)
-- **Data**: Query Supabase storage bucket metadata
-- **Feedback**: Files display in grid, empty state if no files
+**Goal**: [Brief description of what this story delivers]
 
-**Test Scenario**:
-1. Upload 2-3 files using T001
-2. Navigate to `/dashboard`
-3. Verify all uploaded files appear in grid
-4. Check file names, dates, and type icons display correctly
-5. Verify empty state shows if no files exist
+**Independent Test**: [How to verify this story works on its own]
 
-**Files Modified**:
-- `app/dashboard/page.tsx` (create)
-- `app/api/files/route.ts` (create)
-- `components/ui/card.tsx` (use existing)
+### Tests for User Story 1 (OPTIONAL - only if tests requested) ⚠️
 
----
+> **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-### T003 [SLICE] User sees note summary after file processing completes
-**User Story**: As a user, after uploading a note, I can see an AI-generated summary with topics, decisions, actions, and LNO tasks
+- [ ] T010 [P] [US1] Contract test for [endpoint] in tests/contract/test_[name].py
+- [ ] T011 [P] [US1] Integration test for [user journey] in tests/integration/test_[name].py
 
-**Implementation Scope**:
-- **UI**: Summary panel component (`app/components/SummaryPanel.tsx`)
-  - Displays: topics list, decisions list, actions list, LNO task columns
-  - Loading state during processing
-  - Error state if processing fails
-- **Backend**:
-  - File processing service (`lib/services/noteProcessor.ts`)
-    * Convert PDF/DOCX/TXT → Markdown (using unified parser)
-    * Call AI summarization (Vercel AI SDK)
-    * Extract structured JSON (topics, decisions, actions, lno_tasks)
-  - POST `/api/process` endpoint (`app/api/process/route.ts`)
-    * Trigger processing for uploaded file
-    * Store JSON output in Supabase database
-    * Return summary data
-- **Data**:
-  - Supabase table `note_summaries` (file_id, summary_json, created_at)
-  - Storage: original file + generated markdown
-- **Feedback**: Summary appears below upload confirmation with all extracted data
+### Implementation for User Story 1
 
-**Test Scenario**:
-1. Upload `sample-meeting-notes.pdf`
-2. Observe "Processing..." state
-3. Wait for summary to appear (≤8 seconds)
-4. Verify topics, decisions, actions populate
-5. Check LNO tasks categorized correctly (Leverage/Neutral/Overhead)
-6. Confirm data persisted in Supabase table
+- [ ] T012 [P] [US1] Create [Entity1] model in src/models/[entity1].py
+- [ ] T013 [P] [US1] Create [Entity2] model in src/models/[entity2].py
+- [ ] T014 [US1] Implement [Service] in src/services/[service].py (depends on T012, T013)
+- [ ] T015 [US1] Implement [endpoint/feature] in src/[location]/[file].py
+- [ ] T016 [US1] Add validation and error handling
+- [ ] T017 [US1] Add logging for user story 1 operations
 
-**Files Modified**:
-- `app/components/SummaryPanel.tsx` (create)
-- `lib/services/noteProcessor.ts` (create)
-- `app/api/process/route.ts` (create)
-- `app/api/upload/route.ts` (modify to trigger processing)
-- Database migration for `note_summaries` table
+**Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
 ---
 
-## Phase 2: Setup (If Required for P0)
+## Phase 4: User Story 2 - [Title] (Priority: P2)
 
-### T004 [SETUP] Configure AI SDK and document conversion dependencies
-**Why Needed**: T003 requires AI SDK and document parsing libraries
+**Goal**: [Brief description of what this story delivers]
 
-**Implementation Scope**:
-- Install dependencies: `ai`, `pdf-parse`, `mammoth` (DOCX), unified markdown tools
-- Configure environment variables for AI provider
-- Create shared AI client utility (`lib/ai/client.ts`)
-- Add error handling and retry logic wrapper
+**Independent Test**: [How to verify this story works on its own]
 
-**Validation**:
-- Dependencies installed successfully
-- AI client initializes without errors
-- Ready for use in T003
+### Tests for User Story 2 (OPTIONAL - only if tests requested) ⚠️
 
-**Files Modified**:
-- `package.json`
-- `.env.local`
-- `lib/ai/client.ts` (create)
+- [ ] T018 [P] [US2] Contract test for [endpoint] in tests/contract/test_[name].py
+- [ ] T019 [P] [US2] Integration test for [user journey] in tests/integration/test_[name].py
 
----
+### Implementation for User Story 2
 
-## Phase 3: P1 User Journeys (Nice-to-Have)
+- [ ] T020 [P] [US2] Create [Entity] model in src/models/[entity].py
+- [ ] T021 [US2] Implement [Service] in src/services/[service].py
+- [ ] T022 [US2] Implement [endpoint/feature] in src/[location]/[file].py
+- [ ] T023 [US2] Integrate with User Story 1 components (if needed)
 
-### T005 [P] [SLICE] User can delete uploaded file from dashboard
-**User Story**: As a user, I can delete a file from my dashboard and see it removed immediately
-
-**Implementation Scope**:
-- **UI**: Delete button on file cards (`app/dashboard/page.tsx`)
-  - Confirmation dialog before deletion
-  - Optimistic UI update (remove card immediately)
-- **Backend**: DELETE `/api/files/:id` endpoint (`app/api/files/[id]/route.ts`)
-  - Remove file from Supabase storage
-  - Delete associated summary data
-- **Feedback**: File card fades out, success toast appears
-
-**Test Scenario**:
-1. Navigate to dashboard with uploaded files
-2. Click delete icon on a file card
-3. Confirm deletion in dialog
-4. Verify file card disappears
-5. Check file removed from Supabase storage
+**Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
 
 ---
 
-### T006 [P] [SLICE] User can download original uploaded file
-**User Story**: As a user, I can download the original file I uploaded from the dashboard
+## Phase 5: User Story 3 - [Title] (Priority: P3)
 
-**Implementation Scope**:
-- **UI**: Download button on file cards
-  - Shows download progress for large files
-- **Backend**: GET `/api/files/:id/download` endpoint
-  - Retrieve file from Supabase storage
-  - Stream file to client with proper headers
-- **Feedback**: Browser download starts, file saves locally
+**Goal**: [Brief description of what this story delivers]
 
-**Test Scenario**:
-1. Navigate to dashboard
-2. Click download icon on file card
-3. Verify browser download initiates
-4. Check downloaded file matches original
+**Independent Test**: [How to verify this story works on its own]
 
----
+### Tests for User Story 3 (OPTIONAL - only if tests requested) ⚠️
 
-## Phase 4: Polish
+- [ ] T024 [P] [US3] Contract test for [endpoint] in tests/contract/test_[name].py
+- [ ] T025 [P] [US3] Integration test for [user journey] in tests/integration/test_[name].py
 
-### T007 [P] [POLISH] Add upload progress indicator with percentage
-**Enhancement to**: T001
+### Implementation for User Story 3
 
-**Implementation Scope**:
-- Add upload progress tracking to `FileUpload.tsx`
-- Display percentage and estimated time remaining
-- Handle pause/resume for large files
+- [ ] T026 [P] [US3] Create [Entity] model in src/models/[entity].py
+- [ ] T027 [US3] Implement [Service] in src/services/[service].py
+- [ ] T028 [US3] Implement [endpoint/feature] in src/[location]/[file].py
 
-**Test Scenario**:
-1. Upload 50MB file
-2. Observe progress bar with percentage
-3. Verify accurate time estimates
+**Checkpoint**: All user stories should now be independently functional
 
 ---
 
-### T008 [P] [POLISH] Implement summary export (JSON/Markdown download)
-**Enhancement to**: T003
-
-**Implementation Scope**:
-- Add export buttons to `SummaryPanel.tsx`
-- Generate downloadable JSON and Markdown files
-- Format Markdown with proper headings and lists
-
-**Test Scenario**:
-1. Process a file to generate summary
-2. Click "Export JSON" → verify JSON downloads
-3. Click "Export Markdown" → verify formatted MD downloads
+[Add more user story phases as needed, following the same pattern]
 
 ---
 
-## Dependencies
+## Phase N: Polish & Cross-Cutting Concerns
 
-```
-T001 → (enables) → T002, T003
-T004 → (required for) → T003
-T003 → (enables) → T008
-T002 → (enables) → T005, T006
-```
+**Purpose**: Improvements that affect multiple user stories
 
-**Parallel Execution**:
-- T001 must complete first (foundational)
-- T002 + T004 can run in parallel after T001
-- T005 + T006 can run in parallel after T002
-- T007 + T008 can run in parallel after T003
+- [ ] TXXX [P] Documentation updates in docs/
+- [ ] TXXX Code cleanup and refactoring
+- [ ] TXXX Performance optimization across all stories
+- [ ] TXXX [P] Additional unit tests (if requested) in tests/unit/
+- [ ] TXXX Security hardening
+- [ ] TXXX Run quickstart.md validation
 
 ---
 
-## Parallel Execution Example
+## Dependencies & Execution Order
+
+### Phase Dependencies
+
+- **Setup (Phase 1)**: No dependencies - can start immediately
+- **Foundational (Phase 2)**: Depends on Setup completion - BLOCKS all user stories
+- **User Stories (Phase 3+)**: All depend on Foundational phase completion
+  - User stories can then proceed in parallel (if staffed)
+  - Or sequentially in priority order (P1 → P2 → P3)
+- **Polish (Final Phase)**: Depends on all desired user stories being complete
+
+### User Story Dependencies
+
+- **User Story 1 (P1)**: Can start after Foundational (Phase 2) - No dependencies on other stories
+- **User Story 2 (P2)**: Can start after Foundational (Phase 2) - May integrate with US1 but should be independently testable
+- **User Story 3 (P3)**: Can start after Foundational (Phase 2) - May integrate with US1/US2 but should be independently testable
+
+### Within Each User Story
+
+- Tests (if included) MUST be written and FAIL before implementation
+- Models before services
+- Services before endpoints
+- Core implementation before integration
+- Story complete before moving to next priority
+
+### Parallel Opportunities
+
+- All Setup tasks marked [P] can run in parallel
+- All Foundational tasks marked [P] can run in parallel (within Phase 2)
+- Once Foundational phase completes, all user stories can start in parallel (if team capacity allows)
+- All tests for a user story marked [P] can run in parallel
+- Models within a story marked [P] can run in parallel
+- Different user stories can be worked on in parallel by different team members
+
+---
+
+## Parallel Example: User Story 1
 
 ```bash
-# After T001 completes, launch T002 and T004 together:
-Task: "Implement T002 [SLICE] User views uploaded files in dashboard"
-Task: "Implement T004 [SETUP] Configure AI SDK and document conversion dependencies"
+# Launch all tests for User Story 1 together (if tests requested):
+Task: "Contract test for [endpoint] in tests/contract/test_[name].py"
+Task: "Integration test for [user journey] in tests/integration/test_[name].py"
 
-# After T002 and T004 complete, can launch:
-Task: "Implement T003 [SLICE] User sees note summary after processing"
-Task: "Implement T005 [SLICE] User can delete uploaded file"
-Task: "Implement T006 [SLICE] User can download original file"
+# Launch all models for User Story 1 together:
+Task: "Create [Entity1] model in src/models/[entity1].py"
+Task: "Create [Entity2] model in src/models/[entity2].py"
 ```
+
+---
+
+## Implementation Strategy
+
+### MVP First (User Story 1 Only)
+
+1. Complete Phase 1: Setup
+2. Complete Phase 2: Foundational (CRITICAL - blocks all stories)
+3. Complete Phase 3: User Story 1
+4. **STOP and VALIDATE**: Test User Story 1 independently
+5. Deploy/demo if ready
+
+### Incremental Delivery
+
+1. Complete Setup + Foundational → Foundation ready
+2. Add User Story 1 → Test independently → Deploy/Demo (MVP!)
+3. Add User Story 2 → Test independently → Deploy/Demo
+4. Add User Story 3 → Test independently → Deploy/Demo
+5. Each story adds value without breaking previous stories
+
+### Parallel Team Strategy
+
+With multiple developers:
+
+1. Team completes Setup + Foundational together
+2. Once Foundational is done:
+   - Developer A: User Story 1
+   - Developer B: User Story 2
+   - Developer C: User Story 3
+3. Stories complete and integrate independently
 
 ---
 
 ## Notes
 
-- **[SLICE]** tasks are independently deployable and user-testable
-- **[P]** tasks operate on different files/features and can run in parallel
-- Every slice MUST enable user to SEE, DO, and VERIFY something
-- Avoid creating tasks without complete user journey
-- Setup tasks should be minimal - prefer integrating setup into slices
-- Each task should be demoable to a non-technical person
-
-## Validation Checklist
-*MUST verify before creating tasks.md*
-
-- [ ] Every [SLICE] task has a user story
-- [ ] Every [SLICE] task includes UI + Backend + Data + Feedback
-- [ ] Every [SLICE] task has a test scenario
-- [ ] No backend-only or frontend-only tasks exist
-- [ ] Setup tasks are minimal and justify their necessity
-- [ ] Tasks ordered by user value, not technical layers
-- [ ] Parallel tasks truly operate on independent features/files
-- [ ] Each task specifies exact file paths to modify
+- [P] tasks = different files, no dependencies
+- [Story] label maps task to specific user story for traceability
+- Each user story should be independently completable and testable
+- Verify tests fail before implementing
+- Commit after each task or logical group
+- Stop at any checkpoint to validate story independently
+- Avoid: vague tasks, same file conflicts, cross-story dependencies that break independence

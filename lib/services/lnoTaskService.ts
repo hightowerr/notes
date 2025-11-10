@@ -27,6 +27,7 @@ type TaskEmbeddingRow = {
   task_id: string;
   task_text: string | null;
   document_id: string | null;
+  is_manual?: boolean | null;
 };
 
 type ProcessedDocumentRow = {
@@ -47,6 +48,7 @@ export type OutcomeAlignedTask = {
   title: string;
   category: LnoCategory | null;
   rationale: string | null;
+  is_manual?: boolean;
 };
 
 function normalizeText(value: unknown): string | null {
@@ -123,7 +125,7 @@ export async function resolveOutcomeAlignedTasks(
 
   const { data: taskRows, error: taskError } = await supabase
     .from('task_embeddings')
-    .select('task_id, task_text, document_id')
+    .select('task_id, task_text, document_id, is_manual')
     .in('task_id', taskIds)
     .returns<TaskEmbeddingRow[]>();
 
@@ -192,6 +194,7 @@ export async function resolveOutcomeAlignedTasks(
         title,
         category: classification.category,
         rationale,
+        is_manual: Boolean(row.is_manual),
       };
       continue;
     }
@@ -207,6 +210,7 @@ export async function resolveOutcomeAlignedTasks(
         title,
         category: fallbackCategory,
         rationale,
+        is_manual: Boolean(row.is_manual),
       };
     } else {
       const fallbackTitle = row.task_id;
@@ -217,6 +221,7 @@ export async function resolveOutcomeAlignedTasks(
         title: fallbackTitle,
         category: null,
         rationale: null,
+        is_manual: Boolean(row.is_manual),
       };
     }
   }
