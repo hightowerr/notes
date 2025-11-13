@@ -45,13 +45,13 @@ type SortField = 'date' | 'name' | 'confidence' | 'size';
 type SortOrder = 'asc' | 'desc';
 
 interface DocumentSummary {
-  topics: string[];
-  decisions: string[];
-  actions: (string | Action)[]; // Support both old string format and new Action objects
-  lno_tasks: {
-    leverage: string[];
-    neutral: string[];
-    overhead: string[];
+  topics?: string[];
+  decisions?: string[];
+  actions?: (string | Action)[]; // Support both old string format and new Action objects
+  lno_tasks?: {
+    leverage?: string[];
+    neutral?: string[];
+    overhead?: string[];
   };
 }
 
@@ -979,12 +979,12 @@ export default function DashboardPage() {
                     <div className="mb-2">
                       <p className="text-sm font-semibold mb-1">Topics:</p>
                       <div className="flex flex-wrap gap-1">
-                        {doc.summary.topics.slice(0, 3).map((topic, idx) => (
+                        {doc.summary.topics && doc.summary.topics.slice(0, 3).map((topic, idx) => (
                           <Badge key={idx} variant="outline" className="text-xs">
                             {topic}
                           </Badge>
                         ))}
-                        {doc.summary.topics.length > 3 && (
+                        {doc.summary.topics && doc.summary.topics.length > 3 && (
                           <Badge variant="outline" className="text-xs">
                             +{doc.summary.topics.length - 3} more
                           </Badge>
@@ -998,9 +998,9 @@ export default function DashboardPage() {
                     <div className="space-y-3">
                       {/* Topics */}
                       <div>
-                        <p className="text-sm font-semibold mb-1">Topics ({doc.summary.topics.length})</p>
+                        <p className="text-sm font-semibold mb-1">Topics ({doc.summary.topics?.length || 0})</p>
                         <div className="flex flex-wrap gap-1">
-                          {doc.summary.topics.map((topic, idx) => (
+                          {doc.summary.topics && doc.summary.topics.map((topic, idx) => (
                             <Badge key={idx} variant="outline" className="text-xs">
                               {topic}
                             </Badge>
@@ -1012,8 +1012,8 @@ export default function DashboardPage() {
 
                       {/* Decisions */}
                       <div>
-                        <p className="text-sm font-semibold mb-1">Decisions ({doc.summary.decisions.length})</p>
-                        {doc.summary.decisions.length > 0 ? (
+                        <p className="text-sm font-semibold mb-1">Decisions ({doc.summary.decisions?.length || 0})</p>
+                        {doc.summary.decisions && doc.summary.decisions.length > 0 ? (
                           <ul className="list-disc list-inside text-sm space-y-1">
                             {doc.summary.decisions.map((decision, idx) => (
                               <li key={idx} className="text-muted-foreground">
@@ -1030,8 +1030,8 @@ export default function DashboardPage() {
 
                       {/* Actions */}
                       <div>
-                        <p className="text-sm font-semibold mb-1">Actions ({doc.summary.actions.length})</p>
-                        {doc.summary.actions.length > 0 ? (
+                        <p className="text-sm font-semibold mb-1">Actions ({doc.summary.actions?.length || 0})</p>
+                        {doc.summary.actions && doc.summary.actions.length > 0 ? (
                           <ul className="list-disc list-inside text-sm space-y-1">
                             {doc.summary.actions.map((action, idx) => {
                               // Handle both old string format and new Action object format
@@ -1056,9 +1056,9 @@ export default function DashboardPage() {
                         <div className="space-y-2">
                           <div>
                             <p className="text-xs font-medium text-green-600 dark:text-green-400">
-                              Leverage ({doc.summary.lno_tasks.leverage.length})
+                              Leverage ({doc.summary.lno_tasks.leverage?.length || 0})
                             </p>
-                            {doc.summary.lno_tasks.leverage.length > 0 ? (
+                            {doc.summary.lno_tasks.leverage && doc.summary.lno_tasks.leverage.length > 0 ? (
                               <ul className="list-disc list-inside text-xs space-y-0.5 ml-2">
                                 {doc.summary.lno_tasks.leverage.map((task, idx) => (
                                   <li key={idx} className="text-muted-foreground">
@@ -1073,9 +1073,9 @@ export default function DashboardPage() {
 
                           <div>
                             <p className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                              Neutral ({doc.summary.lno_tasks.neutral.length})
+                              Neutral ({doc.summary.lno_tasks.neutral?.length || 0})
                             </p>
-                            {doc.summary.lno_tasks.neutral.length > 0 ? (
+                            {doc.summary.lno_tasks.neutral && doc.summary.lno_tasks.neutral.length > 0 ? (
                               <ul className="list-disc list-inside text-xs space-y-0.5 ml-2">
                                 {doc.summary.lno_tasks.neutral.map((task, idx) => (
                                   <li key={idx} className="text-muted-foreground">
@@ -1090,9 +1090,9 @@ export default function DashboardPage() {
 
                           <div>
                             <p className="text-xs font-medium text-orange-600 dark:text-orange-400">
-                              Overhead ({doc.summary.lno_tasks.overhead.length})
+                              Overhead ({doc.summary.lno_tasks.overhead?.length || 0})
                             </p>
-                            {doc.summary.lno_tasks.overhead.length > 0 ? (
+                            {doc.summary.lno_tasks.overhead && doc.summary.lno_tasks.overhead.length > 0 ? (
                               <ul className="list-disc list-inside text-xs space-y-0.5 ml-2">
                                 {doc.summary.lno_tasks.overhead.map((task, idx) => (
                                   <li key={idx} className="text-muted-foreground">

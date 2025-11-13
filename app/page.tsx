@@ -674,6 +674,10 @@ export default function Home() {
       <ReflectionPanel
         isOpen={reflectionPanelOpen}
         onOpenChange={setReflectionPanelOpen}
+        onReflectionAdded={() => {
+          // When a reflection is added, we could trigger some response if needed
+          // For now, just keep as is, but we have the hook available
+        }}
       />
       </div>
     </>

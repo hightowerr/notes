@@ -30,6 +30,9 @@ const inputSchema = z.object({
     .transform(value => value.trim()),
   limit: z.coerce.number().default(20),
   threshold: z.coerce.number().default(0.7),
+  // Mastra may add additional fields like suspend and resumeData, allow them
+  suspend: z.unknown().optional(),
+  resumeData: z.unknown().optional(),
 });
 
 function isRetryableEmbeddingError(error: EmbeddingError): boolean {
@@ -57,54 +60,40 @@ function isRetryableEmbeddingError(error: EmbeddingError): boolean {
 }
 
 async function executeSemanticSearch(
-  input: z.input<typeof inputSchema>
+  input: any
 ): Promise<{
   tasks: SimilaritySearchResult[];
   count: number;
   query: string;
 }> {
-  const raw = input ?? {};
-  const context = extractProperty(raw, 'context');
+  console.log('[SemanticSearch] Input:', input);
 
-  const normalized = {
-    query: normalizeQuery(
-      extractProperty(raw, 'query') ?? extractProperty(context, 'query')
-    ),
-    limit: normalizeNumber(
-      extractProperty(raw, 'limit') ?? extractProperty(context, 'limit')
-    ),
-    threshold: normalizeNumber(
-      extractProperty(raw, 'threshold') ?? extractProperty(context, 'threshold')
-    ),
-  };
-
-  console.log('[SemanticSearch] Raw input:', input);
-  console.log('[SemanticSearch] Normalized input:', normalized);
-  console.log('[SemanticSearch] input.context:', context);
-  console.log(
-    '[SemanticSearch] Type of normalized.query:',
-    typeof normalized.query,
-    'Value:',
-    normalized.query
-  );
+  // Check if Mastra context format is used (with context property)
+  // Otherwise assume direct arguments for testing compatibility
+  const args = 'context' in input && input.context !== undefined ? input.context : input;
+  
+  if (!args) {
+    throw new SemanticSearchToolError(
+      'INVALID_INPUT',
+      'Tool arguments not found in context object',
+      false
+    );
+  }
 
   let query: string;
   let limit: number;
   let threshold: number;
 
   try {
-    ({ query, limit, threshold } = inputSchema.parse(normalized));
-    console.log('[SemanticSearch] Parsed values:', { query, limit, threshold });
+    // Parse with the input schema (basic coercion only)
+    ({ query, limit, threshold } = inputSchema.parse(args));
+    console.log('[SemanticSearch] Parsed:', { query, limit, threshold });
   } catch (err) {
-    console.error(
-      '[SemanticSearch] Zod parse failed. Normalized snapshot:',
-      normalized,
-      'Error:',
-      err
-    );
+    console.error('[SemanticSearch] Basic parsing failed:', err);
     throw err;
   }
 
+  // Now do the specific validation that was in the original manual checks
   if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
     throw new SemanticSearchToolError(
       'INVALID_THRESHOLD',
@@ -198,83 +187,7 @@ async function executeSemanticSearch(
   }
 }
 
-function normalizeQuery(value: unknown): string {
-  if (value === undefined) {
-    return '';
-  }
 
-  if (typeof value === 'string') {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    const first = value.find(item => typeof item === 'string') ?? '';
-    return String(first);
-  }
-
-  if (value === null || typeof value === 'undefined') {
-    return '';
-  }
-
-  return String(value);
-}
-
-function normalizeNumber(value: unknown): unknown {
-  if (typeof value === 'number' || typeof value === 'bigint') {
-    return Number(value);
-  }
-
-  if (typeof value === 'string' && value.trim().length > 0) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-
-  return value;
-}
-
-function extractProperty(source: unknown, key: string): unknown {
-  if (!source) {
-    return undefined;
-  }
-
-  if (typeof source === 'object') {
-    if (key in (source as Record<string, unknown>)) {
-      return (source as Record<string, unknown>)[key];
-    }
-
-    if (source instanceof Map) {
-      return source.get(key);
-    }
-
-    const candidate = source as Record<string, unknown>;
-    const getter = candidate.get;
-    if (typeof getter === 'function') {
-      try {
-        const value = getter.call(source, key);
-        if (value !== undefined) {
-          return value;
-        }
-      } catch {
-        // Ignore getter errors and continue
-      }
-    }
-
-    const entries = candidate.entries;
-    if (typeof entries === 'function') {
-      try {
-        for (const entry of entries.call(source) as Iterable<unknown>) {
-          if (Array.isArray(entry) && entry[0] === key) {
-            return entry[1];
-          }
-        }
-      } catch {
-        // Ignore iterator errors
-      }
-    }
-  }
-
-  return undefined;
-}
 
 export const semanticSearchTool = createTool({
   id: 'semantic-search',

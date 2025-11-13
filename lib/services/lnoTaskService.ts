@@ -70,7 +70,8 @@ function buildOutcomeAlignment(
   const verb = CATEGORY_VERBS[category];
   const context = CATEGORY_CONTEXT[category];
 
-  const title = `[${label}] ${text}`;
+  // Return clean title without brackets - category will be displayed separately in UI
+  const title = text;
   const rationale = `${context} ${quotedOutcome} by ensuring ${text}. This ${label.toLowerCase()} task ${verb} momentum toward ${quotedOutcome}.`;
 
   return { title, rationale };
@@ -177,6 +178,21 @@ export async function resolveOutcomeAlignedTasks(
   }
 
   const outcome = options.outcome;
+  
+  // 🔍 DIAGNOSTIC: Log detailed info about task rows
+  console.log('[LNOTaskService] Processing task rows:', {
+    totalRows: taskRows?.length ?? 0,
+    rowsWithMissingText: taskRows?.filter(row => !normalizeText(row.task_text)).length ?? 0,
+    sampleMissingText: taskRows?.filter(row => !normalizeText(row.task_text)).slice(0, 2).map(row => ({
+      id: row.task_id.slice(0, 16) + '...',
+      textIsNull: row.task_text === null,
+      textIsEmpty: row.task_text === '',
+      textLength: typeof row.task_text === 'string' ? row.task_text.length : 'not string',
+      hasDocId: !!row.document_id,
+      isManual: row.is_manual
+    }))
+  });
+  
   const result: Record<string, OutcomeAlignedTask> = {};
 
   for (const row of taskRows ?? []) {
@@ -186,6 +202,13 @@ export async function resolveOutcomeAlignedTasks(
 
     const classification = lnoIndex.get(row.task_id);
     if (classification) {
+      console.log('[LNOTaskService] Found classification for task:', {
+        taskId: row.task_id.slice(0, 16) + '...',
+        hasClassificationText: !!classification.text,
+        classificationText: classification.text?.slice(0, 60),
+        category: classification.category
+      });
+      
       const { title, rationale } = buildOutcomeAlignment(classification.text, classification.category, outcome);
       result[row.task_id] = {
         task_id: row.task_id,
@@ -199,8 +222,19 @@ export async function resolveOutcomeAlignedTasks(
       continue;
     }
 
+    console.log('[LNOTaskService] No classification found, checking fallback text for:', {
+      taskId: row.task_id.slice(0, 16) + '...',
+      taskText: row.task_text,
+      hasFallbackText: !!normalizeText(row.task_text)
+    });
+
     const fallbackText = normalizeText(row.task_text);
     if (fallbackText) {
+      console.log('[LNOTaskService] Using fallback text for task:', {
+        taskId: row.task_id.slice(0, 16) + '...',
+        fallbackText: fallbackText?.slice(0, 60)
+      });
+      
       const fallbackCategory: LnoCategory = 'neutral';
       const { title, rationale } = buildOutcomeAlignment(fallbackText, fallbackCategory, outcome);
       result[row.task_id] = {
@@ -213,7 +247,13 @@ export async function resolveOutcomeAlignedTasks(
         is_manual: Boolean(row.is_manual),
       };
     } else {
-      const fallbackTitle = row.task_id;
+      console.log('[LNOTaskService] Using fallback title for task with no text:', {
+        taskId: row.task_id.slice(0, 16) + '...',
+        taskText: row.task_text,
+        documentId: row.document_id
+      });
+      
+      const fallbackTitle = 'Untitled task';
       result[row.task_id] = {
         task_id: row.task_id,
         document_id: row.document_id,

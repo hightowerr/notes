@@ -60,6 +60,24 @@ export async function getTaskRecordsByIds(
     throw new Error(`Failed to load task embeddings: ${error.message}`);
   }
 
+  // 🔍 DIAGNOSTIC: Log tasks found in the database
+  console.log('[TaskRepository] Loaded task embeddings from DB:', {
+    requestedCount: taskIds.length,
+    foundCount: data?.length ?? 0,
+    missingCount: taskIds.length - (data?.length ?? 0),
+    missingSample: taskIds.filter(id => !(data ?? []).some(row => row.task_id === id)).slice(0, 5),
+    nullTextCount: (data ?? []).filter(row => row.task_text === null).length,
+    emptyTextCount: (data ?? []).filter(row => row.task_text === '').length,
+    sampleNullText: (data ?? [])
+      .filter(row => row.task_text === null)
+      .slice(0, 3)
+      .map(row => ({ id: row.task_id.slice(0, 16) + '...', text: row.task_text })),
+    sampleEmptyText: (data ?? [])
+      .filter(row => row.task_text === '')
+      .slice(0, 3)
+      .map(row => ({ id: row.task_id.slice(0, 16) + '...', text: row.task_text }))
+  });
+
   const taskMap = new Map<string, TaskRecord>();
 
   (data ?? []).forEach(row => {

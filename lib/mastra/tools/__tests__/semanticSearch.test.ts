@@ -84,4 +84,34 @@ describe('semanticSearchTool', () => {
       retryable: true,
     });
   });
+
+  it('validates limit is between 1 and 100', async () => {
+    await expect(
+      semanticSearchTool.execute({ query: 'test', limit: 101 })
+    ).rejects.toMatchObject({ code: 'INVALID_LIMIT' });
+
+    await expect(
+      semanticSearchTool.execute({ query: 'test', limit: 0 })
+    ).rejects.toMatchObject({ code: 'INVALID_LIMIT' });
+  });
+
+  it('coerces string numbers to numbers', async () => {
+    vi.spyOn(embeddingService, 'generateEmbedding').mockResolvedValue(mockEmbedding);
+    vi.spyOn(vectorStorage, 'searchSimilarTasks').mockResolvedValue([...baseResult]);
+
+    // Should work with string numbers that can be converted
+    const result = await semanticSearchTool.execute({
+      query: 'test',
+      limit: '5',      // String should be coerced to number
+      threshold: '0.8' // String should be coerced to number
+    });
+
+    expect(result.count).toBe(2);
+  });
+
+  it('throws for non-integer limit values', async () => {
+    await expect(
+      semanticSearchTool.execute({ query: 'test', limit: 5.5 })
+    ).rejects.toMatchObject({ code: 'INVALID_LIMIT' });
+  });
 });

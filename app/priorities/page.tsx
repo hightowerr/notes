@@ -632,14 +632,68 @@ export default function TaskPrioritiesPage() {
             ...prev.confidence_scores,
             ...adjustedPlan.confidence_scores,
           };
-          return {
-            ...prev,
-            ordered_task_ids:
-              adjustedPlan.ordered_task_ids.length > 0
-                ? adjustedPlan.ordered_task_ids
-                : prev.ordered_task_ids,
-            confidence_scores: mergedConfidence,
-          };
+          
+          // Preserve locked task positions by applying adjusted order while respecting locks
+          const prevOrder = [...prev.ordered_task_ids];
+          const adjustedOrder = [...adjustedPlan.ordered_task_ids];
+          
+          // Get currently locked task IDs from localStorage
+          let lockedTaskIds: Set<string> = new Set();
+          try {
+            const lockStore = localStorage.getItem('locked-tasks');
+            if (lockStore) {
+              const parsed = JSON.parse(lockStore);
+              const outcomeKey = activeOutcome?.id || 'global';
+              lockedTaskIds = new Set(Object.keys(parsed[outcomeKey] || {}));
+            }
+          } catch (e) {
+            console.warn('Failed to read locked tasks from localStorage', e);
+          }
+          
+          if (lockedTaskIds.size > 0) {
+            // Separate locked and unlocked tasks from the adjusted order
+            const unlockedInAdjustedOrder = adjustedOrder.filter(id => !lockedTaskIds.has(id));
+            
+            // Create a new order with locked tasks in their original relative positions
+            const newOrder = [];
+            let unlockedIndex = 0;
+            
+            // Go through the previous order and place items accordingly
+            for (const taskId of prevOrder) {
+              if (lockedTaskIds.has(taskId)) {
+                // Keep locked tasks in their original positions
+                newOrder.push(taskId);
+              } else {
+                // Replace unlocked positions with tasks from the adjusted order
+                if (unlockedIndex < unlockedInAdjustedOrder.length) {
+                  newOrder.push(unlockedInAdjustedOrder[unlockedIndex]);
+                  unlockedIndex++;
+                }
+              }
+            }
+            
+            // Add any remaining unlocked tasks that might not have been in the original
+            while (unlockedIndex < unlockedInAdjustedOrder.length) {
+              newOrder.push(unlockedInAdjustedOrder[unlockedIndex]);
+              unlockedIndex++;
+            }
+            
+            return {
+              ...prev,
+              ordered_task_ids: newOrder,
+              confidence_scores: mergedConfidence,
+            };
+          } else {
+            // No locked tasks, use the adjusted order as is
+            return {
+              ...prev,
+              ordered_task_ids:
+                adjustedPlan.ordered_task_ids.length > 0
+                  ? adjustedPlan.ordered_task_ids
+                  : prev.ordered_task_ids,
+              confidence_scores: mergedConfidence,
+            };
+          }
         });
         setPlanVersion(prev => prev + 1);
         setPlanStatusMessage(null);
@@ -2129,6 +2183,10 @@ export default function TaskPrioritiesPage() {
       <ReflectionPanel
         isOpen={reflectionPanelOpen}
         onOpenChange={setReflectionPanelOpen}
+        onReflectionAdded={() => {
+          // When a reflection is added, fetch latest reflections and trigger recompute
+          fetchReflections();
+        }}
       />
     </div>
   );

@@ -144,7 +144,7 @@ export async function createReflection(
 }
 
 /**
- * Delete a reflection
+ * Delete a reflection and clean up any references to it
  *
  * @param userId - User ID (UUID)
  * @param reflectionId - Reflection ID (UUID)
@@ -154,6 +154,72 @@ export async function deleteReflection(
   userId: string,
   reflectionId: string
 ): Promise<void> {
+  // First, update any agent sessions that might be using this reflection to remove references
+  // This prevents broken references in adjusted plans
+  try {
+    // Fetch current agent sessions to check for reflection references
+    const { data: sessions, error: fetchError } = await supabase
+      .from('agent_sessions')
+      .select('id, adjusted_plan, baseline_plan')
+      .eq('user_id', userId);
+
+    if (sessions && Array.isArray(sessions)) {
+      for (const session of sessions) {
+        let updated = false;
+        let updatedAdjustedPlan = session.adjusted_plan;
+        let updatedBaselinePlan = session.baseline_plan;
+
+        // Remove reference to the deleted reflection from adjusted_plan if it contains reflection IDs
+        if (updatedAdjustedPlan && typeof updatedAdjustedPlan === 'object' && updatedAdjustedPlan.adjustment_metadata) {
+          // Safely access the reflections array in adjustment_metadata
+          if (Array.isArray(updatedAdjustedPlan.adjustment_metadata.reflections)) {
+            const originalLength = updatedAdjustedPlan.adjustment_metadata.reflections.length;
+            updatedAdjustedPlan.adjustment_metadata.reflections = 
+              updatedAdjustedPlan.adjustment_metadata.reflections.filter((r: any) => r?.id !== reflectionId);
+              
+            if (updatedAdjustedPlan.adjustment_metadata.reflections.length !== originalLength) {
+              updated = true;
+            }
+          }
+        }
+
+        // Also check baseline_plan (though less likely to contain reflection references)
+        if (updatedBaselinePlan && typeof updatedBaselinePlan === 'object' && updatedBaselinePlan.adjustment_metadata) {
+          if (Array.isArray(updatedBaselinePlan.adjustment_metadata.reflections)) {
+            const originalLength = updatedBaselinePlan.adjustment_metadata.reflections.length;
+            updatedBaselinePlan.adjustment_metadata.reflections = 
+              updatedBaselinePlan.adjustment_metadata.reflections.filter((r: any) => r?.id !== reflectionId);
+              
+            if (updatedBaselinePlan.adjustment_metadata.reflections.length !== originalLength) {
+              updated = true;
+            }
+          }
+        }
+
+        // Update the session if any reflection references were removed
+        if (updated) {
+          const { error: updateError } = await supabase
+            .from('agent_sessions')
+            .update({ 
+              adjusted_plan: updatedAdjustedPlan,
+              baseline_plan: updatedBaselinePlan
+            })
+            .eq('id', session.id);
+
+          if (updateError) {
+            console.warn(`[ReflectionService] Failed to update agent session after reflection deletion:`, updateError);
+          }
+        }
+      }
+    } else if (fetchError) {
+      console.error('Error fetching sessions to clean up reflection references:', fetchError);
+    }
+  } catch (cleanupError) {
+    console.error('Error during reflection reference cleanup:', cleanupError);
+    // Don't throw - continue with deletion even if cleanup fails 
+  }
+
+  // Now delete the reflection from the reflections table
   const { error } = await supabase
     .from('reflections')
     .delete()

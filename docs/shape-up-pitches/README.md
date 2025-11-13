@@ -421,6 +421,151 @@ const trace = await taskOrchestratorAgent.getExecutionTrace(executionId);
 
 ---
 
-**Last Updated:** 2025-01-08
-**Status:** Updated with Phase 9 (Manual Task Control & Discard Approval)
+---
+
+### Phase 10: Task Intelligence (Gap & Quality Detection)
+**Appetite:** 6 weeks
+
+**Problem:** Agent accepts whatever tasks exist without questioning if they're well-defined or comprehensive
+
+**Solution:** AI-powered gap detection + task quality evaluation + auto-generated draft tasks
+
+**Components:**
+- Goal-task coverage analyzer (semantic distance detection)
+- Task quality evaluator (clarity, specificity, granularity)
+- Gap-filling draft generator (suggest missing tasks)
+- Self-questioning protocol (agent validates plan quality)
+- Quality badges + gap detection modal UI
+
+**Key unlock:** System proactively identifies missing steps and vague tasks before work begins
+
+**Features:**
+- ✅ Goal coverage score (detect missing conceptual areas)
+- ✅ Task quality scoring (clarity, measurability, verb strength)
+- ✅ Auto-generated draft tasks to fill gaps
+- ✅ Quality suggestions ("Split 'Improve UX' into 2 measurable tasks")
+- ✅ Pre-flight check in agent reasoning
+- ❌ No automatic task editing (suggestions only)
+
+**Time Investment:** 6 weeks (foundational agentic reasoning)
+
+[Read Full Pitch →](./phase-10-task-intelligence.md)
+
+---
+
+### Phase 11: Strategic Prioritization (Impact-Effort Model)
+**Appetite:** 6 weeks
+
+**Problem:** Tasks ranked by semantic similarity, ignoring business impact, effort, and risk
+
+**Solution:** Multi-dimensional scoring (Impact × Effort × Confidence) + strategic sorting + 2×2 quadrant visualization
+
+**Components:**
+- Strategic scoring service (Impact 0-10, Effort hours, Confidence 0-1)
+- Priority calculation: `Priority = E[Impact] / E[Effort] × Confidence`
+- Multiple sorting strategies (Balanced, Quick Wins, Strategic Bets, Urgent)
+- Impact/Effort 2×2 quadrant visualization
+- Score transparency ("Why this score?" modal)
+- Manual override system
+
+**Key unlock:** Business-aware prioritization that trades off impact, effort, and risk
+
+**Features:**
+- ✅ Impact/Effort/Confidence scoring for every task
+- ✅ Quick wins filter (high impact, low effort)
+- ✅ Strategic bets view (high impact, high effort)
+- ✅ Interactive quadrant visualization
+- ✅ Transparent score breakdowns
+- ❌ No historical outcome tracking (Phase 13)
+
+**Time Investment:** 6 weeks (strategic reasoning layer)
+
+[Read Full Pitch →](./phase-11-strategic-prioritization.md)
+
+---
+
+### Phase 12: Goal Harmony (Conflict Detection & Resolution)
+**Appetite:** 6 weeks
+
+**Problem:** Multiple goals work at cross-purposes without user awareness
+
+**Solution:** Multi-goal conflict detection + resource overlap analysis + trade-off visualization + resolution workflows
+
+**Components:**
+- Conflict detector (semantic + heuristic rules)
+- Resource overlap analyzer (capacity conflicts)
+- Trade-off analysis engine (impact simulation)
+- Goal relationship graph (D3.js)
+- 4 resolution workflows (Prioritize, Merge, Defer, Adjust)
+- Combined priority plan (cross-goal balancing)
+
+**Key unlock:** Users understand how goals interact and avoid wasting effort on conflicting work
+
+**Features:**
+- ✅ Detect conflicting goals ("Increase conversions" vs. "Reduce CAC")
+- ✅ Resource overlap warnings (designer needs 90h, only 40h available)
+- ✅ Trade-off analysis (what you gain/lose by choosing Goal A over B)
+- ✅ Visual goal relationship graph
+- ✅ Synergy detection (tasks that help multiple goals)
+- ❌ No multi-user collaboration features
+
+**Time Investment:** 6 weeks (multi-goal reasoning)
+
+[Read Full Pitch →](./phase-12-goal-harmony.md)
+
+---
+
+### Phase 13: Path Explorer (Alternative Strategy Simulation)
+**Appetite:** 6 weeks
+
+**Problem:** Users see one plan and can't explore alternative approaches or risk profiles
+
+**Solution:** Multi-path strategy generation (Safe/Balanced/Aggressive) + Monte Carlo simulation + what-if mode + scenario comparison
+
+**Components:**
+- Path generation engine (3 alternative strategies)
+- Monte Carlo simulator (10k iterations, Bayesian risk modeling)
+- Path comparison dashboard (timeline, risk, impact, cost)
+- Decision tree visualization
+- Interactive what-if mode (adjust risk/timeline/budget)
+- Scenario customization + export (PDF, CSV)
+
+**Key unlock:** Strategic planning with multiple options, clear trade-offs, and risk transparency
+
+**Features:**
+- ✅ 3 generated paths: Safe Bet (15% risk), Balanced (35% risk), Moonshot (60% risk)
+- ✅ Monte Carlo simulation (success probability, expected value)
+- ✅ Interactive comparison (radar charts, decision trees)
+- ✅ What-if sliders (regenerate paths with new constraints)
+- ✅ Custom path creation (fork and modify)
+- ✅ Shareable scenario URLs + PDF export
+- ❌ No real-time collaboration
+- ❌ No historical outcome tracking (future phase)
+
+**Time Investment:** 6 weeks (advanced scenario planning)
+
+[Read Full Pitch →](./phase-13-path-explorer.md)
+
+---
+
+## Total Timeline: 33-34 Weeks (Phases 1-13)
+
+Each phase is:
+- **Independently shippable** (can ship Phase 10 without Phase 11)
+- **Fixed scope** (rabbit holes explicitly cut)
+- **Time-boxed** (6 week appetite, no extensions)
+
+**Phases 1-9:** Foundation + Core Features (21-22 weeks)
+**Phases 10-13:** Agentic Intelligence (24 weeks)
+
+**Overall Capability Progression:**
+1. **Phases 1-4:** Basic agent runtime + tools
+2. **Phases 5-9:** Cloud sync + context awareness + user control
+3. **Phases 10-11:** Task intelligence + strategic prioritization
+4. **Phases 12-13:** Multi-goal harmony + alternative path exploration
+
+---
+
+**Last Updated:** 2025-11-10
+**Status:** Updated with Phase 10-13 (Agentic Enhancement Suite)
 **Framework:** Mastra AI (TypeScript-first, YC-backed)

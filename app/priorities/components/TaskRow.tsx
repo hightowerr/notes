@@ -114,6 +114,7 @@ export function TaskRow({
   const [showSuccess, setShowSuccess] = useState(false);
   const [recentlyEdited, setRecentlyEdited] = useState(false);
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const editorContentRef = useRef<string>(title);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editHighlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -264,15 +265,24 @@ export function TaskRow({
       clearSaveTimer();
       clearErrorTimer();
       setShowSuccess(false);
+      const newOriginalText = editState.originalText;
       setEditState(prev => ({
         ...prev,
         mode: 'editing',
         draftText: prev.originalText,
         errorMessage: null,
       }));
-      focusEditor();
+      // Update editor content immediately to ensure it's populated
+      setTimeout(() => {
+        const node = editorRef.current;
+        if (node && node.textContent !== newOriginalText) {
+          node.textContent = newOriginalText;
+          editorContentRef.current = newOriginalText;
+        }
+        focusEditor();
+      }, 0);
     },
-    [clearSaveTimer, clearErrorTimer, focusEditor, isEditLocked]
+    [clearSaveTimer, clearErrorTimer, editState.originalText, focusEditor, isEditLocked]
   );
 
   const handleEditorInput = useCallback((event: React.FormEvent<HTMLDivElement>) => {
@@ -282,6 +292,7 @@ export function TaskRow({
       value = value.slice(0, MAX_TEXT_LENGTH);
       event.currentTarget.textContent = value;
     }
+    editorContentRef.current = value;
     setEditState(prev => ({
       ...prev,
       draftText: value,
@@ -388,10 +399,11 @@ export function TaskRow({
     if (!node) {
       return;
     }
-    if (document.activeElement === node) {
-      return;
+    // Only update the content if it's different to avoid cursor jumping when user is typing
+    if (editorContentRef.current !== editState.draftText) {
+      node.textContent = editState.draftText;
+      editorContentRef.current = editState.draftText;
     }
-    node.textContent = editState.draftText;
   }, [editState.draftText]);
 
   const statusIndicator = useMemo(() => {

@@ -106,7 +106,17 @@ const DEFAULT_REMOVAL_REASON =
 
 function formatTaskId(taskId: string): string {
   if (!taskId) {
+    console.log('[formatTaskId] 🔍 Called with empty taskId');
     return 'Unknown task';
+  }
+
+  // Check if this is a raw UUID (32+ characters, hex only)
+  const isRawUuid = /^[0-9a-f]+$/.test(taskId.replace(/-/g, '')) && taskId.replace(/-/g, '').length >= 32;
+  
+  if (isRawUuid) {
+    console.log('[formatTaskId] 🔍 Called with raw UUID, returning placeholder:', taskId);
+    // For raw UUIDs, return a more user-friendly placeholder
+    return 'Untitled task';
   }
 
   const parts = taskId.split('::');
@@ -197,6 +207,15 @@ function buildDependencyLinks(
   ranks: Record<string, number>,
   getTitle: (taskId: string) => string
 ) {
+  console.log('[TaskList] Building dependency links:', {
+    count: dependencies.length,
+    dependencies: dependencies.map(d => ({
+      source_task_id: d.source_task_id,
+      target_task_id: d.target_task_id,
+      relationship_type: d.relationship_type
+    }))
+  });
+  
   return dependencies.map(dependency => ({
     taskId: dependency.source_task_id,
     rank: ranks[dependency.source_task_id] ?? null,
@@ -209,6 +228,15 @@ function buildDependentLinks(
   ranks: Record<string, number>,
   getTitle: (taskId: string) => string
 ) {
+  console.log('[TaskList] Building dependent links:', {
+    count: dependents.length,
+    dependents: dependents.map(d => ({
+      source_task_id: d.source_task_id,
+      target_task_id: d.target_task_id,
+      relationship_type: d.relationship_type
+    }))
+  });
+  
   return dependents.map(dependency => ({
     taskId: dependency.target_task_id,
     rank: ranks[dependency.target_task_id] ?? null,
@@ -877,14 +905,27 @@ export function TaskList({
         stateChanged = true;
       }
 
+      // 🔒 SAFEGUARD: Never auto-complete/discard tasks from agent annotations
+      // Only manual user actions via handleToggleCompleted/handleApplyDiscardDecisions should change status
+      // This prevents silent task disappearance without user knowledge
       if (annotation?.state === 'completed' && nextState.statuses[taskId] !== 'completed') {
-        nextState.statuses[taskId] = 'completed';
-        stateChanged = true;
+        // Log warning but don't auto-apply
+        console.warn('[TaskList] ⚠️ Agent tried to mark task as completed:', {
+          taskId: taskId.slice(0, 16) + '...',
+          annotationState: annotation.state,
+          currentStatus: nextState.statuses[taskId]
+        });
+        // Keep status as 'active' - user must manually mark as complete
       }
 
       if (annotation?.state === 'discarded' && nextState.statuses[taskId] !== 'discarded') {
-        nextState.statuses[taskId] = 'discarded';
-        stateChanged = true;
+        // Log warning but don't auto-apply
+        console.warn('[TaskList] ⚠️ Agent tried to mark task as discarded:', {
+          taskId: taskId.slice(0, 16) + '...',
+          annotationState: annotation.state,
+          currentStatus: nextState.statuses[taskId]
+        });
+        // Keep status as 'active' - user must review via DiscardReviewModal
       }
 
       const desiredRank = index + 1;
@@ -1150,6 +1191,18 @@ export function TaskList({
         setTaskLookup(prev => {
           const next = { ...prev };
           for (const task of payload.tasks ?? []) {
+            // 🔍 DIAGNOSTIC: Log task info to understand missing titles
+            if (!task.title || task.title === formatTaskId(task.task_id)) {
+              console.log('[TaskList] 🔍 Task missing proper title:', {
+                taskId: task.task_id,
+                originalTitle: task.title,
+                fallbackTitle: formatTaskId(task.task_id),
+                isManual: task.is_manual,
+                category: task.category,
+                documentId: task.document_id,
+              });
+            }
+            
             next[task.task_id] = {
               title: task.title ?? formatTaskId(task.task_id),
               documentId: task.document_id ?? null,
@@ -1217,7 +1270,18 @@ export function TaskList({
   }, [trackedTaskIds, outcomeStatement]);
 
   const getTaskTitle = useCallback(
-    (taskId: string) => taskLookup[taskId]?.title ?? formatTaskId(taskId),
+    (taskId: string) => {
+      const task = taskLookup[taskId];
+      if (!task) {
+        console.log('[TaskList] 🔍 No task found in lookup for ID:', taskId);
+        return formatTaskId(taskId);
+      }
+      if (!task.title) {
+        console.log('[TaskList] 🔍 Task found but title is missing for ID:', taskId);
+        return formatTaskId(taskId);
+      }
+      return task.title;
+    },
     [taskLookup]
   );
 

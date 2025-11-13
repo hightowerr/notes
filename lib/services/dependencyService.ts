@@ -68,6 +68,9 @@ ${taskDescriptions}`;
     (dep) => dep.source_task_id !== dep.target_task_id
   );
 
+  console.log('[DependencyService] Raw dependencies from AI:', result.dependencies);
+  console.log('[DependencyService] Valid dependencies after filtering:', validDependencies);
+
   if (validDependencies.length > 0) {
     const { error: insertError } = await supabase
       .from('task_relationships')
@@ -84,6 +87,8 @@ ${taskDescriptions}`;
     if (insertError) {
       console.error('Failed to upsert dependencies:', insertError);
     }
+    
+    console.log('[DependencyService] Upserted dependencies to task_relationships table');
   }
 
   return {

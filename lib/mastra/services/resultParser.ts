@@ -310,6 +310,35 @@ function buildPlanFromJson(raw: unknown, narrative?: string): PrioritizedTaskPla
   return coercePlanCandidate(raw, narrative);
 }
 
+function sanitizeJsonString(jsonStr: string): string {
+  // Remove or escape control characters that are invalid in JSON strings
+  // Replace control characters (ASCII 0-31) with their escaped versions or remove them
+  return jsonStr
+    .replace(/\x08/g, '\\b')    // backspace
+    .replace(/\t/g, '\\t')       // tab
+    .replace(/\n/g, '\\n')       // newline
+    .replace(/\f/g, '\\f')       // form feed
+    .replace(/\r/g, '\\r')       // carriage return
+    .replace(/[\x00-\x07\x0B\x0C\x0E-\x1F\x7F]/g, ''); // Remove other control characters
+}
+
+function safeJsonParse(jsonStr: string): any {
+  try {
+    // First try to parse as is
+    return JSON.parse(jsonStr);
+  } catch (error) {
+    // If that fails, try to sanitize and parse
+    try {
+      const sanitized = sanitizeJsonString(jsonStr);
+      return JSON.parse(sanitized);
+    } catch (sanitizeError) {
+      // If sanitization also fails, re-throw the original error
+      console.error('[ResultParser] JSON sanitization failed', sanitizeError);
+      throw error; // Throw the original error
+    }
+  }
+}
+
 export function parsePlanFromAgentResponse(raw: unknown): MaybePlan {
   if (raw === null || typeof raw === 'undefined') {
     return { success: false, error: new Error('Empty response from agent') };
@@ -337,7 +366,7 @@ export function parsePlanFromAgentResponse(raw: unknown): MaybePlan {
 
       if (trimmed.startsWith('{')) {
         try {
-          const parsed = JSON.parse(trimmed);
+          const parsed = safeJsonParse(trimmed);
           const result = buildPlanFromJson(parsed);
           return { success: true, plan: result };
         } catch (error) {
@@ -356,7 +385,7 @@ export function parsePlanFromAgentResponse(raw: unknown): MaybePlan {
 
         const jsonContent = codeBlockMatch[1].trim();
         try {
-          const parsed = JSON.parse(jsonContent);
+          const parsed = safeJsonParse(jsonContent);
           const result = buildPlanFromJson(parsed, narrative);
           return { success: true, plan: result, narrative };
         } catch (error) {
@@ -377,7 +406,7 @@ export function parsePlanFromAgentResponse(raw: unknown): MaybePlan {
 
         const sliced = trimmed.slice(firstBrace, lastBrace + 1);
         try {
-          const parsed = JSON.parse(sliced);
+          const parsed = safeJsonParse(sliced);
           const result = buildPlanFromJson(parsed, narrative);
           return { success: true, plan: result, narrative };
         } catch (error) {

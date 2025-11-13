@@ -328,6 +328,16 @@ export async function POST(request: Request) {
     recoverMissing: true,
   });
 
+  // 🔍 DIAGNOSTIC: Log task text availability
+  console.log('[Suggest Gaps] Task text availability check:', {
+    totalTasks: planTasks.length,
+    missingTextCount: planTasks.filter(task => !task.task_text || task.task_text === 'Task description unavailable').length,
+    sampleMissing: planTasks
+      .filter(task => !task.task_text || task.task_text === 'Task description unavailable')
+      .slice(0, 3)
+      .map(task => ({ id: task.task_id.slice(0, 16) + '...', text: task.task_text }))
+  });
+  
   const taskTextMap = new Map(planTasks.map(task => [task.task_id, task.task_text]));
   const planSnapshot = buildPlanSnapshot(
     orderedTaskIds,

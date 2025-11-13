@@ -70,7 +70,7 @@ type ProcessedDocumentRow = {
 function toTaskSummary(row: TaskEmbeddingRow): TaskSummary {
   return {
     task_id: row.task_id,
-    task_text: row.task_text,
+    task_text: row.task_text || 'Task description unavailable', // Fallback for empty/null task text
     document_id: row.document_id,
     source: 'embedding',
   };

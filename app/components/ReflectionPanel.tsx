@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ReflectionInput } from './ReflectionInput';
@@ -14,12 +14,18 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 interface ReflectionPanelProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
+  onReflectionAdded?: () => void;  // Callback to notify parent when a reflection is added
 }
 
-export function ReflectionPanel({ isOpen, onOpenChange }: ReflectionPanelProps) {
+export function ReflectionPanel({ isOpen, onOpenChange, onReflectionAdded }: ReflectionPanelProps) {
   const [reflections, setReflections] = useState<ReflectionWithWeight[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+    return window.innerWidth < 768;
+  });
   const [pendingToggleIds, setPendingToggleIds] = useState<Set<string>>(new Set());
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
 
@@ -85,6 +91,8 @@ export function ReflectionPanel({ isOpen, onOpenChange }: ReflectionPanelProps) 
     } else {
       // Add new reflection (optimistic)
       setReflections((prev) => [reflection, ...prev].slice(0, 5)); // Keep max 5
+      // Notify parent that a reflection was added to trigger priority recompute
+      onReflectionAdded?.();
     }
   };
 
@@ -201,7 +209,13 @@ export function ReflectionPanel({ isOpen, onOpenChange }: ReflectionPanelProps) 
   );
 
   const PanelContent = () => (
-    <div className="h-full flex flex-col">
+    <div 
+      className="h-full flex flex-col"
+      onClick={(e) => {
+        console.log('[ReflectionPanel] PanelContent clicked - this should not close the panel');
+        e.stopPropagation();
+      }}
+    >
       {/* Header */}
       <div className="flex items-center justify-between mb-6 pb-4">
         <div>
@@ -240,40 +254,80 @@ export function ReflectionPanel({ isOpen, onOpenChange }: ReflectionPanelProps) 
     </div>
   );
 
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen || isMobile) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const panel = panelRef.current;
+      if (panel && !panel.contains(event.target as Node)) {
+        console.log('[ReflectionPanel] Click detected outside panel, closing');
+        onOpenChange(false);
+      } else {
+        console.log('[ReflectionPanel] Click detected inside panel, not closing');
+        console.log('[ReflectionPanel] Panel contains target:', panel?.contains(event.target as Node));
+        console.log('[ReflectionPanel] Event target:', event.target);
+        console.log('[ReflectionPanel] Panel ref:', panel);
+      }
+    };
+
+    console.log('[ReflectionPanel] Adding mousedown event listener, isOpen:', isOpen);
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      console.log('[ReflectionPanel] Removing mousedown event listener');
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen, isMobile, onOpenChange]);
+
+  // Desktop: Collapsible sidebar (outside Dialog)
+  const DesktopPanel = () => (
+    <div
+      ref={panelRef}
+      className="hidden md:block fixed right-0 top-0 h-full w-80 bg-bg-layer-2 shadow-2layer-lg transform transition-transform duration-300 ease-in-out translate-x-0"
+      style={{ zIndex: 1000 }}
+      onClick={(e) => {
+        console.log('[ReflectionPanel] Click event caught at panel level, stopping propagation');
+        e.stopPropagation();
+      }}
+    >
+      <div className="h-full p-6 overflow-hidden">
+        <PanelContent />
+      </div>
+    </div>
+  );
+
   return (
     <>
       {/* Desktop: Collapsible sidebar (outside Dialog) */}
-      {isOpen && (
-        <>
-          {/* Overlay (click to close) */}
+      {!isMobile && isOpen && (
+        <div className="relative">
+          {/* Overlay (click to close) - Only for outside clicks, handled by event listener */}
           <div
             className="hidden md:block fixed inset-0 bg-black/20 transition-opacity duration-300"
             style={{ zIndex: 999 }}
-            onClick={() => onOpenChange(false)}
+            onClick={() => {
+              console.log('[ReflectionPanel] Overlay background clicked, closing panel');
+              onOpenChange(false);
+            }}
           />
 
-          {/* Panel - higher z-index to appear above overlay */}
-          <div
-            className="hidden md:block fixed right-0 top-0 h-full w-80 bg-bg-layer-2 shadow-2layer-lg transform transition-transform duration-300 ease-in-out translate-x-0"
-            style={{ zIndex: 1000 }}
-          >
-            <div className="h-full p-6 overflow-hidden">
-              <PanelContent />
-            </div>
-          </div>
-        </>
+          <DesktopPanel />
+        </div>
       )}
 
       {/* Mobile: Full-screen modal */}
-      <Dialog open={isOpen} onOpenChange={onOpenChange}>
-        <DialogContent className="w-full h-full max-w-none p-6 overflow-y-auto md:hidden">
-          <DialogHeader className="sr-only">
-            <DialogTitle>Reflections</DialogTitle>
-            <DialogDescription>Capture current context reflections.</DialogDescription>
-          </DialogHeader>
-          <PanelContent />
-        </DialogContent>
-      </Dialog>
+      {isMobile && (
+        <Dialog open={isOpen} onOpenChange={onOpenChange}>
+          <DialogContent className="w-full h-full max-w-none p-6 overflow-y-auto md:hidden">
+            <DialogHeader className="sr-only">
+              <DialogTitle>Reflections</DialogTitle>
+              <DialogDescription>Capture current context reflections.</DialogDescription>
+            </DialogHeader>
+            <PanelContent />
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   );
 }
