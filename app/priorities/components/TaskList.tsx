@@ -25,12 +25,15 @@ import { useScrollToTask } from '@/app/priorities/components/useScrollToTask';
 import type { MovementInfo } from '@/app/priorities/components/MovementBadge';
 import { ManualTaskModal } from '@/app/components/ManualTaskModal';
 import { DiscardReviewModal, type DiscardCandidate } from '@/app/components/DiscardReviewModal';
+import { RefinementModal } from '@/app/priorities/components/RefinementModal';
 import {
   DEPENDENCY_OVERRIDE_STORAGE_KEY,
   type DependencyOverrideEntry,
   type DependencyOverrideStore,
 } from '@/lib/utils/dependencyOverrides';
 import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
+import type { RefinementAction } from '@/lib/services/qualityRefinement';
+import type { QualityMetadata } from '@/lib/schemas/taskIntelligence';
 
 type TaskStatus = 'active' | 'completed' | 'discarded';
 
@@ -49,8 +52,20 @@ type TaskLookup = Record<
     rationale?: string | null;
     sourceText?: string | null;
     isManual?: boolean;
+    clarityScore?: number | null;
+    badgeColor?: 'green' | 'yellow' | 'red';
+    badgeLabel?: 'Clear' | 'Review' | 'Needs Work';
+    qualityMetadata?: QualityMetadata | null;
   }
 >;
+
+type QualityUpdatePayload = {
+  taskId: string;
+  clarityScore: number;
+  badgeColor: 'green' | 'yellow' | 'red';
+  badgeLabel: 'Clear' | 'Review' | 'Needs Work';
+  qualityMetadata?: QualityMetadata;
+};
 
 type TaskRenderNode = {
   id: string;
@@ -76,6 +91,13 @@ type LockedTaskState = {
   order: number;
 };
 
+type ApplyRefinementPayload = {
+  taskId: string;
+  suggestionId: string;
+  newTaskTexts: string[];
+  action: RefinementAction;
+};
+
 type TaskOption = {
   id: string;
   title: string;
@@ -99,6 +121,7 @@ type TaskListProps = {
   sessionStatus?: SessionStatus;
   canTriggerPrioritization?: boolean;
   onRequestPrioritization?: () => void | Promise<void>;
+  isRecalculating?: boolean;
 };
 
 const DEFAULT_REMOVAL_REASON =
@@ -255,6 +278,7 @@ export function TaskList({
   sessionStatus = 'idle',
   canTriggerPrioritization = false,
   onRequestPrioritization,
+  isRecalculating = false,
 }: TaskListProps) {
   const sanitizedTaskIds = useMemo(() => sanitizePlanOrder(plan), [plan]);
   const taskAnnotations = useMemo<TaskAnnotation[]>(() => plan.task_annotations ?? [], [plan.task_annotations]);
@@ -344,6 +368,9 @@ export function TaskList({
   const [recentlyDiscarded, setRecentlyDiscarded] = useState<Set<string>>(new Set());
   const [discardCandidates, setDiscardCandidates] = useState<DiscardCandidate[]>([]);
   const [showDiscardReview, setShowDiscardReview] = useState(false);
+  const [showRefinementModal, setShowRefinementModal] = useState(false);
+  const [refinementTaskId, setRefinementTaskId] = useState<string | null>(null);
+  const [refinementTaskText, setRefinementTaskText] = useState<string>('');
   const [lockStore, setLockStore] = useLocalStorage<Record<string, Record<string, LockedTaskState>>>('locked-tasks', {});
   const [dependencyStore, setDependencyStore] = useLocalStorage<DependencyOverrideStore>(DEPENDENCY_OVERRIDE_STORAGE_KEY, {});
   const outcomeKey = outcomeId ?? 'global';
@@ -636,6 +663,28 @@ export function TaskList({
       }
     },
     [outcomeId, triggerAutoPrioritization]
+  );
+
+  const handleQualityUpdate = useCallback(
+    ({ taskId, clarityScore, badgeColor, badgeLabel, qualityMetadata }: QualityUpdatePayload) => {
+      setTaskLookup(prev => {
+        const current = prev[taskId] ?? {
+          title: formatTaskId(taskId),
+          qualityMetadata: null,
+        };
+        return {
+          ...prev,
+          [taskId]: {
+            ...current,
+            clarityScore,
+            badgeColor,
+            badgeLabel,
+            qualityMetadata: qualityMetadata ?? current.qualityMetadata ?? null,
+          },
+        };
+      });
+    },
+    [setTaskLookup]
   );
 
   useEffect(() => {
@@ -1202,7 +1251,8 @@ export function TaskList({
                 documentId: task.document_id,
               });
             }
-            
+
+            const previousEntry = next[task.task_id];
             next[task.task_id] = {
               title: task.title ?? formatTaskId(task.task_id),
               documentId: task.document_id ?? null,
@@ -1210,6 +1260,10 @@ export function TaskList({
               rationale: task.rationale ?? null,
               sourceText: task.original_text ?? null,
               isManual: Boolean(task.is_manual),
+              clarityScore: task.clarity_score ?? previousEntry?.clarityScore ?? null,
+              badgeColor: task.badge_color ?? previousEntry?.badgeColor ?? null,
+              badgeLabel: task.badge_label ?? previousEntry?.badgeLabel ?? null,
+              qualityMetadata: task.quality_metadata ?? previousEntry?.qualityMetadata ?? null,
             };
           }
 
@@ -1220,7 +1274,8 @@ export function TaskList({
             sampleTasks: Object.entries(next).slice(0, 2).map(([id, data]) => ({
               id: id.slice(0, 16) + '...',
               title: data.title?.slice(0, 30) + '...',
-              hasCategory: !!data.category
+              hasCategory: !!data.category,
+              hasQuality: !!data.clarityScore
             }))
           });
 
@@ -1771,6 +1826,51 @@ export function TaskList({
     setIsDrawerOpen(true);
   }, []);
 
+  const handleRefineTask = useCallback((taskId: string, taskText: string) => {
+    setRefinementTaskId(taskId);
+    setRefinementTaskText(taskText);
+    setShowRefinementModal(true);
+  }, []);
+
+  const handleApplyRefinement = useCallback(
+    async ({ taskId, suggestionId, newTaskTexts, action }: ApplyRefinementPayload) => {
+      try {
+        const response = await fetch(`/api/tasks/${taskId}/apply-refinement`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            suggestion_id: suggestionId,
+            new_task_texts: newTaskTexts,
+            action,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => null);
+          throw new Error(errorData?.error || 'Failed to apply refinement');
+        }
+
+        setShowRefinementModal(false);
+
+        toast.success(
+          `${action.charAt(0).toUpperCase() + action.slice(1)} operation applied. ${
+            newTaskTexts.length
+          } new task(s) created.`
+        );
+
+        if (outcomeId) {
+          triggerAutoPrioritization();
+        }
+      } catch (error) {
+        console.error('Error applying refinement:', error);
+        toast.error('Failed to apply refinement. Please try again.');
+      }
+    },
+    [outcomeId, triggerAutoPrioritization]
+  );
+
   const selectedNode = selectedTaskId ? nodeMap[selectedTaskId] ?? null : null;
   const selectedStatus: TaskStatus = selectedTaskId
     ? priorityState.statuses[selectedTaskId] ?? 'active'
@@ -1889,6 +1989,13 @@ export function TaskList({
               onTaskTitleChange={handleTaskTitleChange}
               outcomeId={outcomeId}
               onEditSuccess={handleTaskEditSuccess}
+              clarityScore={taskLookup[task.id]?.clarityScore}
+              badgeColor={taskLookup[task.id]?.badgeColor}
+              badgeLabel={taskLookup[task.id]?.badgeLabel}
+              qualityMetadata={taskLookup[task.id]?.qualityMetadata}
+              onRefineClick={() => handleRefineTask(task.id, task.title)}
+              isRecalculating={isRecalculating}
+              onQualityUpdate={handleQualityUpdate}
             />
           ))}
               </div>
@@ -1989,6 +2096,14 @@ export function TaskList({
         onToggleCandidate={handleToggleDiscardCandidate}
         onApplyChanges={handleApplyDiscardDecisions}
         onCancelAll={handleCancelAllDiscards}
+      />
+
+      <RefinementModal
+        isOpen={showRefinementModal}
+        onClose={() => setShowRefinementModal(false)}
+        originalTaskId={refinementTaskId || ''}
+        originalTaskText={refinementTaskText}
+        onApplyRefinement={handleApplyRefinement}
       />
     </div>
   );

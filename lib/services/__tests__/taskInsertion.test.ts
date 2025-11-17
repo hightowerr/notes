@@ -91,6 +91,10 @@ describe('taskInsertion service', () => {
         { id: '002', text: 'Task 2', estimated_hours: 40, depends_on: ['001'] },
         { id: '003', text: 'Task 3', estimated_hours: 20, depends_on: ['002'] },
       ];
+      const originalSnapshot = currentPlan.map(task => ({
+        ...task,
+        depends_on: [...task.depends_on],
+      }));
 
       const bridgingTasks = [
         { text: 'Bridging task', estimated_hours: 30 },
@@ -109,6 +113,7 @@ describe('taskInsertion service', () => {
       expect(result.error).toContain('circular dependency');
       expect(result.insertedIds).toHaveLength(0);
       expect(result.updated_plan).toBeUndefined();
+      expect(currentPlan).toEqual(originalSnapshot);
     });
 
     it('should handle single task insertion correctly', () => {

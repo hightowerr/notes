@@ -1,974 +1,388 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle, Loader2 } from 'lucide-react';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { DraftTask } from '@/lib/schemas/taskIntelligence';
+import ErrorBanner from '@/app/components/ErrorBanner';
+import { DraftTaskCard } from './DraftTaskCard';
 
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from '@/components/ui/accordion';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Progress } from '@/components/ui/progress';
-import { Separator } from '@/components/ui/separator';
-import { supabase } from '@/lib/supabase';
-import type { Gap } from '@/lib/schemas/gapSchema';
-import type { BridgingTask } from '@/lib/schemas/bridgingTaskSchema';
+const MAX_DRAFT_RETRY_ATTEMPTS = 3;
+const DRAFT_ERROR_MESSAGE = 'AI analysis unavailable. Showing heuristic draft suggestions. [Retry]';
+const DRAFT_EXHAUSTED_MESSAGE =
+  'AI service temporarily unavailable. Draft suggestions rely on heuristic templates.';
+const LOADING_STEPS = [
+  { key: 'analysis', label: 'Analyzing gaps... 🔄' },
+  { key: 'generation', label: 'Generating draft tasks... 🤖' },
+];
 
-import { BridgingTaskCard } from '@/app/priorities/components/BridgingTaskCard';
-
-export type BridgingTaskWithSelection = BridgingTask & { checked: boolean };
-
-export type GapSuggestionState = {
-  gap: Gap;
-  status: 'loading' | 'success' | 'error' | 'requires_examples';
-  tasks: BridgingTaskWithSelection[];
-  error?: string;
-  requiresManualExamples?: boolean;
-  metadata?: {
-    search_results_count: number;
-    generation_duration_ms: number;
-  };
-};
-
-export type GapAcceptanceErrorInfo = {
-  message: string;
-  details?: string[];
-  code?: string;
-};
-
-type GapDetectionModalProps = {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  detectionStatus: 'idle' | 'detecting' | 'success' | 'error';
-  detectionError: string | null;
-  detectionResult: { gaps: Gap[]; metadata: { analysis_duration_ms: number; gaps_detected: number } } | null;
-  suggestions: GapSuggestionState[];
-  isGenerating: boolean;
-  onToggleTask: (gapId: string, taskId: string, checked: boolean) => void;
-  onEditTask: (
-    gapId: string,
-    taskId: string,
-    updates: Pick<Partial<BridgingTask>, 'edited_task_text' | 'edited_estimated_hours'>
-  ) => void;
-  onRetryWithExamples: (gapId: string, examples: string[]) => void;
-  onSkipExamples: (gapId: string) => void;
-  onRetryGeneration: (gapId: string) => void; // T005: Manual retry for AI failures
-  onAcceptSelected: () => void;
-  isAccepting: boolean;
-  acceptError: GapAcceptanceErrorInfo | null;
-  generationProgress: number;
-  generationDurationMs: number | null;
-  onRetryAnalysis?: () => void;
-  performanceMetrics?: {
-    detection_ms: number;
-    generation_ms: number;
-    total_ms: number;
-    search_query_count?: number;
-  } | null;
-};
-
-type TaskLookup = Record<string, string>;
-
-const INDICATOR_LABELS: Record<keyof Gap['indicators'], string> = {
-  time_gap: 'Time gap',
-  action_type_jump: 'Workflow jump',
-  no_dependency: 'No dependency',
-  skill_jump: 'Skill change',
-};
-
-function formatTaskTitle(taskId: string, lookup: TaskLookup): string {
-  return lookup[taskId] ?? taskId;
+interface GapDetectionModalProps {
+  isOpen?: boolean;
+  open?: boolean;
+  onClose?: () => void;
+  onOpenChange?: (nextOpen: boolean) => void;
+  missingAreas?: string[] | null;
+  onAcceptSelected: (draftIds: string[]) => void;
+  sessionId: string;
+  outcomeText: string;
+  existingTaskIds: string[];
+  existingTaskTexts?: string[];
+  detectionStatus?: string;
+  detectionError?: string | null;
+  detectionResult?: unknown;
+  suggestions?: unknown;
+  isGenerating?: boolean;
 }
 
-function IndicatorBadges({ gap }: { gap: Gap }) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {(Object.keys(gap.indicators) as Array<keyof Gap['indicators']>)
-        .filter(key => gap.indicators[key])
-        .map(key => (
-          <Badge key={key} variant="outline" className="rounded-md border-border/70 bg-muted/40">
-            {INDICATOR_LABELS[key]}
-          </Badge>
-        ))}
-    </div>
-  );
-}
-
-function ManualExamplesPrompt({
-  gapId,
-  predecessorTitle,
-  successorTitle,
-  onRetry,
-  onSkip,
-  isGenerating,
-}: {
-  gapId: string;
-  predecessorTitle: string;
-  successorTitle: string;
-  onRetry: (gapId: string, examples: string[]) => void;
-  onSkip: (gapId: string) => void;
-  isGenerating: boolean;
-}) {
-  const [example1, setExample1] = useState('');
-  const [example2, setExample2] = useState('');
-
-  const handleRetry = () => {
-    const examples: string[] = [];
-    if (example1.trim().length >= 10) examples.push(example1.trim());
-    if (example2.trim().length >= 10) examples.push(example2.trim());
-
-    if (examples.length > 0) {
-      onRetry(gapId, examples);
-    }
-  };
-
-  const hasValidExamples = example1.trim().length >= 10 || example2.trim().length >= 10;
-
-  return (
-    <div className="space-y-4 rounded-lg border border-border/60 bg-muted/30 px-4 py-4">
-      <Alert>
-        <AlertTitle>No similar tasks found</AlertTitle>
-        <AlertDescription>
-          The system couldn&apos;t find similar tasks in your existing corpus. Provide 1-2 example tasks to help generate relevant suggestions for the gap between &quot;{predecessorTitle}&quot; → &quot;{successorTitle}&quot;.
-        </AlertDescription>
-      </Alert>
-      <div className="space-y-3">
-        <div className="space-y-2">
-          <Label htmlFor={`example1-${gapId}`}>Example task 1 (optional)</Label>
-          <Input
-            id={`example1-${gapId}`}
-            placeholder="e.g., Implement user authentication with OAuth"
-            value={example1}
-            onChange={(e) => setExample1(e.target.value)}
-            disabled={isGenerating}
-            maxLength={200}
-          />
-          {example1.length > 0 && example1.length < 10 && (
-            <p className="text-xs text-muted-foreground">Minimum 10 characters required</p>
-          )}
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor={`example2-${gapId}`}>Example task 2 (optional)</Label>
-          <Input
-            id={`example2-${gapId}`}
-            placeholder="e.g., Set up database schema and migrations"
-            value={example2}
-            onChange={(e) => setExample2(e.target.value)}
-            disabled={isGenerating}
-            maxLength={200}
-          />
-          {example2.length > 0 && example2.length < 10 && (
-            <p className="text-xs text-muted-foreground">Minimum 10 characters required</p>
-          )}
-        </div>
-      </div>
-
-      <div className="flex items-center gap-3">
-        <Button
-          onClick={handleRetry}
-          disabled={!hasValidExamples || isGenerating}
-          size="sm"
-        >
-          {isGenerating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Generate with Examples
-        </Button>
-        <Button
-          variant="ghost"
-          onClick={() => onSkip(gapId)}
-          disabled={isGenerating}
-          size="sm"
-        >
-          Skip (lower confidence)
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function GapProgressIndicator({
-  totalGaps,
-  processedGaps,
-  successfulGaps,
-  isGenerating,
-  generationProgress,
-  generationDurationMs,
-}: {
-  totalGaps: number;
-  processedGaps: number;
-  successfulGaps: number;
-  isGenerating: boolean;
-  generationProgress: number;
-  generationDurationMs: number | null;
-}) {
-  if (totalGaps === 0) {
-    return null;
-  }
-
-  const normalizedProgressCount = isGenerating
-    ? Math.min(generationProgress, totalGaps)
-    : Math.min(processedGaps, totalGaps);
-
-  const percentage = totalGaps > 0 ? Math.round((normalizedProgressCount / totalGaps) * 100) : 0;
-
-  const progressLabel = isGenerating
-    ? `Generating ${normalizedProgressCount}/${totalGaps} gaps...`
-    : `Gap suggestions ready: ${successfulGaps}/${totalGaps}`;
-
-  const pendingCount = Math.max(totalGaps - processedGaps, 0);
-
-  return (
-    <div className="space-y-2 rounded-md border border-border/60 bg-muted/20 px-4 py-3">
-      <div className="flex items-center justify-between text-sm">
-        <span className="flex items-center gap-2 text-muted-foreground">
-          {isGenerating && <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden="true" />}
-          {progressLabel}
-        </span>
-        <span className="font-medium text-foreground">{percentage}%</span>
-      </div>
-      <Progress
-        value={Math.min(percentage, 100)}
-        className="h-2"
-        aria-label={
-          isGenerating
-            ? `Generating gap suggestions: ${normalizedProgressCount} of ${totalGaps}`
-            : `Gap suggestions ready for review: ${successfulGaps} of ${totalGaps}`
-        }
-      />
-      {!isGenerating && generationDurationMs != null && (
-        <p className="text-xs text-muted-foreground">
-          Completed in {(generationDurationMs / 1000).toFixed(1)}s
-        </p>
-      )}
-      {!isGenerating && pendingCount > 0 && (
-        <p className="text-xs text-muted-foreground">
-          Waiting on {pendingCount} gap{pendingCount === 1 ? '' : 's'} to finish generation.
-        </p>
-      )}
-    </div>
-  );
-}
-
-function GapContent({
-  suggestion,
-  taskTitles,
-  isLoadingTasks,
-  isGenerating,
-  onToggleTask,
-  onEditTask,
-  onRetryWithExamples,
-  onSkipExamples,
-  onRetryGeneration, // T005: Manual retry for AI failures
-  isAccepting,
-  editingLookup,
-  onToggleTaskEditing,
-}: {
-  suggestion: GapSuggestionState;
-  taskTitles: TaskLookup;
-  isLoadingTasks: boolean;
-  isGenerating: boolean;
-  onToggleTask: (gapId: string, taskId: string, checked: boolean) => void;
-  onEditTask: (
-    gapId: string,
-    taskId: string,
-    updates: Pick<Partial<BridgingTask>, 'edited_task_text' | 'edited_estimated_hours'>
-  ) => void;
-  onRetryWithExamples: (gapId: string, examples: string[]) => void;
-  onSkipExamples: (gapId: string) => void;
-  onRetryGeneration: (gapId: string) => void; // T005: Manual retry for AI failures
-  isAccepting: boolean;
-  editingLookup: Record<string, boolean>;
-  onToggleTaskEditing: (gapId: string, taskId: string, next: boolean) => void;
-}) {
-  const gap = suggestion.gap;
-  const predecessorTitle = formatTaskTitle(gap.predecessor_task_id, taskTitles);
-  const successorTitle = formatTaskTitle(gap.successor_task_id, taskTitles);
-
-  return (
-    <div className="space-y-4">
-      {/* Gap Header */}
-      <div className="space-y-3">
-        <div className="space-y-2">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1 min-w-0">
-              <h3 className="text-base font-semibold text-foreground break-words">
-                Gap between &quot;{predecessorTitle}&quot; → &quot;{successorTitle}&quot;
-              </h3>
-              <p className="text-xs text-muted-foreground mt-1">
-                Confidence: {Math.round(gap.confidence * 100)}% · Detected at {new Date(gap.detected_at).toLocaleString()}
-              </p>
-            </div>
-            {isLoadingTasks && (
-              <span className="flex items-center gap-2 text-xs text-muted-foreground shrink-0">
-                <Loader2 className="h-3 w-3 animate-spin text-primary" />
-                Loading…
-              </span>
-            )}
-          </div>
-          <IndicatorBadges gap={gap} />
-        </div>
-        <Separator />
-      </div>
-
-      {/* Gap Status/Content */}
-      {suggestion.status === 'loading' && (
-        <div className="flex items-center gap-2 rounded-md border border-dashed border-border/60 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin text-primary" />
-          <span>Generating bridging tasks…</span>
-        </div>
-      )}
-
-      {/* T005: Error state with retry button for AI failures */}
-      {suggestion.status === 'error' && (
-        <div className="space-y-3">
-          <Alert variant="destructive">
-            <AlertTitle>Failed to generate suggestions</AlertTitle>
-            <AlertDescription>
-              {suggestion.error ?? 'The AI service was unable to propose bridging tasks for this gap.'}
-            </AlertDescription>
-          </Alert>
-          <div className="flex items-center justify-center">
-            <Button
-              onClick={() => onRetryGeneration(gap.id)}
-              disabled={isGenerating}
-              variant="outline"
-              size="sm"
-            >
-              {isGenerating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Try Again
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {suggestion.status === 'requires_examples' && (
-        <ManualExamplesPrompt
-          gapId={gap.id}
-          predecessorTitle={predecessorTitle}
-          successorTitle={successorTitle}
-          onRetry={onRetryWithExamples}
-          onSkip={onSkipExamples}
-          isGenerating={isGenerating}
-        />
-      )}
-
-      {suggestion.status === 'success' && suggestion.tasks.length > 0 && (
-        <div className="space-y-3">
-          {suggestion.tasks.map(task => {
-            const taskKey = `${gap.id}:${task.id}`;
-            return (
-              <BridgingTaskCard
-                key={task.id}
-                task={task}
-                checked={task.checked}
-                onCheckedChange={checked => onToggleTask(gap.id, task.id, checked)}
-                onEditTask={updates => onEditTask(gap.id, task.id, updates)}
-                disableEdits={isAccepting}
-                isEditing={Boolean(editingLookup[taskKey])}
-                onToggleEdit={next => onToggleTaskEditing(gap.id, task.id, next)}
-              />
-            );
-          })}
-          {suggestion.metadata && (
-            <p className="text-xs text-muted-foreground">
-              Semantic search context: {suggestion.metadata.search_results_count} result
-              {suggestion.metadata.search_results_count === 1 ? '' : 's'} · Generated in{' '}
-              {suggestion.metadata.generation_duration_ms} ms
-            </p>
-          )}
-        </div>
-      )}
-
-      {suggestion.status === 'success' && suggestion.tasks.length === 0 && (
-        <div className="rounded-md border border-border/70 bg-muted/30 px-4 py-6 text-center">
-          <p className="text-sm text-muted-foreground">No bridging tasks suggested for this gap.</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-export function GapDetectionModal({
+export const GapDetectionModal: React.FC<GapDetectionModalProps> = ({
+  isOpen,
   open,
+  onClose,
   onOpenChange,
-  detectionStatus,
-  detectionError,
-  detectionResult,
-  suggestions,
-  isGenerating,
-  onToggleTask,
-  onEditTask,
-  onRetryWithExamples,
-  onSkipExamples,
-  onRetryGeneration, // T005: Manual retry for AI failures
+  missingAreas = [],
   onAcceptSelected,
-  isAccepting,
-  acceptError,
-  generationProgress,
-  generationDurationMs,
-  onRetryAnalysis,
-  performanceMetrics,
-}: GapDetectionModalProps) {
-  const [taskTitles, setTaskTitles] = useState<TaskLookup>({});
-  const [isLoadingTasks, setIsLoadingTasks] = useState(false);
-  const [taskFetchError, setTaskFetchError] = useState<string | null>(null);
-  const [editingTasks, setEditingTasks] = useState<Record<string, boolean>>({});
-  const [openGapIds, setOpenGapIds] = useState<string[]>([]);
-  const makeTaskKey = useCallback((gapId: string, taskId: string) => `${gapId}:${taskId}`, []);
+  sessionId,
+  outcomeText,
+  existingTaskIds,
+  existingTaskTexts = [],
+}) => {
+  const resolvedIsOpen = typeof open === 'boolean' ? open : Boolean(isOpen);
+  const handleClose = useCallback(() => {
+    onClose?.();
+    onOpenChange?.(false);
+  }, [onClose, onOpenChange]);
 
-  const handleToggleTaskEditing = useCallback(
-    (gapId: string, taskId: string, next: boolean) => {
-      const key = makeTaskKey(gapId, taskId);
-      setEditingTasks(prev => {
-        if (next) {
-          if (prev[key]) {
-            return prev;
-          }
-          return { ...prev, [key]: true };
-        }
-        if (!prev[key]) {
-          return prev;
-        }
-        const copy = { ...prev };
-        delete copy[key];
-        return copy;
-      });
-    },
-    [makeTaskKey]
-  );
+  const [drafts, setDrafts] = useState<DraftTask[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedDraftIds, setSelectedDraftIds] = useState<string[]>([]);
+  const [p5Triggered, setP5Triggered] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const [draftFailureCount, setDraftFailureCount] = useState(0);
+  const [loadingStageIndex, setLoadingStageIndex] = useState<number | null>(null);
 
-  useEffect(() => {
-    if (!open || !detectionResult || detectionResult.gaps.length === 0) {
+  const emptyStateInitializedRef = useRef(false);
+
+  const generateDraftTasks = useCallback(async () => {
+    const normalizedMissingAreas = Array.isArray(missingAreas)
+      ? missingAreas.filter(area => typeof area === 'string' && area.trim().length > 0)
+      : [];
+
+    if (normalizedMissingAreas.length === 0) {
+      if (!emptyStateInitializedRef.current) {
+        setDrafts([]);
+        setP5Triggered(false);
+        setDraftError(null);
+        setLoadingStageIndex(null);
+        emptyStateInitializedRef.current = true;
+      }
       return;
     }
 
-    const uniqueTaskIds = Array.from(
-      new Set(
-        detectionResult.gaps.flatMap(gap => [gap.predecessor_task_id, gap.successor_task_id])
+    emptyStateInitializedRef.current = false;
+
+    setLoading(true);
+    setLoadingStageIndex(0);
+    try {
+      const response = await fetch('/api/agent/generate-draft-tasks', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          outcome_text: outcomeText,
+          missing_areas: normalizedMissingAreas,
+          existing_task_ids: existingTaskIds,
+          existing_task_texts: existingTaskTexts,
+          session_id: sessionId,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setDrafts(data.drafts);
+      setP5Triggered(data.phase5_triggered);
+      setDraftError(null);
+      setDraftFailureCount(0);
+    } catch (error) {
+      console.error('Error generating draft tasks:', error);
+      setDraftError(DRAFT_ERROR_MESSAGE);
+      setDraftFailureCount(prev => Math.min(prev + 1, MAX_DRAFT_RETRY_ATTEMPTS));
+    } finally {
+      setLoading(false);
+      setLoadingStageIndex(null);
+    }
+  }, [existingTaskIds, existingTaskTexts, missingAreas, outcomeText, sessionId]);
+
+  const wasOpenRef = useRef(false);
+
+  // Fetch or generate drafts when modal opens, reset state once after closing
+  useEffect(() => {
+    if (resolvedIsOpen) {
+      wasOpenRef.current = true;
+      void generateDraftTasks();
+      return;
+    }
+
+    if (wasOpenRef.current) {
+      wasOpenRef.current = false;
+      setDraftError(null);
+      setDraftFailureCount(0);
+      setSelectedDraftIds([]);
+      setLoadingStageIndex(null);
+    }
+  }, [generateDraftTasks, resolvedIsOpen]);
+
+  useEffect(() => {
+    if (!loading || loadingStageIndex === null) {
+      return;
+    }
+    if (loadingStageIndex >= LOADING_STEPS.length - 1) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setLoadingStageIndex(current => {
+        if (current === null) {
+          return null;
+        }
+        return Math.min(current + 1, LOADING_STEPS.length - 1);
+      });
+    }, 1800);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [loading, loadingStageIndex]);
+
+  const handleEditDraft = (id: string, newText: string) => {
+    setDrafts(prevDrafts =>
+      prevDrafts.map(draft => 
+        draft.id === id ? { ...draft, task_text: newText } : draft
       )
     );
+  };
 
-    if (uniqueTaskIds.length === 0) {
+  const handleAcceptDraft = (id: string) => {
+    if (!selectedDraftIds.includes(id)) {
+      setSelectedDraftIds(prev => [...prev, id]);
+    }
+  };
+
+  const handleRetryDraftGeneration = useCallback(() => {
+    if (draftFailureCount >= MAX_DRAFT_RETRY_ATTEMPTS || loading) {
       return;
     }
+    void generateDraftTasks();
+  }, [draftFailureCount, generateDraftTasks, loading]);
 
-    let isCancelled = false;
+  const handleDismissDraft = (id: string) => {
+    setDrafts(prevDrafts => prevDrafts.filter(draft => draft.id !== id));
+    setSelectedDraftIds(prev => prev.filter(draftId => draftId !== id));
+  };
 
-    const loadTaskTitles = async () => {
-      try {
-        setIsLoadingTasks(true);
-        setTaskFetchError(null);
+  const handleAcceptSelected = async () => {
+    if (selectedDraftIds.length === 0) return;
 
-        const { data, error } = await supabase
-          .from('task_embeddings')
-          .select('task_id, task_text')
-          .in('task_id', uniqueTaskIds);
+    // Show loading state
+    setLoading(true);
 
-        if (error) {
-          throw new Error(error.message);
+    try {
+      // Prepare edited drafts
+      const editedDrafts = drafts
+        .filter(draft => selectedDraftIds.includes(draft.id) && draft.task_text !== drafts.find(d => d.id === draft.id)?.task_text)
+        .map(draft => ({
+          id: draft.id,
+          task_text: draft.task_text
+        }));
+
+      // Call the accept API
+      const response = await fetch('/api/agent/accept-draft-tasks', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+          accepted_draft_ids: selectedDraftIds,
+          edited_drafts: editedDrafts,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        if (result.cycle_detected) {
+          // Handle cycle error - keep modal open to allow user to adjust
+          console.error('Cycle detected:', result);
+          alert(`Cycle detected in tasks. Please adjust your selections.\nDetails: ${result.error || 'Unknown cycle error'}`);
+        } else {
+          throw new Error(result.error || 'Failed to accept draft tasks');
         }
-
-        if (isCancelled) {
-          return;
-        }
-
-        const lookup: TaskLookup = {};
-        for (const task of data ?? []) {
-          if (task.task_id && task.task_text) {
-            lookup[task.task_id] = task.task_text;
-          }
-        }
-
-        setTaskTitles(prev => ({ ...lookup, ...prev }));
-      } catch (error) {
-        if (!isCancelled) {
-          console.error('[GapDetectionModal] Failed to load task titles:', error);
-          setTaskFetchError('Unable to load task details for gap preview.');
-        }
-      } finally {
-        if (!isCancelled) {
-          setIsLoadingTasks(false);
-        }
+      } else {
+        // Success: show feedback, close modal, refresh task list
+        const oldCoverage = 0; // In a real implementation, you'd have access to the previous coverage
+        alert(`✅ ${result.inserted_task_ids.length} tasks added. Coverage: ${oldCoverage}% → ${result.new_coverage_percentage}%`);
+        onAcceptSelected(selectedDraftIds);
+        onClose();
       }
-    };
-
-    loadTaskTitles();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [open, detectionResult]);
-
-  const suggestionLookup = useMemo(() => {
-    const map = new Map<string, GapSuggestionState>();
-    for (const suggestion of suggestions) {
-      map.set(suggestion.gap.id, suggestion);
+    } catch (error) {
+      console.error('Error accepting selected drafts:', error);
+      alert('Error accepting draft tasks. Please try again.');
+    } finally {
+      setLoading(false);
     }
-    return map;
-  }, [suggestions]);
+  };
 
-  const orderedSuggestions = useMemo(() => {
-    if (!detectionResult) {
-      return [];
-    }
+  if (!resolvedIsOpen) return null;
 
-    const sortedGaps = [...detectionResult.gaps].sort((a, b) => b.confidence - a.confidence);
-
-    return sortedGaps.map(gap => suggestionLookup.get(gap.id) ?? {
-      gap,
-      status: 'loading' as const,
-      tasks: [],
-    });
-  }, [detectionResult, suggestionLookup]);
-
-  useEffect(() => {
-    if (orderedSuggestions.length === 0) {
-      setEditingTasks(prev => (Object.keys(prev).length > 0 ? {} : prev));
-      return;
-    }
-
-    const activeKeys = new Set<string>();
-    for (const suggestion of orderedSuggestions) {
-      if (suggestion.status !== 'success') {
-        continue;
-      }
-      for (const task of suggestion.tasks) {
-        activeKeys.add(makeTaskKey(suggestion.gap.id, task.id));
-      }
-    }
-
-    setEditingTasks(prev => {
-      let changed = false;
-      const next = { ...prev };
-      for (const key of Object.keys(next)) {
-        if (!activeKeys.has(key)) {
-          delete next[key];
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [orderedSuggestions, makeTaskKey]);
-
-  useEffect(() => {
-    if (!isAccepting) {
-      return;
-    }
-    setEditingTasks(prev => (Object.keys(prev).length > 0 ? {} : prev));
-  }, [isAccepting]);
-
-  useEffect(() => {
-    if (!open) {
-      setOpenGapIds(prev => (prev.length === 0 ? prev : []));
-      return;
-    }
-
-    if (orderedSuggestions.length === 0) {
-      setOpenGapIds(prev => (prev.length === 0 ? prev : []));
-      return;
-    }
-
-    setOpenGapIds(prev => {
-      const validPrev = prev.filter(id => orderedSuggestions.some(suggestion => suggestion.gap.id === id));
-      if (validPrev.length > 0) {
-        if (validPrev.length === prev.length && validPrev.every((id, index) => id === prev[index])) {
-          return prev;
-        }
-        return validPrev;
-      }
-      const firstGapId = orderedSuggestions[0]?.gap.id;
-      return firstGapId ? [firstGapId] : [];
-    });
-  }, [open, orderedSuggestions]);
-
-  const processedGaps = useMemo(() => {
-    return orderedSuggestions.filter(suggestion => suggestion.status !== 'loading').length;
-  }, [orderedSuggestions]);
-
-  const successfulGaps = useMemo(() => {
-    return orderedSuggestions.filter(suggestion => suggestion.status === 'success').length;
-  }, [orderedSuggestions]);
-
-  const selectedCount = useMemo(() => {
-    return orderedSuggestions.reduce((count, suggestion) => {
-      if (suggestion.status !== 'success') {
-        return count;
-      }
-      return (
-        count +
-        suggestion.tasks.filter(task => task.checked).length
-      );
-    }, 0);
-  }, [orderedSuggestions]);
-
-  const suggestedTaskCount = useMemo(() => {
-    return orderedSuggestions.reduce((count, suggestion) => {
-      if (suggestion.status !== 'success') {
-        return count;
-      }
-      return count + suggestion.tasks.length;
-    }, 0);
-  }, [orderedSuggestions]);
-
-  const isAnyTaskEditing = useMemo(() => {
-    return Object.values(editingTasks).some(Boolean);
-  }, [editingTasks]);
-
-  useEffect(() => {
-    if (!open) {
-      return;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) {
-        return;
-      }
-
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onOpenChange(false);
-        return;
-      }
-
-      if (
-        event.key === 'Enter' &&
-        !event.metaKey &&
-        !event.ctrlKey &&
-        !event.altKey &&
-        !event.shiftKey
-      ) {
-        const target = event.target as HTMLElement | null;
-        const tagName = target?.tagName?.toLowerCase();
-        const isTextInput =
-          target?.isContentEditable ||
-          tagName === 'input' ||
-          tagName === 'textarea' ||
-          tagName === 'select';
-        const isButtonLike =
-          tagName === 'button' ||
-          tagName === 'a' ||
-          Boolean(target?.closest('[role="button"]'));
-
-        if (isTextInput || isButtonLike || isAnyTaskEditing) {
-          return;
-        }
-
-        if (selectedCount === 0 || isAccepting) {
-          return;
-        }
-
-        event.preventDefault();
-        onAcceptSelected();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [open, onOpenChange, isAnyTaskEditing, selectedCount, isAccepting, onAcceptSelected]);
-
-  const hasGaps = Boolean(detectionResult?.gaps.length);
-  const isEmptyState = detectionStatus === 'success' && !hasGaps;
-
-  const gapCount = detectionResult?.gaps.length ?? 0;
-  const modalTitle =
-    detectionStatus === 'success'
-      ? hasGaps
-        ? `${gapCount} gap${gapCount === 1 ? '' : 's'} detected · ${suggestedTaskCount} task${suggestedTaskCount === 1 ? '' : 's'} suggested`
-        : 'No gaps detected'
-      : 'Gap Analysis';
-
-  const modalDescription = (() => {
-    if (detectionStatus === 'error') {
-      return detectionError ?? 'An error occurred while analyzing your plan. Please try again.';
-    }
-    if (detectionStatus === 'success') {
-      if (!hasGaps) {
-        return 'Your plan appears complete. All tasks have a clear, logical progression.';
-      }
-      if (isGenerating) {
-        return 'Generating bridging tasks for each detected gap…';
-      }
-      return 'Review AI-generated bridging tasks grouped by gap.';
-    }
-    if (detectionStatus === 'detecting') {
-      return 'Analyzing your plan for gaps and missing work.';
-    }
-    return 'Run a gap analysis to identify missing tasks in your plan.';
-  })();
-
-  const metricsDisplay = useMemo(() => {
-    if (!performanceMetrics || detectionStatus !== 'success') {
-      return null;
-    }
-    const toSeconds = (ms: number) => (ms / 1000).toFixed(1);
-    const detectionSeconds = toSeconds(Math.max(0, performanceMetrics.detection_ms ?? 0));
-    const generationSeconds = toSeconds(Math.max(0, performanceMetrics.generation_ms ?? 0));
-    const totalSeconds = toSeconds(Math.max(0, performanceMetrics.total_ms ?? 0));
-    return `Analysis completed in ${totalSeconds}s (Detection: ${detectionSeconds}s, Generation: ${generationSeconds}s)`;
-  }, [performanceMetrics, detectionStatus]);
-
-  const isDuplicateAcceptanceError = acceptError?.code === 'DUPLICATE_TASK';
-  const isCycleError = acceptError?.code === 'CYCLE_DETECTED';
-  const alertTitle = isCycleError
-    ? 'Circular dependency detected'
-    : acceptError?.code
-      ? acceptError.message
-      : 'Unable to accept tasks';
-  const shouldShowPrimaryMessage =
-    !acceptError?.code || (acceptError?.details?.length ?? 0) === 0 || isCycleError;
-
-  const content = (
-    <>
-      {/* Header Content */}
-      <div className="space-y-3">
-        {detectionStatus === 'detecting' && (
-          <div className="flex items-center gap-3 rounded-md border border-dashed border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin text-primary" />
-            <span>Analyzing task sequence…</span>
-          </div>
-        )}
-
-        {detectionStatus === 'error' && (
-          <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-destructive/40 bg-destructive/10 px-8 py-10 text-center dark:border-red-500/30 dark:bg-red-500/10">
-            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-destructive/20 text-destructive dark:bg-red-500/20 dark:text-red-200">
-              <AlertTriangle className="h-8 w-8" aria-hidden="true" />
-            </div>
-            <div className="space-y-2">
-              <h3 className="text-lg font-semibold text-destructive dark:text-red-200">
-                Unable to generate suggestions
-              </h3>
-              <p className="text-sm text-destructive/80 dark:text-red-100/70">
-                {detectionError ?? 'An error occurred while analyzing your plan. Please try again.'}
-              </p>
-            </div>
-            <div className="flex flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-center">
-              {typeof onRetryAnalysis === 'function' && (
-                <Button onClick={() => onRetryAnalysis()} className="sm:min-w-[140px]">
-                  Try Again
-                </Button>
-              )}
-              <Button
-                variant="secondary"
-                onClick={() => onOpenChange(false)}
-                className="sm:min-w-[140px]"
-              >
-                Close
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {detectionStatus === 'success' && detectionResult && (
-          <div className="space-y-4">
-            {taskFetchError && (
-              <Alert variant="destructive">
-                <AlertTitle>Task context unavailable</AlertTitle>
-                <AlertDescription>{taskFetchError}</AlertDescription>
-              </Alert>
-            )}
-
-            {/* Progress Indicator */}
-            {hasGaps && (
-              <GapProgressIndicator
-                totalGaps={detectionResult.gaps.length}
-                processedGaps={processedGaps}
-                successfulGaps={successfulGaps}
-                isGenerating={isGenerating}
-                generationProgress={generationProgress}
-                generationDurationMs={generationDurationMs}
-              />
-            )}
-
-            {!hasGaps ? (
-              <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-emerald-300/50 bg-emerald-100/30 px-8 py-10 text-center dark:border-emerald-300/20 dark:bg-emerald-500/10">
-                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-700 dark:bg-emerald-400/20 dark:text-emerald-200">
-                  <CheckCircle className="h-8 w-8" aria-hidden="true" />
-                </div>
-                <div className="space-y-2">
-                  <h3 className="text-lg font-semibold text-emerald-800 dark:text-emerald-200">
-                    No gaps detected
-                  </h3>
-                  <p className="text-sm text-emerald-900/80 dark:text-emerald-100/70">
-                    Your plan appears complete. All tasks have a clear, logical progression.
-                  </p>
-                </div>
-                <Button onClick={() => onOpenChange(false)} size="sm">
-                  Close
-                </Button>
-              </div>
-            ) : (
-              <Accordion
-                type="multiple"
-                value={openGapIds}
-                onValueChange={value => setOpenGapIds(value)}
-                className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border/60 bg-layer-2"
-              >
-                {orderedSuggestions.map((suggestion, index) => {
-                  const { gap } = suggestion;
-                  const predecessorTitle = formatTaskTitle(gap.predecessor_task_id, taskTitles);
-                  const successorTitle = formatTaskTitle(gap.successor_task_id, taskTitles);
-                  const confidencePercent = Math.round(gap.confidence * 100);
-
-                  const statusSummary = (() => {
-                    if (suggestion.status === 'loading') {
-                      return 'Generating suggestions…';
-                    }
-                    if (suggestion.status === 'error') {
-                      return 'Generation failed';
-                    }
-                    if (suggestion.status === 'requires_examples') {
-                      return 'Provide manual examples to continue';
-                    }
-                    const taskCount = suggestion.tasks.length;
-                    const taskLabel = taskCount === 1 ? 'task' : 'tasks';
-                    return `${taskCount} ${taskLabel} suggested`;
-                  })();
-
-                  const indicatorCount = Object.values(gap.indicators).filter(Boolean).length;
-
-                  return (
-                    <AccordionItem key={gap.id} value={gap.id}>
-                      <AccordionTrigger className="px-4">
-                        <div className="flex w-full flex-col gap-1 text-left">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="text-sm font-semibold text-foreground">
-                              Gap {index + 1}: "{predecessorTitle}" → "{successorTitle}"
-                            </span>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                            <span>{confidencePercent}% confidence</span>
-                            <span aria-hidden="true">•</span>
-                            <span>{indicatorCount}/4 indicators triggered</span>
-                            <span aria-hidden="true">•</span>
-                            <span>{statusSummary}</span>
-                          </div>
-                        </div>
-                      </AccordionTrigger>
-                      <AccordionContent className="px-4 pt-0">
-                        <GapContent
-                          suggestion={suggestion}
-                          taskTitles={taskTitles}
-                          isLoadingTasks={isLoadingTasks}
-                          isGenerating={isGenerating}
-                          onToggleTask={onToggleTask}
-                          onEditTask={onEditTask}
-                          onRetryWithExamples={onRetryWithExamples}
-                          onSkipExamples={onSkipExamples}
-                          onRetryGeneration={onRetryGeneration}
-                          isAccepting={isAccepting}
-                          editingLookup={editingTasks}
-                          onToggleTaskEditing={handleToggleTaskEditing}
-                        />
-                      </AccordionContent>
-                    </AccordionItem>
-                  );
-                })}
-              </Accordion>
-            )}
-          </div>
-        )}
-      </div>
-    </>
-  );
-
-  const footer = (
-    <div className="space-y-3">
-      {metricsDisplay && (
-        <div className="text-xs text-muted-foreground" aria-live="polite">
-          {metricsDisplay}
-        </div>
-      )}
-      {hasGaps && acceptError && (
-        <Alert variant="destructive">
-          <AlertTitle>{alertTitle}</AlertTitle>
-          <AlertDescription>
-            <div className="space-y-2">
-              {shouldShowPrimaryMessage && (
-                <p>
-                  {isCycleError
-                    ? 'Accepting the selected tasks would create a circular dependency in your plan. Adjust your selection or update existing relationships before trying again.'
-                    : acceptError.message}
-                </p>
-              )}
-              {acceptError.details && acceptError.details.length > 0 && (
-                <ul className="list-disc space-y-1 pl-5 text-sm">
-                  {acceptError.details.map((detail, index) => (
-                    <li key={index}>{detail}</li>
-                  ))}
-                </ul>
-              )}
-              {isDuplicateAcceptanceError && (
-                <p className="text-sm text-muted-foreground">
-                  Edit the task description or estimate to differentiate it from the existing task, then try again.
-                </p>
-              )}
-            </div>
-          </AlertDescription>
-        </Alert>
-      )}
-      {hasGaps ? (
-        <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-sm text-muted-foreground" aria-live="polite" aria-atomic="true">
-            {`${selectedCount} task${selectedCount === 1 ? '' : 's'} selected`}
-          </div>
-          <div className="flex items-center justify-end gap-3">
-            <Button
-              variant="secondary"
-              onClick={() => onOpenChange(false)}
-              disabled={isAccepting}
-            >
-              Cancel
-            </Button>
-            <div className="flex flex-col items-end gap-1">
-              <Button
-                onClick={onAcceptSelected}
-                disabled={isAccepting || selectedCount === 0}
-              >
-                {isAccepting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {isAccepting ? `Accepting ${selectedCount}…` : `Accept Selected (${selectedCount})`}
-              </Button>
-              {selectedCount > 0 && !isAccepting && (
-                <span className="text-xs text-muted-foreground">Press Enter to accept</span>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
+  // Group drafts by source
+  const p10Drafts = drafts.filter(draft => draft.source === 'phase10_semantic');
+  const p5Drafts = drafts.filter(draft => draft.source === 'phase5_dependency');
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl flex flex-col gap-4 p-3 sm:p-6">
-        <DialogHeader className="px-0 pt-0">
-          <DialogTitle>{modalTitle}</DialogTitle>
-          <DialogDescription>{modalDescription}</DialogDescription>
-        </DialogHeader>
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          {content}
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-bold text-gray-800">🎯 Suggested Tasks to Fill Gaps</h2>
+            <button
+              onClick={handleClose}
+              className="text-gray-500 hover:text-gray-700"
+            >
+              ✕
+            </button>
+          </div>
+
+          {draftError && (
+            <div className="mb-4">
+              <ErrorBanner
+                message={DRAFT_ERROR_MESSAGE}
+                exhaustedMessage={DRAFT_EXHAUSTED_MESSAGE}
+                retryCount={draftFailureCount}
+                maxRetries={MAX_DRAFT_RETRY_ATTEMPTS}
+                onRetry={draftFailureCount >= MAX_DRAFT_RETRY_ATTEMPTS ? undefined : handleRetryDraftGeneration}
+                retryLabel="Retry generation"
+              />
+            </div>
+          )}
+
+          {loading ? (
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2 rounded-lg bg-bg-layer-2 p-4 shadow-2layer-sm">
+                <p className="text-sm font-semibold text-muted-foreground">System response</p>
+                <ol className="space-y-2 text-sm text-foreground">
+                  <li>1. Phase 10 Semantic Drafts: up to 3 drafts per missing area.</li>
+                  <li>2. Phase 5 fallback check: trigger dependency gaps if coverage &lt;80%.</li>
+                  <li>3. Deduplication: suppress P5 drafts when similarity &gt;0.85.</li>
+                </ol>
+              </div>
+              <div className="rounded-lg bg-bg-layer-3 p-4 shadow-2layer-sm">
+                <p className="text-sm font-semibold text-muted-foreground mb-3">What you should see</p>
+                <div className="space-y-2">
+                  {LOADING_STEPS.map((step, index) => (
+                    <div
+                      key={step.key}
+                      className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm ${
+                        index === loadingStageIndex ? 'bg-primary/10 text-primary-foreground' : 'bg-muted text-muted-foreground'
+                      }`}
+                    >
+                      {index === loadingStageIndex ? (
+                        <span className="inline-flex h-3 w-3 animate-pulse rounded-full bg-primary" />
+                      ) : (
+                        <span className="inline-flex h-3 w-3 rounded-full bg-muted-foreground/30" />
+                      )}
+                      <span>{step.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="mb-4">
+                <p className="text-gray-600">
+                  {missingAreas.length > 0
+                    ? `Missing conceptual areas: ${missingAreas.join(', ')}`
+                    : 'No specific gaps detected, but dependency tasks suggested.'}
+                </p>
+              </div>
+
+              {p10Drafts.length > 0 && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold text-blue-700 mb-2">🎯 Semantic Gaps (Phase 10)</h3>
+                  {p10Drafts.map(draft => (
+                    <DraftTaskCard
+                      key={draft.id}
+                      draft={draft}
+                      onEdit={handleEditDraft}
+                      onAccept={handleAcceptDraft}
+                      onDismiss={handleDismissDraft}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {p5Triggered && p5Drafts.length > 0 && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold text-purple-700 mb-2">🔗 Dependency Gaps (Phase 5)</h3>
+                  {p5Drafts.map(draft => (
+                    <DraftTaskCard
+                      key={draft.id}
+                      draft={draft}
+                      onEdit={handleEditDraft}
+                      onAccept={handleAcceptDraft}
+                      onDismiss={handleDismissDraft}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {drafts.length === 0 && !loading && (
+                <div className="text-center py-8 text-gray-500">
+                  No draft tasks generated. Try adjusting your outcome or task plan.
+                </div>
+              )}
+
+              <div className="flex justify-between items-center mt-6">
+                <button
+                  onClick={handleClose}
+                  className="px-4 py-2 text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
+                  disabled={loading}
+                >
+                  Dismiss All
+                </button>
+                <div>
+                  <span className="mr-4 text-gray-600">
+                    Selected: {selectedDraftIds.length}
+                  </span>
+                  <button
+                    onClick={handleAcceptSelected}
+                    disabled={selectedDraftIds.length === 0 || loading}
+                    className={`px-4 py-2 rounded-md ${
+                      selectedDraftIds.length > 0 && !loading
+                        ? 'bg-blue-500 text-white hover:bg-blue-600'
+                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    }`}
+                  >
+                    {loading ? (
+                      <span className="flex items-center">
+                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Processing...
+                      </span>
+                    ) : (
+                      `Accept Selected (${selectedDraftIds.length})`
+                    )}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
-        <DialogFooter className="px-0 pb-0 pt-0">
-          {footer}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   );
-}
+};

@@ -1,0 +1,294 @@
+openapi: 3.0.3
+info:
+  title: Draft Task Generation API
+  description: Generate AI draft tasks to fill coverage gaps with Phase 5 deduplication
+  version: 1.0.0
+
+paths:
+  /api/agent/generate-draft-tasks:
+    post:
+      summary: Generate draft tasks for coverage gaps
+      description: |
+        Creates AI-suggested tasks to fill semantic and dependency gaps.
+        Phase 10 (semantic) runs first, Phase 5 (dependency) as fallback.
+        Deduplicates Phase 5 suggestions if similar to Phase 10 (>0.85 embedding similarity).
+      operationId: generateDraftTasks
+      tags:
+        - Task Intelligence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - outcome_text
+                - missing_areas
+                - existing_task_texts
+              properties:
+                outcome_text:
+                  type: string
+                  minLength: 10
+                  maxLength: 500
+                  description: User's outcome statement for context
+                  example: "Increase monthly recurring revenue by 25% within 6 months"
+                missing_areas:
+                  type: array
+                  items:
+                    type: string
+                  minItems: 1
+                  maxItems: 5
+                  description: Conceptual gaps from coverage analysis
+                  example: ["pricing experiments", "upsell flow"]
+                existing_task_texts:
+                  type: array
+                  items:
+                    type: string
+                  description: Current task texts to avoid duplication
+                  example: ["Build pricing page", "Setup analytics dashboard"]
+                max_drafts_per_area:
+                  type: integer
+                  minimum: 1
+                  maximum: 3
+                  default: 3
+                  description: Max draft tasks per missing area
+                include_phase5_fallback:
+                  type: boolean
+                  default: true
+                  description: Run Phase 5 dependency gap detection if coverage still <80%
+      responses:
+        '200':
+          description: Draft tasks generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - drafts
+                  - generation_duration_ms
+                  - phase5_triggered
+                properties:
+                  drafts:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - id
+                        - task_text
+                        - estimated_hours
+                        - cognition_level
+                        - reasoning
+                        - gap_area
+                        - confidence_score
+                        - source
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                          description: Draft task UUID
+                          example: "draft-550e8400-e29b-41d4-a716-446655440000"
+                        task_text:
+                          type: string
+                          minLength: 10
+                          maxLength: 200
+                          example: "Run pricing A/B test: $49 vs $59 tier for SMB segment"
+                        estimated_hours:
+                          type: number
+                          format: float
+                          minimum: 0.25
+                          maximum: 8.0
+                          example: 4.0
+                        cognition_level:
+                          type: string
+                          enum: [low, medium, high]
+                          example: "medium"
+                        reasoning:
+                          type: string
+                          minLength: 50
+                          maxLength: 300
+                          example: "Addresses gap in 'pricing experiments' - outcome mentions 25% ARR increase, pricing optimization is key lever"
+                        gap_area:
+                          type: string
+                          description: Missing concept this task fills
+                          example: "pricing experiments"
+                        confidence_score:
+                          type: number
+                          format: float
+                          minimum: 0.0
+                          maximum: 1.0
+                          example: 0.85
+                        source:
+                          type: string
+                          enum: [phase10_semantic, phase5_dependency]
+                          description: Which system generated this draft (FR-026)
+                          example: "phase10_semantic"
+                        source_label:
+                          type: string
+                          enum: ["🎯 Semantic Gap", "🔗 Dependency Gap"]
+                          description: UI label for draft source
+                          example: "🎯 Semantic Gap"
+                  generation_duration_ms:
+                    type: integer
+                    description: Time taken to generate all drafts
+                    example: 4200
+                  phase5_triggered:
+                    type: boolean
+                    description: True if Phase 5 was triggered as fallback
+                    example: false
+                  deduplication_stats:
+                    type: object
+                    description: Deduplication metrics (FR-027)
+                    properties:
+                      phase5_total:
+                        type: integer
+                        description: Phase 5 drafts before dedup
+                        example: 3
+                      phase5_suppressed:
+                        type: integer
+                        description: Phase 5 drafts removed (similar to P10)
+                        example: 1
+                      final_count:
+                        type: integer
+                        description: Total drafts returned (P10 + P5_deduped)
+                        example: 5
+        '400':
+          description: Bad request - validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: AI service error or server failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                ai_timeout:
+                  summary: OpenAI timeout after retry
+                  value:
+                    error: "Draft generation timed out after retry"
+                    code: "AI_TIMEOUT"
+                    retryable: true
+
+  /api/agent/accept-draft-tasks:
+    post:
+      summary: Accept and insert draft tasks into plan
+      description: |
+        Validates selected drafts, runs cycle detection, inserts into task_embeddings.
+        Updates agent_sessions.result.draft_tasks with acceptance state.
+      operationId: acceptDraftTasks
+      tags:
+        - Task Intelligence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - session_id
+                - accepted_draft_ids
+              properties:
+                session_id:
+                  type: string
+                  format: uuid
+                  description: Agent session UUID containing drafts
+                  example: "550e8400-e29b-41d4-a716-446655440000"
+                accepted_draft_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  minItems: 1
+                  description: IDs of drafts user accepted
+                  example: ["draft-001", "draft-003"]
+                edited_drafts:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - draft_id
+                      - edited_text
+                    properties:
+                      draft_id:
+                        type: string
+                        format: uuid
+                      edited_text:
+                        type: string
+                        minLength: 10
+                        maxLength: 200
+                  description: Drafts user edited before accepting (optional)
+      responses:
+        '200':
+          description: Draft tasks inserted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - inserted_task_ids
+                  - cycle_detected
+                properties:
+                  inserted_task_ids:
+                    type: array
+                    items:
+                      type: string
+                    description: task_id values for newly inserted tasks
+                    example: ["task-101", "task-102"]
+                  cycle_detected:
+                    type: boolean
+                    description: True if dependency cycle was prevented
+                    example: false
+                  cycle_details:
+                    type: object
+                    description: Present only if cycle_detected = true
+                    properties:
+                      affected_task_ids:
+                        type: array
+                        items:
+                          type: string
+                      resolution:
+                        type: string
+                        example: "Removed dependency link to prevent cycle"
+        '400':
+          description: Validation error or cycle prevention failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                cycle_error:
+                  summary: Dependency cycle detected
+                  value:
+                    error: "Inserting these tasks would create a cycle"
+                    code: "DEPENDENCY_CYCLE"
+                    retryable: false
+        '404':
+          description: Session or drafts not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Database error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - code
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+        retryable:
+          type: boolean
+          default: false

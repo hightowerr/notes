@@ -55,6 +55,13 @@ export class TaskInsertionError extends Error {
   }
 }
 
+/**
+ * Validates bridging task payloads from the API and transforms them into the normalized
+ * structure used throughout the insertion pipeline. This enforces schema invariants up
+ * front so downstream logic can assume cleaned IDs, descriptions, and hour estimates.
+ *
+ * @throws TaskInsertionError when tasks are missing required fields or violate limits.
+ */
 function validateAndNormalizeTasks(inputs: AcceptedTaskInput[]): NormalizedTask[] {
   if (!Array.isArray(inputs) || inputs.length === 0) {
     throw new TaskInsertionError('No tasks provided for insertion', 'VALIDATION_ERROR');
@@ -268,6 +275,13 @@ function buildAdjacency(
   return adjacency;
 }
 
+/**
+ * Runs Kahn's algorithm against the proposed dependency graph (existing relationships
+ * plus new bridging tasks). If a cycle is detected, the function attempts to surface a
+ * human-readable path to aid debugging and throws a TaskInsertionError.
+ *
+ * @throws TaskInsertionError when the graph contains a cycle that cannot be resolved.
+ */
 async function runCycleDetection(
   adjacency: Map<string, Set<string>>,
   normalized: NormalizedTask[]
@@ -356,6 +370,10 @@ async function runCycleDetection(
   );
 }
 
+/**
+ * Executes a depth-first search to locate a single cycle within the adjacency map.
+ * The returned list represents the cycle path in visitation order for diagnostics.
+ */
 function findCycle(adjacency: Map<string, Set<string>>): string[] {
   const visited = new Set<string>();
   const stack = new Set<string>();
@@ -447,6 +465,11 @@ function findPath(
 
 /**
  * Find all edges along the shortest path from source to target
+ */
+/**
+ * Finds the shortest path between two nodes (if any) and returns the concrete edges
+ * involved. This is used when we need to surgically delete one edge to break an indirect
+ * cycle before inserting bridging tasks.
  */
 function findPathEdges(
   relationships: RelationshipRecord[],
@@ -556,6 +579,11 @@ async function insertRelationships(normalized: NormalizedTask[]) {
   }
 }
 
+/**
+ * Primary entry point for accepting user-approved bridging tasks. Handles validation,
+ * duplicate detection, embedding generation, cycle prevention and cleanup, task/relationship
+ * persistence, and returns structured metadata about the insertion.
+ */
 export async function insertBridgingTasks(
   inputs: AcceptedTaskInput[]
 ): Promise<TaskInsertionResult> {

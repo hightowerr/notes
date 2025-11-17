@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 export const cognitionLevelSchema = z.enum(['low', 'medium', 'high']);
 
+export const bridgingTaskSourceEnum = z.enum(['ai_generated', 'phase5_dependency']);
+
 export const bridgingTaskSchema = z.object({
   id: z.string().uuid(),
   gap_id: z.string().uuid(),
@@ -10,11 +12,12 @@ export const bridgingTaskSchema = z.object({
   cognition_level: cognitionLevelSchema,
   confidence: z.number().min(0).max(1),
   reasoning: z.string().min(20).max(1000),
-  source: z.literal('ai_generated'),
+  source: bridgingTaskSourceEnum,
   requires_review: z.boolean(),
   created_at: z.string().datetime(),
   edited_task_text: z.string().min(10).max(500).optional(),
   edited_estimated_hours: z.number().int().min(8).max(160).optional(),
+  embedding: z.array(z.number()).length(1536).optional(),  // For deduplication purposes
 });
 
 export const bridgingTaskResponseSchema = z.object({
@@ -24,5 +27,6 @@ export const bridgingTaskResponseSchema = z.object({
 });
 
 export type CognitionLevel = z.infer<typeof cognitionLevelSchema>;
+export type BridgingTaskSource = z.infer<typeof bridgingTaskSourceEnum>;
 export type BridgingTask = z.infer<typeof bridgingTaskSchema>;
 export type BridgingTaskResponse = z.infer<typeof bridgingTaskResponseSchema>;
