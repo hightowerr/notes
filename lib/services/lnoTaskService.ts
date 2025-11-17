@@ -28,6 +28,24 @@ type TaskEmbeddingRow = {
   task_text: string | null;
   document_id: string | null;
   is_manual?: boolean | null;
+  quality_metadata?: {
+    clarity_score: number;
+    badge_color: 'green' | 'yellow' | 'red';
+    badge_label: 'Clear' | 'Review' | 'Needs Work';
+    calculated_at: string;
+    calculation_method: 'ai' | 'heuristic';
+    improvement_suggestions: string[];
+    specificity_indicators: {
+      has_metrics: boolean;
+      has_acceptance_criteria: boolean;
+      contains_numbers: boolean;
+    };
+    granularity_flags: {
+      estimated_size: 'small' | 'medium' | 'large';
+      is_atomic: boolean;
+    };
+    verb_strength: 'strong' | 'weak';
+  } | null;
 };
 
 type ProcessedDocumentRow = {
@@ -49,6 +67,9 @@ export type OutcomeAlignedTask = {
   category: LnoCategory | null;
   rationale: string | null;
   is_manual?: boolean;
+  clarity_score?: number | null;
+  badge_color?: 'green' | 'yellow' | 'red' | null;
+  badge_label?: 'Clear' | 'Review' | 'Needs Work' | null;
 };
 
 function normalizeText(value: unknown): string | null {
@@ -126,7 +147,7 @@ export async function resolveOutcomeAlignedTasks(
 
   const { data: taskRows, error: taskError } = await supabase
     .from('task_embeddings')
-    .select('task_id, task_text, document_id, is_manual')
+    .select('task_id, task_text, document_id, is_manual, quality_metadata')
     .in('task_id', taskIds)
     .returns<TaskEmbeddingRow[]>();
 
@@ -218,6 +239,9 @@ export async function resolveOutcomeAlignedTasks(
         category: classification.category,
         rationale,
         is_manual: Boolean(row.is_manual),
+        clarity_score: row.quality_metadata?.clarity_score || null,
+        badge_color: row.quality_metadata?.badge_color || null,
+        badge_label: row.quality_metadata?.badge_label || null,
       };
       continue;
     }
@@ -245,6 +269,9 @@ export async function resolveOutcomeAlignedTasks(
         category: fallbackCategory,
         rationale,
         is_manual: Boolean(row.is_manual),
+        clarity_score: row.quality_metadata?.clarity_score || null,
+        badge_color: row.quality_metadata?.badge_color || null,
+        badge_label: row.quality_metadata?.badge_label || null,
       };
     } else {
       console.log('[LNOTaskService] Using fallback title for task with no text:', {
@@ -262,6 +289,9 @@ export async function resolveOutcomeAlignedTasks(
         category: null,
         rationale: null,
         is_manual: Boolean(row.is_manual),
+        clarity_score: row.quality_metadata?.clarity_score || null,
+        badge_color: row.quality_metadata?.badge_color || null,
+        badge_label: row.quality_metadata?.badge_label || null,
       };
     }
   }

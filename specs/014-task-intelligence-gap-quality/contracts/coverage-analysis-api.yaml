@@ -1,0 +1,151 @@
+openapi: 3.0.3
+info:
+  title: Coverage Analysis API
+  description: Goal-task coverage analysis endpoint for Phase 10 Task Intelligence
+  version: 1.0.0
+
+paths:
+  /api/agent/coverage-analysis:
+    post:
+      summary: Analyze goal-task coverage
+      description: |
+        Calculates semantic coverage percentage between outcome goal and task list.
+        Returns missing conceptual areas when coverage <70%.
+        Runs asynchronously (<3s target at P95).
+      operationId: analyzeCoverage
+      tags:
+        - Task Intelligence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - outcome_id
+                - task_ids
+              properties:
+                outcome_id:
+                  type: string
+                  format: uuid
+                  description: UUID of user_outcomes record
+                  example: "550e8400-e29b-41d4-a716-446655440000"
+                task_ids:
+                  type: array
+                  items:
+                    type: string
+                  minItems: 1
+                  maxItems: 50
+                  description: Array of task_id strings from task_embeddings
+                  example: ["task-001", "task-002", "task-003"]
+                threshold:
+                  type: number
+                  format: float
+                  minimum: 0.0
+                  maximum: 1.0
+                  default: 0.7
+                  description: Cosine similarity threshold for coverage detection
+                  example: 0.7
+      responses:
+        '200':
+          description: Coverage analysis completed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - coverage_percentage
+                  - missing_areas
+                  - should_generate_drafts
+                  - analysis_duration_ms
+                properties:
+                  coverage_percentage:
+                    type: integer
+                    minimum: 0
+                    maximum: 100
+                    description: Semantic coverage score (0-100%)
+                    example: 72
+                  missing_areas:
+                    type: array
+                    items:
+                      type: string
+                    description: Conceptual gaps detected via LLM extraction
+                    example: ["pricing experiments", "upsell flow"]
+                  should_generate_drafts:
+                    type: boolean
+                    description: True if coverage <70% (auto-open Gap Detection Modal)
+                    example: true
+                  analysis_duration_ms:
+                    type: integer
+                    description: Time taken for coverage calculation
+                    example: 1250
+                  task_count:
+                    type: integer
+                    description: Number of tasks analyzed
+                    example: 15
+                  threshold_used:
+                    type: number
+                    format: float
+                    description: Threshold used for this analysis
+                    example: 0.7
+        '400':
+          description: Bad request - validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                insufficient_tasks:
+                  summary: Task count below minimum
+                  value:
+                    error: "Minimum 1 task required for coverage analysis"
+                    code: "INSUFFICIENT_TASKS"
+                too_many_tasks:
+                  summary: Task count exceeds limit
+                  value:
+                    error: "Maximum 50 tasks supported per analysis"
+                    code: "TOO_MANY_TASKS"
+        '404':
+          description: Outcome or tasks not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                outcome_not_found:
+                  summary: Outcome ID not found
+                  value:
+                    error: "Outcome not found"
+                    code: "OUTCOME_NOT_FOUND"
+        '500':
+          description: Server error or AI service unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                ai_service_error:
+                  summary: OpenAI API failure
+                  value:
+                    error: "AI service unavailable after retry"
+                    code: "AI_SERVICE_ERROR"
+                    retryable: true
+
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - code
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+        code:
+          type: string
+          description: Machine-readable error code
+        retryable:
+          type: boolean
+          description: Whether the request can be retried
+          default: false

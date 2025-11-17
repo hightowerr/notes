@@ -454,6 +454,13 @@ setTimeout(() => { const values = form.getValues(); }, 0);
 3. Restart dev server: `pnpm dev`
 4. Task metadata API (`/api/tasks/metadata`) requires admin client access
 
+**Task metadata and quality evaluation APIs not working?**
+1. Verify `SUPABASE_SERVICE_ROLE_KEY` is set in `.env.local` - Required for task metadata operations in `/api/tasks/evaluate-quality` and other administrative operations
+2. Obtain service role key from Supabase Dashboard → Settings → API → Service Role Key
+3. The service role key is required for operations that bypass Row Level Security (RLS), such as updating task quality metadata
+4. Ensure your API routes are using the admin client from `lib/supabase/admin.ts` for these operations
+5. Restart dev server after adding the environment variable: `pnpm dev`
+
 ## Resources
 
 - **Implementation Status:** `IMPLEMENTATION_STATUS.md`

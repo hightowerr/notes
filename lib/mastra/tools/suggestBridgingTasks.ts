@@ -6,6 +6,7 @@ import {
   TaskGenerationError,
 } from '@/lib/services/taskGenerationService';
 import { bridgingTaskResponseSchema } from '@/lib/schemas/bridgingTaskSchema';
+import { generateEmbedding } from '@/lib/services/embeddingService';
 
 const inputSchema = z.object({
   gap_id: z.string().uuid(),
@@ -32,7 +33,22 @@ export const suggestBridgingTasksTool = createTool({
       manualExamples: input.manual_examples,
     });
 
-    return outputSchema.parse(result);
+    // Add source and embedding fields to support P10/P5 integration
+    const enhancedResult = {
+      ...result,
+      bridging_tasks: await Promise.all(result.bridging_tasks.map(async (task) => {
+        // Generate embedding for each task to support deduplication
+        const embedding = await generateEmbedding(task.task_text);
+
+        return {
+          ...task,
+          source: 'phase5_dependency',  // Mark as Phase 5 generated
+          embedding,  // Add embedding for deduplication
+        };
+      }))
+    };
+
+    return outputSchema.parse(enhancedResult);
   },
 });
 

@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { MainNav } from '@/components/main-nav';
 import { TaskList } from '@/app/priorities/components/TaskList';
 import { ContextCard } from '@/app/priorities/components/ContextCard';
+import CoverageBar from '@/app/components/CoverageBar';
 import { ReflectionPanel } from '@/app/components/ReflectionPanel';
 import { prioritizedPlanSchema } from '@/lib/schemas/prioritizedPlanSchema';
 import { executionMetadataSchema } from '@/lib/schemas/executionMetadataSchema';
@@ -46,6 +47,7 @@ const MINUTE_IN_MS = 60 * 1000;
 const HOUR_IN_MS = 60 * 60 * 1000;
 const DAY_IN_MS = 24 * HOUR_IN_MS;
 const WEEK_IN_MS = 7 * DAY_IN_MS;
+const MAX_COVERAGE_TASKS = 50;
 
 function describeBaselineAge(ageMs: number): string {
   if (ageMs <= 0) {
@@ -268,6 +270,12 @@ export default function TaskPrioritiesPage() {
     total_ms: number;
     search_query_count?: number;
   } | null>(null);
+
+  // Coverage analysis state
+  const [coverageData, setCoverageData] = useState<{ coveragePercentage: number; missingAreas: string[] } | null>(null);
+  const [coverageLoading, setCoverageLoading] = useState(false);
+  const [coverageError, setCoverageError] = useState<string | null>(null);
+  const [coverageLimitedToTop50, setCoverageLimitedToTop50] = useState(false);
 
   const readDependencyOverrideEdges = useCallback(() => {
     if (typeof window === 'undefined') {
@@ -1830,6 +1838,80 @@ export default function TaskPrioritiesPage() {
     };
   }, [activeOutcome, prioritizedPlan, hasFetchedInitialPlan, applySessionResults, reflections]);
 
+  // Fetch coverage analysis when a plan is available
+  useEffect(() => {
+    if (!prioritizedPlan || !activeOutcome?.id || !currentSessionId) {
+      setCoverageLimitedToTop50(false);
+      return;
+    }
+
+    const orderedTaskIds = prioritizedPlan.ordered_task_ids ?? [];
+    if (orderedTaskIds.length === 0) {
+      setCoverageLimitedToTop50(false);
+      return;
+    }
+
+    const shouldLimitCoverage = orderedTaskIds.length > MAX_COVERAGE_TASKS;
+    const taskIdsForAnalysis = shouldLimitCoverage
+      ? orderedTaskIds.slice(0, MAX_COVERAGE_TASKS)
+      : orderedTaskIds;
+
+    // FR-017: Only analyze the top 50 prioritized tasks when coverage is computed
+    setCoverageLimitedToTop50(shouldLimitCoverage);
+
+    const fetchCoverage = async () => {
+      try {
+        setCoverageLoading(true);
+        setCoverageError(null);
+
+        const response = await fetch('/api/agent/coverage-analysis', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            outcome_id: activeOutcome.id,
+            task_ids: taskIdsForAnalysis,
+            session_id: currentSessionId
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch coverage analysis');
+        }
+
+        const data = await response.json();
+
+        setCoverageData({
+          coveragePercentage: data.coverage_percentage,
+          missingAreas: data.missing_areas
+        });
+
+        // If coverage is less than 70%, automatically open the gap detection modal
+        if (data.coverage_percentage < 70) {
+          setIsGapModalOpen(true);
+        }
+      } catch (error) {
+        console.error('[Task Priorities] Coverage analysis failed:', error);
+        setCoverageError('Unable to calculate goal coverage. Please try again.');
+      } finally {
+        setCoverageLoading(false);
+      }
+    };
+
+    // Fetch coverage data after a short delay to ensure plan is fully loaded
+    const timer = setTimeout(fetchCoverage, 2000);
+
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [prioritizedPlan, activeOutcome, currentSessionId]);
+
+  // Auto-open gap modal when coverage falls below threshold (FR-010)
+  useEffect(() => {
+    if (coverageData?.coveragePercentage !== undefined && coverageData.coveragePercentage < 70) {
+      setIsGapModalOpen(true);
+    }
+  }, [coverageData?.coveragePercentage]);
+
   return (
     <div className="min-h-screen bg-muted/30">
       <MainNav />
@@ -2113,6 +2195,61 @@ export default function TaskPrioritiesPage() {
                 </AlertDescription>
               </Alert>
             )}
+            {/* Coverage Analysis Bar */}
+            {coverageLimitedToTop50 && (
+              <Alert className="border-amber-300 bg-amber-50">
+                <AlertTitle className="text-amber-900">50-task limit reached</AlertTitle>
+                <AlertDescription className="text-amber-900">
+                  Analysis limited to top 50 tasks. Consider archiving completed tasks to improve coverage accuracy.
+                </AlertDescription>
+              </Alert>
+            )}
+            {coverageData && !coverageLoading && (
+              <Card className="border-border/70 shadow-1layer-sm">
+                <CardHeader>
+                  <CardTitle className="flex justify-between items-center">
+                    <span>Goal Coverage Analysis</span>
+                    <span className={`text-lg font-bold ${coverageData.coveragePercentage < 70 ? 'text-red-700' : coverageData.coveragePercentage < 85 ? 'text-yellow-700' : 'text-green-700'}`}>
+                      {coverageData.coveragePercentage}%
+                    </span>
+                  </CardTitle>
+                  <CardDescription>
+                    How well your tasks align with your outcome goal
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="mb-4">
+                    <CoverageBar
+                      coveragePercentage={coverageData.coveragePercentage}
+                      missingAreas={coverageData.missingAreas}
+                      onGenerateDraftsClick={() => setIsGapModalOpen(true)}
+                      taskCount={prioritizedPlan?.ordered_task_ids?.length ?? 0}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+            {coverageLoading && (
+              <Card className="border-dashed border-border/70 bg-muted/40">
+                <CardHeader>
+                  <CardTitle>Calculating goal coverage</CardTitle>
+                  <CardDescription>
+                    Analyzing how well your tasks align with your outcome goal.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <Skeleton className="h-5 w-48" />
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-3/4" />
+                </CardContent>
+              </Card>
+            )}
+            {coverageError && (
+              <Alert variant="destructive">
+                <AlertTitle>Coverage analysis failed</AlertTitle>
+                <AlertDescription>{coverageError}</AlertDescription>
+              </Alert>
+            )}
             <TaskList
               plan={prioritizedPlan}
               executionMetadata={executionMetadata ?? undefined}
@@ -2124,9 +2261,11 @@ export default function TaskPrioritiesPage() {
               sessionStatus={sessionStatus}
               canTriggerPrioritization={canAutoTriggerPrioritization}
               onRequestPrioritization={handleAnalyzeTasks}
+              isRecalculating={isRecalculating}
             />
-            <div className="mt-6 flex justify-end">
+            <div className="mt-6 flex justify-between">
               <Button
+                variant="outline"
                 onClick={handleDetectGaps}
                 disabled={isSuggestingGaps || !prioritizedPlan}
               >

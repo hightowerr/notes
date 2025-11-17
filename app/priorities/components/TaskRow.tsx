@@ -5,8 +5,14 @@ import { Check, Loader2, Lock, Pencil, Unlock, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import QualityTooltip from '@/app/components/QualityTooltip';
+import QualityBadge from '@/app/components/QualityBadge';
+import ErrorBanner from '@/app/components/ErrorBanner';
 import { cn } from '@/lib/utils';
 import { MovementBadge, type MovementInfo } from '@/app/priorities/components/MovementBadge';
+import { useDebounce } from '@/lib/hooks/useDebounce';
+import PulseAnimation from '@/app/components/PulseAnimation';
+import type { QualityMetadata } from '@/lib/schemas/taskIntelligence';
 
 type EditMode = 'idle' | 'editing' | 'saving' | 'error';
 
@@ -21,11 +27,24 @@ const SAVE_DEBOUNCE_MS = 500;
 const SUCCESS_INDICATOR_MS = 1000;
 const MIN_TEXT_LENGTH = 10;
 const MAX_TEXT_LENGTH = 500;
+const AI_MAX_RETRY_ATTEMPTS = 3;
+const QUALITY_FAILURE_MESSAGE = 'AI analysis unavailable. Showing basic quality scores. [Retry]';
+const QUALITY_EXHAUSTED_MESSAGE =
+  'AI service temporarily unavailable. Quality scores based on basic heuristics.';
 
 type DependencyLink = {
   taskId: string;
   rank: number | null;
   label: string;
+};
+
+type BadgeColor = 'green' | 'yellow' | 'red';
+type BadgeLabel = 'Clear' | 'Review' | 'Needs Work';
+
+type QualitySnapshot = {
+  clarityScore: number | null;
+  badgeColor: BadgeColor | null;
+  badgeLabel: BadgeLabel | null;
 };
 
 type TaskRowProps = {
@@ -49,6 +68,19 @@ type TaskRowProps = {
   onTaskTitleChange?: (taskId: string, nextTitle: string) => void;
   outcomeId?: string | null;
   onEditSuccess?: (taskId: string, options: { prioritizationTriggered: boolean }) => void;
+  clarityScore?: number | null;
+  badgeColor?: BadgeColor;
+  badgeLabel?: BadgeLabel;
+  qualityMetadata?: QualityMetadata | null;
+  onRefineClick?: () => void;
+  isRecalculating?: boolean;
+  onQualityUpdate?: (payload: {
+    taskId: string;
+    clarityScore: number;
+    badgeColor: BadgeColor;
+    badgeLabel: BadgeLabel;
+    qualityMetadata?: QualityMetadata;
+  }) => void;
 };
 
 function MobileFieldLabel({ children }: { children: string }) {
@@ -80,6 +112,13 @@ export function TaskRow({
   onTaskTitleChange,
   outcomeId,
   onEditSuccess,
+  clarityScore,
+  badgeColor,
+  badgeLabel,
+  qualityMetadata,
+  onRefineClick,
+  isRecalculating = false,
+  onQualityUpdate,
 }: TaskRowProps) {
   const categoryLabel = category
     ? category === 'leverage'
@@ -88,6 +127,35 @@ export function TaskRow({
         ? 'Neutral'
         : 'Overhead'
     : null;
+  const [editState, setEditState] = useState<EditState>({
+    mode: 'idle',
+    draftText: title,
+    originalText: title,
+    errorMessage: null,
+  });
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [recentlyEdited, setRecentlyEdited] = useState(false);
+  const [isRecalculatingQuality, setIsRecalculatingQuality] = useState(false);
+  const [qualitySnapshot, setQualitySnapshot] = useState<QualitySnapshot>({
+    clarityScore: clarityScore ?? null,
+    badgeColor: badgeColor ?? null,
+    badgeLabel: badgeLabel ?? null,
+  });
+  const [qualityMetadataState, setQualityMetadataState] = useState<QualityMetadata | null>(
+    qualityMetadata ?? null
+  );
+  const [qualityError, setQualityError] = useState<string | null>(null);
+  const [qualityFailureCount, setQualityFailureCount] = useState(0);
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const editorContentRef = useRef<string>(title);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editHighlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const qualityRequestIdRef = useRef<number | null>(null);
+  const qualityLatencyRef = useRef<number | null>(null);
+  const isEditLocked = isEditingDisabled || isPrioritizing || editState.mode === 'saving';
+
   const dependencyBadges = dependencyLinks.length ? (
     <div className="flex flex-wrap gap-1">
       {dependencyLinks.map(link => (
@@ -105,21 +173,52 @@ export function TaskRow({
     <span className="text-sm text-muted-foreground">None</span>
   );
 
-  const [editState, setEditState] = useState<EditState>({
-    mode: 'idle',
-    draftText: title,
-    originalText: title,
-    errorMessage: null,
-  });
-  const [showSuccess, setShowSuccess] = useState(false);
-  const [recentlyEdited, setRecentlyEdited] = useState(false);
-  const editorRef = useRef<HTMLDivElement | null>(null);
-  const editorContentRef = useRef<string>(title);
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const editHighlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isEditLocked = isEditingDisabled || isPrioritizing || editState.mode === 'saving';
+  const hasQualitySnapshot = qualitySnapshot.clarityScore !== null;
+  const qualityTooltipMetadata = useMemo<QualityMetadata>(() => {
+    if (qualityMetadataState) {
+      return qualityMetadataState;
+    }
+    const clarity = qualitySnapshot.clarityScore ?? 0;
+    const text = editState.draftText;
+    const containsNumbers = /\d/.test(text);
+    const estimatedSize: 'small' | 'medium' | 'large' =
+      text.length > 80 ? 'large' : text.length < 30 ? 'small' : 'medium';
+
+    return {
+      clarity_score: clarity,
+      verb_strength: clarity >= 0.7 ? 'strong' : 'weak',
+      specificity_indicators: {
+        has_metrics: containsNumbers,
+        has_acceptance_criteria: /acceptance|criteria|target|goal|require/i.test(text),
+        contains_numbers: containsNumbers,
+      },
+      granularity_flags: {
+        estimated_size: estimatedSize,
+        is_atomic: !/and|then|also/i.test(text),
+      },
+      improvement_suggestions: [],
+      calculated_at: new Date().toISOString(),
+      calculation_method: 'heuristic',
+    };
+  }, [editState.draftText, qualityMetadataState, qualitySnapshot.clarityScore]);
+
+  const qualityBadgeNode = useMemo(
+    () => (
+      <QualityBadge
+        clarityScore={qualitySnapshot.clarityScore}
+        className={cn(
+          'shrink-0 px-2 py-0.5 text-xs font-medium',
+          hasQualitySnapshot && 'cursor-help',
+          qualitySnapshot.badgeColor === 'green' && 'border-emerald-500/20 dark:text-emerald-300',
+          qualitySnapshot.badgeColor === 'yellow' && 'border-amber-500/20 dark:text-amber-300',
+          qualitySnapshot.badgeColor === 'red' && 'border-destructive/20 dark:text-red-300'
+        )}
+        isLoading={!hasQualitySnapshot}
+        isRecalculating={isRecalculatingQuality}
+      />
+    ),
+    [hasQualitySnapshot, isRecalculatingQuality, qualitySnapshot.badgeColor, qualitySnapshot.clarityScore]
+  );
 
   const clearSaveTimer = useCallback(() => {
     if (saveTimeoutRef.current) {
@@ -285,20 +384,32 @@ export function TaskRow({
     [clearSaveTimer, clearErrorTimer, editState.originalText, focusEditor, isEditLocked]
   );
 
-  const handleEditorInput = useCallback((event: React.FormEvent<HTMLDivElement>) => {
-    event.stopPropagation();
-    let value = event.currentTarget.textContent ?? '';
-    if (value.length > MAX_TEXT_LENGTH) {
-      value = value.slice(0, MAX_TEXT_LENGTH);
-      event.currentTarget.textContent = value;
-    }
-    editorContentRef.current = value;
-    setEditState(prev => ({
-      ...prev,
-      draftText: value,
-      errorMessage: null,
-    }));
-  }, []);
+  const handleEditorInput = useCallback(
+    (event: React.FormEvent<HTMLDivElement>) => {
+      event.stopPropagation();
+      let value = event.currentTarget.textContent ?? '';
+      if (value.length > MAX_TEXT_LENGTH) {
+        value = value.slice(0, MAX_TEXT_LENGTH);
+        event.currentTarget.textContent = value;
+      }
+      editorContentRef.current = value;
+      setEditState(prev => {
+        const nextMode = prev.mode === 'idle' ? 'editing' : prev.mode;
+        const nextState = {
+          ...prev,
+          draftText: value,
+          errorMessage: null,
+          mode: nextMode,
+        };
+        if (value.trim() !== prev.originalText.trim()) {
+          setIsRecalculatingQuality(true);
+        }
+        return nextState;
+      });
+      onTaskTitleChange?.(taskId, value);
+    },
+    [onTaskTitleChange, taskId]
+  );
 
   const commitChanges = useCallback(
     (rawValue: string) => {
@@ -383,7 +494,37 @@ export function TaskRow({
       };
     });
     clearErrorTimer(); // Clear error timer when title changes
+    setQualityError(null);
+    setQualityFailureCount(0);
   }, [title, clearErrorTimer]);
+
+  useEffect(() => {
+    if (!qualityMetadata) {
+      return;
+    }
+    setQualityMetadataState(qualityMetadata);
+  }, [qualityMetadata]);
+
+  useEffect(() => {
+    if (isRecalculatingQuality) {
+      return;
+    }
+    setQualitySnapshot(prev => {
+      const nextSnapshot: QualitySnapshot = {
+        clarityScore: clarityScore ?? null,
+        badgeColor: badgeColor ?? null,
+        badgeLabel: badgeLabel ?? null,
+      };
+      if (
+        prev.clarityScore === nextSnapshot.clarityScore &&
+        prev.badgeColor === nextSnapshot.badgeColor &&
+        prev.badgeLabel === nextSnapshot.badgeLabel
+      ) {
+        return prev;
+      }
+      return nextSnapshot;
+    });
+  }, [clarityScore, badgeColor, badgeLabel, isRecalculatingQuality]);
 
   useEffect(() => {
     if (!isEditLocked) {
@@ -393,6 +534,151 @@ export function TaskRow({
       resetToOriginal();
     }
   }, [editState.mode, isEditLocked, resetToOriginal]);
+
+  useEffect(() => {
+    if (editState.draftText === editState.originalText) {
+      qualityRequestIdRef.current = null;
+      setIsRecalculatingQuality(false);
+    }
+  }, [editState.draftText, editState.originalText]);
+
+  // Recalculate quality when draft text changes after a debounce
+  const debouncedDraftText = useDebounce(editState.draftText, 300);
+
+  const recalculateQuality = useCallback(
+    async (taskText: string) => {
+      const trimmed = taskText.trim();
+      if (trimmed.length < MIN_TEXT_LENGTH) {
+        qualityRequestIdRef.current = null;
+        setIsRecalculatingQuality(false);
+        return;
+      }
+
+      const requestId = Date.now();
+      qualityRequestIdRef.current = requestId;
+      setIsRecalculatingQuality(true);
+
+      const logLatency = (status: 'success' | 'error', method?: string) => {
+        if (qualityLatencyRef.current !== null) {
+          const endTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+          const durationMs = endTime - qualityLatencyRef.current;
+          console.log('[TaskRow] Quality recalculation latency', {
+            task_id: taskId,
+            duration_ms: Math.round(durationMs),
+            status,
+            method,
+          });
+          qualityLatencyRef.current = null;
+        }
+      };
+
+      const applyEvaluation = (
+        evaluation: {
+          clarity_score: number;
+          badge_color: BadgeColor;
+          badge_label: BadgeLabel;
+          quality_metadata?: QualityMetadata;
+        },
+        options?: { fallbackUsed?: boolean }
+      ) => {
+        if (qualityRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        setQualitySnapshot({
+          clarityScore: evaluation.clarity_score,
+          badgeColor: evaluation.badge_color,
+          badgeLabel: evaluation.badge_label,
+        });
+        setQualityMetadataState(evaluation.quality_metadata ?? null);
+        if (options?.fallbackUsed) {
+          setQualityError(QUALITY_FAILURE_MESSAGE);
+          setQualityFailureCount(prev => Math.min(prev + 1, AI_MAX_RETRY_ATTEMPTS));
+        } else {
+          setQualityError(null);
+          setQualityFailureCount(0);
+        }
+
+        onQualityUpdate?.({
+          taskId,
+          clarityScore: evaluation.clarity_score,
+          badgeColor: evaluation.badge_color,
+          badgeLabel: evaluation.badge_label,
+          qualityMetadata: evaluation.quality_metadata,
+        });
+
+        onEditSuccess?.(taskId, { prioritizationTriggered: false });
+        const method = evaluation.quality_metadata?.calculation_method;
+        logLatency('success', method ?? (options?.fallbackUsed ? 'heuristic' : undefined));
+      };
+
+      const runEvaluation = async (forceHeuristic: boolean) => {
+        const response = await fetch('/api/tasks/evaluate-quality', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            tasks: [{ id: taskId, text: trimmed }],
+            force_heuristic: forceHeuristic,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorPayload = await response.text();
+          throw new Error(errorPayload || 'Failed to recalculate quality');
+        }
+
+        const result = await response.json();
+        const evaluation = Array.isArray(result.evaluations) ? result.evaluations[0] : null;
+        if (!evaluation) {
+          throw new Error('Quality evaluation response missing evaluations array');
+        }
+        return evaluation;
+      };
+
+      try {
+        qualityLatencyRef.current =
+          typeof performance !== 'undefined' ? performance.now() : Date.now();
+        const evaluation = await runEvaluation(false);
+        applyEvaluation(evaluation);
+      } catch (error) {
+        console.error('Error recalculating quality (AI path):', error);
+        try {
+          const fallbackEvaluation = await runEvaluation(true);
+          applyEvaluation(fallbackEvaluation, { fallbackUsed: true });
+        } catch (fallbackError) {
+          console.error('Heuristic fallback failed:', fallbackError);
+          setQualityFailureCount(prev => Math.min(prev + 1, AI_MAX_RETRY_ATTEMPTS));
+          setQualityError(QUALITY_FAILURE_MESSAGE);
+          logLatency('error');
+        }
+      } finally {
+        if (qualityRequestIdRef.current === requestId) {
+          setIsRecalculatingQuality(false);
+          qualityRequestIdRef.current = null;
+        }
+      }
+    },
+    [onEditSuccess, onQualityUpdate, taskId]
+  );
+
+  // Effect to recalculate quality when debounced text changes
+  useEffect(() => {
+    if (editState.mode !== 'editing') {
+      return;
+    }
+
+    const trimmed = debouncedDraftText.trim();
+    if (!trimmed || trimmed === editState.originalText.trim()) {
+      if (!trimmed) {
+        setIsRecalculatingQuality(false);
+      }
+      return;
+    }
+
+    void recalculateQuality(trimmed);
+  }, [debouncedDraftText, editState.mode, editState.originalText, recalculateQuality]);
 
   useEffect(() => {
     const node = editorRef.current;
@@ -436,8 +722,22 @@ export function TaskRow({
         />
       );
     }
+    if (isRecalculatingQuality || isRecalculating) {
+      return <PulseAnimation className="h-4 w-4 text-blue-600" size="sm" />;
+    }
     return null;
-  }, [editState.mode, editState.errorMessage, showSuccess]);
+  }, [editState.mode, editState.errorMessage, showSuccess, isRecalculatingQuality, isRecalculating]);
+
+  const handleQualityRetry = useCallback(() => {
+    if (qualityFailureCount >= AI_MAX_RETRY_ATTEMPTS) {
+      return;
+    }
+    const latestText = editorContentRef.current ?? editState.draftText;
+    if (!latestText) {
+      return;
+    }
+    void recalculateQuality(latestText);
+  }, [editState.draftText, qualityFailureCount, recalculateQuality]);
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -565,6 +865,15 @@ export function TaskRow({
               {editState.mode === 'error' && editState.errorMessage && (
                 <span className="text-xs text-destructive">{editState.errorMessage}</span>
               )}
+              {qualityError && (
+                <ErrorBanner
+                  message={QUALITY_FAILURE_MESSAGE}
+                  exhaustedMessage={QUALITY_EXHAUSTED_MESSAGE}
+                  retryCount={qualityFailureCount}
+                  maxRetries={AI_MAX_RETRY_ATTEMPTS}
+                  onRetry={qualityFailureCount >= AI_MAX_RETRY_ATTEMPTS ? undefined : handleQualityRetry}
+                />
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {category && categoryLabel && (
@@ -616,6 +925,17 @@ export function TaskRow({
                   </TooltipContent>
                 </Tooltip>
               )}
+              {(hasQualitySnapshot || isRecalculatingQuality) &&
+                (hasQualitySnapshot ? (
+                  <QualityTooltip
+                    qualityMetadata={qualityTooltipMetadata}
+                    onRefineClick={onRefineClick}
+                  >
+                    {qualityBadgeNode}
+                  </QualityTooltip>
+                ) : (
+                  qualityBadgeNode
+                ))}
             </div>
           </div>
         </div>

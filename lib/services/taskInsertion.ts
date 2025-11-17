@@ -247,8 +247,11 @@ export function insertBridgingTasks(
     };
   });
 
-  // Create updated plan with new tasks inserted
-  const updatedPlan = [...currentPlan];
+  // Stage updates on a deep copy so currentPlan never mutates on failure
+  const updatedPlan = currentPlan.map(task => ({
+    ...task,
+    depends_on: [...task.depends_on],
+  }));
 
   // Find insertion index (after predecessor)
   let insertionIndex: number;

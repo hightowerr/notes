@@ -1,50 +1,209 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+============================================================================
+SYNC IMPACT REPORT
+============================================================================
+Version Change: [Initial] → 1.0.0
+Modified Principles: N/A (initial creation)
+Added Sections:
+  - Core Principles (all 5 principles newly defined)
+  - Quality Standards
+  - Development Workflow
+  - Governance
+
+Templates Requiring Updates:
+  ✅ plan-template.md - Constitution Check section references this file
+  ✅ spec-template.md - User story format aligns with vertical slice mandate
+  ✅ tasks-template.md - Task structure supports vertical slice delivery
+
+Follow-up TODOs: None
+
+Rationale for Version 1.0.0:
+  - Initial constitution codifying existing project practices
+  - Formalizes the vertical slice development protocol from SYSTEM_RULES.md
+  - Captures TDD, observability, and architecture principles from CLAUDE.md
+============================================================================
+-->
+
+# AI Note Synthesiser Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Vertical Slice Development (NON-NEGOTIABLE)
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+Every code change MUST deliver complete user value through three observable elements:
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+- **SEE IT**: Visible UI change or feedback that users can observe
+- **DO IT**: Interactive capability users can trigger through the interface
+- **VERIFY IT**: Observable outcome confirming the action worked
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+**Rationale**: Infrastructure or backend-only work that cannot be user-tested creates technical debt and delays value delivery. Every slice must be demonstrable to non-technical stakeholders.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+**Enforcement**: Tasks lacking UI entry point, user action, or visible outcome MUST be rejected and restructured before implementation begins.
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+### II. Test-First Development (NON-NEGOTIABLE)
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+TDD cycle is mandatory with no exceptions to execution order:
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+- Write failing test FIRST
+- Implement minimal code to pass the test
+- Review code quality via automated reviewer
+- Run complete test suite
+- Validate end-to-end user journey
+- Document user capability added
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+**Rationale**: Tests written after implementation tend to verify existing behavior rather than requirements, leading to brittle test suites and missed edge cases.
+
+**Target Coverage**: ≥80% code coverage with contract tests for all API endpoints and integration tests for multi-service workflows.
+
+### III. Autonomous Agent Architecture
+
+System operates via Sense → Reason → Act → Learn loop:
+
+- **Sense**: Document intake, vector embeddings, semantic search
+- **Reason**: Mastra-powered agent orchestration with structured reasoning
+- **Act**: Task prioritization, gap detection, dependency inference
+- **Learn**: Outcome scoring, reflection-driven context adjustment
+
+**Rationale**: Manual triggers and human-in-loop bottlenecks violate the core value proposition of autonomous document intelligence.
+
+**Constraints**: Agent outputs MUST use deterministic JSON schemas validated with Zod. Confidence scores required for all AI-generated recommendations.
+
+### IV. Modular Service Architecture
+
+Services MUST be decoupled, independently testable, and single-purpose:
+
+- Document processing services isolated from AI summarization
+- Vector operations separate from task prioritization logic
+- Cloud sync independent of core document pipeline
+- Each service exports clear TypeScript interfaces
+
+**Rationale**: Monolithic services create cascading test failures, complicate feature isolation, and prevent parallel development streams.
+
+**Standards**: Services live in `lib/services/`, tests colocated or in `__tests__/`, no circular dependencies permitted.
+
+### V. Observable by Design
+
+All system operations MUST emit structured telemetry:
+
+- Mastra tool execution traces with latency and retry metrics
+- Processing queue states (pending/running/completed/failed)
+- Agent reasoning steps persisted to `agent_sessions` table
+- Error logs include context hashes for deduplication
+
+**Rationale**: Debugging autonomous systems without telemetry requires reading code, recreating state, and guessing at race conditions.
+
+**Performance SLOs**: Document processing <8s, semantic search p95 <500ms, agent prioritization <30s.
+
+## Quality Standards
+
+### Code Quality
+
+- TypeScript strict mode enabled, no `any` types without explicit justification
+- ESLint + Prettier enforced pre-commit
+- All API routes validate inputs with Zod schemas
+- React components use TypeScript for props, hooks typed
+
+### Testing Requirements
+
+- **Unit Tests**: Colocated with services in `__tests__/` or `lib/services/__tests__/`
+- **Contract Tests**: API endpoint validation in `__tests__/contract/`
+- **Integration Tests**: Multi-service flows in `__tests__/integration/`
+- **Manual Test Guides**: Required for blocked automated tests (e.g., FormData serialization issues)
+
+### Security & Privacy
+
+- OAuth tokens encrypted with AES-256 before database storage
+- Supabase Row Level Security policies for all user-facing tables
+- API keys never committed, managed via `.env.local`
+- 30-day auto-expiry for processed documents
+
+### Performance & Scale
+
+- Max file size: 10MB
+- Concurrent processing: 3 uploads max
+- Vector search optimized with pgvector IVFFlat index
+- Task embeddings pre-computed, cached, and reused
+
+## Development Workflow
+
+### Pre-Flight Check (Before ANY Code)
+
+1. Define user story: "As a user, I can [action] to [achieve outcome]"
+2. Identify UI component for user interaction
+3. Identify backend endpoint processing the action
+4. Confirm: Can user test this when complete? (YES required to proceed)
+
+### Agent Selection Protocol
+
+- **Feature implementation**: ALWAYS use `slice-orchestrator` agent
+- **Bug fix with user impact**: Use `slice-orchestrator` for complete slice
+- **Code review only**: Use `code-reviewer` agent
+- **Error investigation**: Use `debugger` agent, THEN `slice-orchestrator` for fix
+
+### Completion Criteria
+
+Task is complete ONLY when all checkpoints pass:
+
+- ✅ User can perform action via UI
+- ✅ Backend processes and persists action
+- ✅ User receives feedback/confirmation
+- ✅ Tests cover complete user journey
+- ✅ Code reviewed and approved by `code-reviewer` agent
+- ✅ Feature can be demoed to non-technical person
+
+### Forbidden Actions
+
+NEVER:
+
+- ❌ Write backend code without corresponding UI
+- ❌ Create UI without working backend
+- ❌ Mark task complete without user journey test
+- ❌ Skip the failing test phase
+- ❌ Implement features that cannot be user-tested
+- ❌ Deliver "infrastructure" or "setup" as a standalone slice
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+### Amendment Process
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+1. Proposed changes MUST include rationale and impact analysis
+2. Version bump follows semantic versioning:
+   - **MAJOR**: Backward-incompatible governance or principle removal
+   - **MINOR**: New principle added or material expansion
+   - **PATCH**: Clarifications, wording improvements, non-semantic fixes
+3. Update Sync Impact Report (HTML comment) documenting:
+   - Version change
+   - Modified/added/removed principles
+   - Template updates required
+   - Follow-up TODOs
+4. Validate consistency across `.specify/templates/` files
+
+### Compliance Review
+
+All code reviews MUST verify:
+
+- Vertical slice criterion met (SEE → DO → VERIFY)
+- Tests written before implementation
+- Agent selection protocol followed
+- Completion criteria checklist passed
+
+### Complexity Justification
+
+Use of patterns violating simplicity principles requires documentation:
+
+- Repository pattern (when direct Supabase client sufficient)
+- Additional microservices (when monolith viable)
+- Custom state management (when React Context sufficient)
+
+Justification captured in feature `plan.md` under "Complexity Tracking" section.
+
+### Runtime Guidance
+
+For implementation patterns, standards, and troubleshooting, developers MUST consult:
+
+- `CLAUDE.md` - Primary development guide, architecture overview, troubleshooting
+- `.claude/SYSTEM_RULES.md` - Vertical slice protocol, agent coordination rules
+- `.claude/standards.md` - TypeScript conventions, TDD workflow, design system
+- `AGENTS.md` - Repository workflow, commit guidelines, security posture
+
+**Version**: 1.0.0 | **Ratified**: 2025-01-13 | **Last Amended**: 2025-01-13
