@@ -1,0 +1,209 @@
+openapi: 3.0.3
+info:
+  title: Task Quality Evaluation API
+  description: Batch task quality evaluation with AI or heuristic fallback
+  version: 1.0.0
+
+paths:
+  /api/tasks/evaluate-quality:
+    post:
+      summary: Evaluate quality for batch of tasks
+      description: |
+        Analyzes task clarity, specificity, and granularity.
+        Returns quality badges (🟢 Clear | 🟡 Review | 🔴 Needs Work).
+        Uses AI by default, falls back to heuristics on failure.
+      operationId: evaluateQuality
+      tags:
+        - Task Intelligence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - tasks
+              properties:
+                tasks:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - task_id
+                      - task_text
+                    properties:
+                      task_id:
+                        type: string
+                        description: Unique task identifier
+                        example: "task-001"
+                      task_text:
+                        type: string
+                        minLength: 1
+                        maxLength: 200
+                        description: Task description to evaluate
+                        example: "Reduce checkout steps from 5 to 3"
+                  minItems: 1
+                  maxItems: 50
+                  description: Tasks to evaluate (max 50 per request)
+                force_heuristic:
+                  type: boolean
+                  default: false
+                  description: Skip AI evaluation, use only heuristics (for testing/fallback)
+      responses:
+        '200':
+          description: Quality evaluation completed
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - evaluations
+                  - summary
+                properties:
+                  evaluations:
+                    type: array
+                    items:
+                      type: object
+                      required:
+                        - task_id
+                        - clarity_score
+                        - badge_color
+                        - badge_label
+                        - quality_metadata
+                      properties:
+                        task_id:
+                          type: string
+                          example: "task-001"
+                        clarity_score:
+                          type: number
+                          format: float
+                          minimum: 0.0
+                          maximum: 1.0
+                          example: 0.85
+                        badge_color:
+                          type: string
+                          enum: [green, yellow, red]
+                          example: "green"
+                        badge_label:
+                          type: string
+                          enum: [Clear, Review, "Needs Work"]
+                          example: "Clear"
+                        quality_metadata:
+                          type: object
+                          required:
+                            - verb_strength
+                            - specificity_indicators
+                            - granularity_flags
+                            - improvement_suggestions
+                            - calculated_at
+                            - calculation_method
+                          properties:
+                            verb_strength:
+                              type: string
+                              enum: [strong, weak]
+                              example: "strong"
+                            specificity_indicators:
+                              type: object
+                              properties:
+                                has_metrics:
+                                  type: boolean
+                                  example: true
+                                has_acceptance_criteria:
+                                  type: boolean
+                                  example: false
+                                contains_numbers:
+                                  type: boolean
+                                  example: true
+                            granularity_flags:
+                              type: object
+                              properties:
+                                estimated_size:
+                                  type: string
+                                  enum: [small, medium, large]
+                                  example: "small"
+                                is_atomic:
+                                  type: boolean
+                                  example: true
+                            improvement_suggestions:
+                              type: array
+                              items:
+                                type: string
+                              example: ["Add acceptance criteria for measurability"]
+                            calculated_at:
+                              type: string
+                              format: date-time
+                              example: "2025-01-13T14:30:00Z"
+                            calculation_method:
+                              type: string
+                              enum: [ai, heuristic]
+                              example: "ai"
+                  summary:
+                    type: object
+                    required:
+                      - average_clarity
+                      - high_quality_count
+                      - needs_review_count
+                      - needs_work_count
+                      - analyzed_at
+                      - duration_ms
+                    properties:
+                      average_clarity:
+                        type: number
+                        format: float
+                        minimum: 0.0
+                        maximum: 1.0
+                        example: 0.68
+                      high_quality_count:
+                        type: integer
+                        description: Tasks with score ≥0.8
+                        example: 5
+                      needs_review_count:
+                        type: integer
+                        description: Tasks with score 0.5-0.8
+                        example: 7
+                      needs_work_count:
+                        type: integer
+                        description: Tasks with score <0.5
+                        example: 3
+                      analyzed_at:
+                        type: string
+                        format: date-time
+                        example: "2025-01-13T14:30:05Z"
+                      duration_ms:
+                        type: integer
+                        description: Total evaluation time
+                        example: 2300
+                      used_fallback:
+                        type: boolean
+                        description: True if heuristics were used instead of AI
+                        example: false
+        '400':
+          description: Bad request - validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - code
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+        code:
+          type: string
+          description: Machine-readable error code
+        retryable:
+          type: boolean
+          default: false

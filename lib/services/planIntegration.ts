@@ -1,6 +1,24 @@
 import type { BridgingTask } from '@/lib/schemas/bridgingTaskSchema';
 import type { PrioritizedTaskPlan } from '@/lib/types/agent';
 
+export type AuthenticatedUser = {
+  id: string;
+};
+
+const DEFAULT_USER_ID = 'default-user';
+
+/**
+ * Lightweight auth helper for API routes. Until full auth is wired up we rely on a
+ * deterministic fallback user so the rest of the stack can behave consistently.
+ */
+export async function getAuthUser(request: Request): Promise<AuthenticatedUser | null> {
+  const headerUserId = request.headers.get('x-user-id')?.trim();
+  if (headerUserId) {
+    return { id: headerUserId };
+  }
+  return { id: DEFAULT_USER_ID };
+}
+
 export type GapContextForPlan = {
   predecessor_task_id: string;
   successor_task_id: string;

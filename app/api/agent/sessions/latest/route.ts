@@ -1,11 +1,9 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
 import { parsePlanFromAgentResponse } from '@/lib/mastra/services/resultParser';
+import { getSupabaseAdminClient } from '@/lib/supabase/admin';
+import { cleanupExpiredAgentSessions } from '@/lib/services/agentSessionCleanup';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = getSupabaseAdminClient();
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -27,6 +25,8 @@ export async function GET(request: Request) {
   }
 
   try {
+    await cleanupExpiredAgentSessions();
+
     const { data: session, error } = await supabase
       .from('agent_sessions')
       .select('*')

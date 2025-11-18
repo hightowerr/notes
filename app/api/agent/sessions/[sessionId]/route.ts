@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { parsePlanFromAgentResponse } from '@/lib/mastra/services/resultParser';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
+import { cleanupExpiredAgentSessions } from '@/lib/services/agentSessionCleanup';
 
 const supabase = getSupabaseAdminClient();
 
@@ -20,6 +21,8 @@ export async function GET(_: Request, { params }: { params: Promise<RouteParams>
   }
 
   try {
+    await cleanupExpiredAgentSessions();
+
     const { data: session, error } = await supabase
       .from('agent_sessions')
       .select('*')
