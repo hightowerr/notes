@@ -4,7 +4,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import SummaryPanel from '../SummaryPanel';
 import type { DocumentOutput } from '@/lib/schemas';
 
@@ -83,7 +84,8 @@ describe('SummaryPanel', () => {
     expect(screen.getByText(/Sunset legacy API v1 by March 2026/i)).toBeInTheDocument();
   });
 
-  it('displays all actions with icons', () => {
+  it('displays all actions with icons', async () => {
+    const user = userEvent.setup();
     render(
       <SummaryPanel
         summary={mockSummary}
@@ -93,12 +95,21 @@ describe('SummaryPanel', () => {
       />
     );
 
-    expect(screen.getByText(/Schedule follow-up meeting/i)).toBeInTheDocument();
+    // Switch to Actions tab first
+    const actionsTab = screen.getByRole('tab', { name: /Actions/i });
+    await user.click(actionsTab);
+
+    // Wait for tab content to be rendered
+    await waitFor(() => {
+      expect(screen.getByText(/Schedule follow-up meeting/i)).toBeInTheDocument();
+    });
+
     expect(screen.getByText(/Review hiring pipeline/i)).toBeInTheDocument();
     expect(screen.getByText(/Send migration guide to API v1 customers/i)).toBeInTheDocument();
   });
 
-  it('displays LNO tasks in three columns', () => {
+  it('displays LNO tasks in three columns', async () => {
+    const user = userEvent.setup();
     render(
       <SummaryPanel
         summary={mockSummary}
@@ -108,17 +119,38 @@ describe('SummaryPanel', () => {
       />
     );
 
+    // Switch to Tasks tab first
+    const tasksTab = screen.getByRole('tab', { name: /Tasks \(LNO\)/i });
+    await user.click(tasksTab);
+
+    // Wait for tab content to be rendered - target the specific "Leverage" text in the card title
+    await waitFor(() => {
+      // Look for the "Leverage" text inside an element with data-slot="card-title"
+      const leverageElements = screen.getAllByText(/Leverage/i);
+      const leverageCardTitle = leverageElements.find(el =>
+        el.closest('[data-slot="card-title"]') !== null
+      );
+      expect(leverageCardTitle).toBeInTheDocument();
+    });
+
     // Leverage tasks
-    expect(screen.getByText(/Leverage/i)).toBeInTheDocument();
     expect(screen.getByText(/Complete competitive analysis/i)).toBeInTheDocument();
     expect(screen.getByText(/Define metrics for success/i)).toBeInTheDocument();
 
-    // Neutral tasks
-    expect(screen.getByText(/Neutral/i)).toBeInTheDocument();
+    // Neutral tasks - find the element with data-slot="card-title" containing "Neutral"
+    const neutralElements = screen.getAllByText(/Neutral/i);
+    const neutralCardTitle = neutralElements.find(el =>
+      el.closest('[data-slot="card-title"]') !== null
+    );
+    expect(neutralCardTitle).toBeInTheDocument();
     expect(screen.getByText(/Update project documentation/i)).toBeInTheDocument();
 
-    // Overhead tasks
-    expect(screen.getByText(/Overhead/i)).toBeInTheDocument();
+    // Overhead tasks - find the element with data-slot="card-title" containing "Overhead"
+    const overheadElements = screen.getAllByText(/Overhead/i);
+    const overheadCardTitle = overheadElements.find(el =>
+      el.closest('[data-slot="card-title"]') !== null
+    );
+    expect(overheadCardTitle).toBeInTheDocument();
     expect(screen.getByText(/File expense reports/i)).toBeInTheDocument();
   });
 
@@ -204,7 +236,8 @@ describe('SummaryPanel', () => {
     expect(screen.getByText(/No decisions identified/i)).toBeInTheDocument();
   });
 
-  it('handles empty actions array gracefully', () => {
+  it('handles empty actions array gracefully', async () => {
+    const user = userEvent.setup();
     const emptyActionsSummary = { ...mockSummary, actions: [] };
 
     render(
@@ -216,10 +249,18 @@ describe('SummaryPanel', () => {
       />
     );
 
-    expect(screen.getByText(/No actions identified/i)).toBeInTheDocument();
+    // Switch to Actions tab first
+    const actionsTab = screen.getByRole('tab', { name: /Actions/i });
+    await user.click(actionsTab);
+
+    // Wait for tab content to be rendered
+    await waitFor(() => {
+      expect(screen.getByText(/No actions identified/i)).toBeInTheDocument();
+    });
   });
 
-  it('handles empty LNO tasks gracefully', () => {
+  it('handles empty LNO tasks gracefully', async () => {
+    const user = userEvent.setup();
     const emptyLNOSummary = {
       ...mockSummary,
       lno_tasks: {
@@ -238,13 +279,40 @@ describe('SummaryPanel', () => {
       />
     );
 
-    const leverageColumn = screen.getByText(/Leverage/i).closest('div.rounded-lg');
-    const neutralColumn = screen.getByText(/Neutral/i).closest('div.rounded-lg');
-    const overheadColumn = screen.getByText(/Overhead/i).closest('div.rounded-lg');
+    // Switch to Tasks tab first
+    const tasksTab = screen.getByRole('tab', { name: /Tasks \(LNO\)/i });
+    await user.click(tasksTab);
 
-    expect(within(leverageColumn).getByText(/No tasks identified/i)).toBeInTheDocument();
-    expect(within(neutralColumn).getByText(/No tasks identified/i)).toBeInTheDocument();
-    expect(within(overheadColumn).getByText(/No tasks identified/i)).toBeInTheDocument();
+    // Wait for tab content to be rendered - target the specific "Leverage" text in the card title
+    await waitFor(() => {
+      // Look for the "Leverage" text inside an element with data-slot="card-title"
+      const leverageElements = screen.getAllByText(/Leverage/i);
+      const leverageCardTitle = leverageElements.find(el =>
+        el.closest('[data-slot="card-title"]') !== null
+      );
+      expect(leverageCardTitle).toBeInTheDocument();
+    });
+
+    // All the LNO cards are inside the tasks tab panel
+    const tasksTabPanel = screen.getByRole('tabpanel', { name: /Tasks \(LNO\)/i });
+
+    // Find each card by looking for the specific card title within data-slot="card" elements
+    const allLNOCards = tasksTabPanel.querySelectorAll('[data-slot="card"]');
+
+    // Find the specific cards containing each category
+    const leverageCard = Array.from(allLNOCards).find(card =>
+      card.querySelector('[data-slot="card-title"]')?.textContent?.includes('Leverage')
+    );
+    const neutralCard = Array.from(allLNOCards).find(card =>
+      card.querySelector('[data-slot="card-title"]')?.textContent?.includes('Neutral')
+    );
+    const overheadCard = Array.from(allLNOCards).find(card =>
+      card.querySelector('[data-slot="card-title"]')?.textContent?.includes('Overhead')
+    );
+
+    expect(within(leverageCard).getByText(/No tasks identified/i)).toBeInTheDocument();
+    expect(within(neutralCard).getByText(/No tasks identified/i)).toBeInTheDocument();
+    expect(within(overheadCard).getByText(/No tasks identified/i)).toBeInTheDocument();
   });
 
   it('has proper heading hierarchy for accessibility', () => {

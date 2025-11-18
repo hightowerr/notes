@@ -10,9 +10,15 @@ interface ReflectionInputProps {
   onReflectionAdded: (reflection: ReflectionWithWeight, tempId?: string, remove?: boolean) => void;
   onMobileClose?: () => void; // Mobile-specific: close modal after submit
   onMobileReopen?: () => void; // Mobile-specific: reopen modal from "Add Another" button
+  disabled?: boolean;
 }
 
-export function ReflectionInput({ onReflectionAdded, onMobileClose, onMobileReopen }: ReflectionInputProps) {
+export function ReflectionInput({
+  onReflectionAdded,
+  onMobileClose,
+  onMobileReopen,
+  disabled = false,
+}: ReflectionInputProps) {
   const [text, setText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -32,6 +38,10 @@ export function ReflectionInput({ onReflectionAdded, onMobileClose, onMobileReop
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (disabled) {
+      return;
+    }
 
     // Clear previous validation errors
     setValidationError(null);
@@ -134,7 +144,7 @@ export function ReflectionInput({ onReflectionAdded, onMobileClose, onMobileReop
           maxLength={500} // Hard limit at 500
           placeholder="What's your current context? (energy level, constraints, blockers, momentum...)"
           className="min-h-[128px] resize-none bg-bg-layer-3 text-text-body text-base sm:text-sm focus-visible:ring-primary-3 focus-visible:border-primary-3 sm:min-h-[96px]"
-          disabled={isSubmitting}
+          disabled={isSubmitting || disabled}
           autoFocus
         />
 
@@ -164,7 +174,7 @@ export function ReflectionInput({ onReflectionAdded, onMobileClose, onMobileReop
 
       <button
         type="submit"
-        disabled={isSubmitting || text.trim().length === 0}
+        disabled={isSubmitting || text.trim().length === 0 || disabled}
         className="w-full px-4 py-2 bg-primary-2 text-text-on-primary rounded-lg hover:bg-primary-3 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-2layer-sm hover:shadow-2layer-md font-medium"
       >
         {isSubmitting ? 'Adding...' : 'Add Reflection'}

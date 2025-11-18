@@ -1,5 +1,7 @@
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { generateTaskId } from '@/lib/services/embeddingService';
+import { getTaskRecordsByIds, type TaskRecord } from '@/lib/services/taskRepository';
+import { ManualOverrideSchema, type ManualOverrideState } from '@/lib/schemas/manualOverride';
 
 const supabase = getSupabaseAdminClient();
 
@@ -28,6 +30,7 @@ type TaskEmbeddingRow = {
   task_text: string | null;
   document_id: string | null;
   is_manual?: boolean | null;
+  manual_overrides?: unknown;
 };
 
 type ProcessedDocumentRow = {
@@ -49,6 +52,7 @@ export type OutcomeAlignedTask = {
   category: LnoCategory | null;
   rationale: string | null;
   is_manual?: boolean;
+  manual_override?: ManualOverrideState | null;
 };
 
 function normalizeText(value: unknown): string | null {
@@ -118,16 +122,18 @@ export async function resolveOutcomeAlignedTasks(
     return {};
   }
 
+  const uniqueTaskIds = Array.from(new Set(taskIds));
+
   // 🔍 DIAGNOSTIC: Log input task IDs
   console.log('[LNOTaskService] Input:', {
-    taskIdsCount: taskIds.length,
-    sampleIds: taskIds.slice(0, 3).map(id => id.slice(0, 16) + '...')
+    taskIdsCount: uniqueTaskIds.length,
+    sampleIds: uniqueTaskIds.slice(0, 3).map(id => id.slice(0, 16) + '...')
   });
 
   const { data: taskRows, error: taskError } = await supabase
     .from('task_embeddings')
-    .select('task_id, task_text, document_id, is_manual')
-    .in('task_id', taskIds)
+    .select('task_id, task_text, document_id, is_manual, manual_overrides')
+    .in('task_id', uniqueTaskIds)
     .returns<TaskEmbeddingRow[]>();
 
   if (taskError) {
@@ -144,20 +150,70 @@ export async function resolveOutcomeAlignedTasks(
     }))
   });
 
-  const documentIds = Array.from(
-    new Set(
-      (taskRows ?? [])
-        .map(row => row.document_id)
-        .filter((value): value is string => typeof value === 'string')
-    )
-  );
+  const taskRowMap = new Map<string, TaskEmbeddingRow>();
+  (taskRows ?? []).forEach(row => {
+    if (row?.task_id) {
+      taskRowMap.set(row.task_id, row);
+    }
+  });
+
+  const idsNeedingRecovery = uniqueTaskIds.filter(taskId => {
+    const row = taskRowMap.get(taskId);
+    return !row || !normalizeText(row.task_text);
+  });
+
+  let recoveredRecords: TaskRecord[] = [];
+  if (idsNeedingRecovery.length > 0) {
+    try {
+      const recovery = await getTaskRecordsByIds(idsNeedingRecovery, { recoverMissing: true });
+      recoveredRecords = recovery.tasks;
+      console.log('[LNOTaskService] Text recovery summary:', {
+        requested: idsNeedingRecovery.length,
+        recovered: recovery.tasks.length,
+        stillMissing: recovery.missingIds.length,
+        sampleRecovered: recovery.tasks.slice(0, 2).map(task => ({
+          id: task.task_id.slice(0, 16) + '...',
+          hasText: !!task.task_text,
+          documentId: task.document_id,
+        })),
+      });
+    } catch (error) {
+      console.error('[LNOTaskService] Failed to recover task texts', error);
+    }
+  }
+
+  const recoveredMap = new Map<string, TaskRecord>();
+  recoveredRecords.forEach(record => {
+    recoveredMap.set(record.task_id, record);
+    if (!taskRowMap.has(record.task_id)) {
+      taskRowMap.set(record.task_id, {
+        task_id: record.task_id,
+        task_text: record.task_text,
+        document_id: record.document_id,
+        is_manual: false,
+        manual_overrides: null,
+      });
+    }
+  });
+
+  const documentIdSet = new Set<string>();
+  (taskRows ?? []).forEach(row => {
+    if (row?.document_id) {
+      documentIdSet.add(row.document_id);
+    }
+  });
+  recoveredRecords.forEach(record => {
+    if (record.document_id) {
+      documentIdSet.add(record.document_id);
+    }
+  });
 
   let lnoIndex = new Map<string, { category: LnoCategory; text: string }>();
-  if (documentIds.length > 0) {
+  if (documentIdSet.size > 0) {
     const { data: docs, error: docError } = await supabase
       .from('processed_documents')
       .select('id, structured_output')
-      .in('id', documentIds)
+      .in('id', Array.from(documentIdSet))
       .returns<ProcessedDocumentRow[]>();
 
     if (docError) {
@@ -172,98 +228,103 @@ export async function resolveOutcomeAlignedTasks(
       sampleEntries: Array.from(lnoIndex.entries()).slice(0, 2).map(([id, data]) => ({
         id: id.slice(0, 16) + '...',
         category: data.category,
-        textLength: data.text.length
-      }))
+        textLength: data.text.length,
+      })),
     });
   }
 
   const outcome = options.outcome;
-  
+
   // 🔍 DIAGNOSTIC: Log detailed info about task rows
   console.log('[LNOTaskService] Processing task rows:', {
     totalRows: taskRows?.length ?? 0,
-    rowsWithMissingText: taskRows?.filter(row => !normalizeText(row.task_text)).length ?? 0,
-    sampleMissingText: taskRows?.filter(row => !normalizeText(row.task_text)).slice(0, 2).map(row => ({
-      id: row.task_id.slice(0, 16) + '...',
-      textIsNull: row.task_text === null,
-      textIsEmpty: row.task_text === '',
-      textLength: typeof row.task_text === 'string' ? row.task_text.length : 'not string',
-      hasDocId: !!row.document_id,
-      isManual: row.is_manual
-    }))
+    rowsWithMissingText:
+      taskRows?.filter(row => !normalizeText(row.task_text)).length ?? 0,
+    sampleMissingText: taskRows
+      ?.filter(row => !normalizeText(row.task_text))
+      .slice(0, 2)
+      .map(row => ({
+        id: row.task_id.slice(0, 16) + '...',
+        textIsNull: row.task_text === null,
+        textIsEmpty: row.task_text === '',
+        textLength: typeof row.task_text === 'string' ? row.task_text.length : 'not string',
+        hasDocId: !!row.document_id,
+        isManual: row.is_manual,
+      })),
   });
-  
+
   const result: Record<string, OutcomeAlignedTask> = {};
 
-  for (const row of taskRows ?? []) {
-    if (!row || typeof row.task_id !== 'string') {
-      continue;
-    }
+  for (const taskId of uniqueTaskIds) {
+    const row = taskRowMap.get(taskId) ?? null;
+    const recovered = recoveredMap.get(taskId);
 
-    const classification = lnoIndex.get(row.task_id);
+    const manualOverrideResult = ManualOverrideSchema.safeParse(
+      row?.manual_overrides ?? null
+    );
+    const manualOverride: ManualOverrideState | null = manualOverrideResult.success
+      ? manualOverrideResult.data
+      : null;
+
+    const classification = lnoIndex.get(taskId);
     if (classification) {
-      console.log('[LNOTaskService] Found classification for task:', {
-        taskId: row.task_id.slice(0, 16) + '...',
-        hasClassificationText: !!classification.text,
-        classificationText: classification.text?.slice(0, 60),
-        category: classification.category
-      });
-      
-      const { title, rationale } = buildOutcomeAlignment(classification.text, classification.category, outcome);
-      result[row.task_id] = {
-        task_id: row.task_id,
-        document_id: row.document_id,
+      const { title, rationale } = buildOutcomeAlignment(
+        classification.text,
+        classification.category,
+        outcome
+      );
+      result[taskId] = {
+        task_id: taskId,
+        document_id: row?.document_id ?? recovered?.document_id ?? null,
         original_text: classification.text,
         title,
         category: classification.category,
         rationale,
-        is_manual: Boolean(row.is_manual),
+        is_manual: Boolean(row?.is_manual),
+        manual_override: manualOverride,
       };
       continue;
     }
 
-    console.log('[LNOTaskService] No classification found, checking fallback text for:', {
-      taskId: row.task_id.slice(0, 16) + '...',
-      taskText: row.task_text,
-      hasFallbackText: !!normalizeText(row.task_text)
-    });
-
-    const fallbackText = normalizeText(row.task_text);
+    const fallbackText =
+      normalizeText(row?.task_text) ?? normalizeText(recovered?.task_text);
     if (fallbackText) {
-      console.log('[LNOTaskService] Using fallback text for task:', {
-        taskId: row.task_id.slice(0, 16) + '...',
-        fallbackText: fallbackText?.slice(0, 60)
-      });
-      
       const fallbackCategory: LnoCategory = 'neutral';
-      const { title, rationale } = buildOutcomeAlignment(fallbackText, fallbackCategory, outcome);
-      result[row.task_id] = {
-        task_id: row.task_id,
-        document_id: row.document_id,
+      const { title, rationale } = buildOutcomeAlignment(
+        fallbackText,
+        fallbackCategory,
+        outcome
+      );
+      result[taskId] = {
+        task_id: taskId,
+        document_id: row?.document_id ?? recovered?.document_id ?? null,
         original_text: fallbackText,
         title,
         category: fallbackCategory,
         rationale,
-        is_manual: Boolean(row.is_manual),
+        is_manual: Boolean(row?.is_manual),
+        manual_override: manualOverride,
       };
-    } else {
-      console.log('[LNOTaskService] Using fallback title for task with no text:', {
-        taskId: row.task_id.slice(0, 16) + '...',
-        taskText: row.task_text,
-        documentId: row.document_id
-      });
-      
-      const fallbackTitle = 'Untitled task';
-      result[row.task_id] = {
-        task_id: row.task_id,
-        document_id: row.document_id,
-        original_text: fallbackTitle,
-        title: fallbackTitle,
-        category: null,
-        rationale: null,
-        is_manual: Boolean(row.is_manual),
-      };
+      continue;
     }
+
+    console.warn('[LNOTaskService] Unable to recover text for task, using fallback title', {
+      taskId: taskId.slice(0, 16) + '...',
+      hasRow: Boolean(row),
+      hasRecoveredRecord: Boolean(recovered),
+    });
+
+    const fallbackTitle = 'Untitled task';
+    result[taskId] = {
+      task_id: taskId,
+      document_id: row?.document_id ?? recovered?.document_id ?? null,
+      original_text: fallbackTitle,
+      title: fallbackTitle,
+      category: null,
+      rationale: null,
+      is_manual: Boolean(row?.is_manual),
+      manual_override: manualOverride,
+    };
   }
 
   return result;

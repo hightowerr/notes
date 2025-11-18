@@ -21,6 +21,7 @@ export default defineConfig(({ mode }) => {
         NEXT_PUBLIC_SUPABASE_URL: env.NEXT_PUBLIC_SUPABASE_URL || 'https://test.supabase.co',
         NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'test-key-placeholder',
         OPENAI_API_KEY: env.OPENAI_API_KEY || '',
+        SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY || 'service-role-test-key',
       },
     },
     resolve: {

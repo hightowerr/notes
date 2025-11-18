@@ -5,8 +5,15 @@ import { Check, Loader2, Lock, Pencil, Unlock, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { MovementBadge, type MovementInfo } from '@/app/priorities/components/MovementBadge';
+import { QUADRANT_CONFIGS, getQuadrant, type Quadrant } from '@/lib/schemas/quadrant';
+import { ScoreBreakdownModal } from '@/app/priorities/components/ScoreBreakdownModal';
+import { ManualOverrideControls } from '@/app/priorities/components/ManualOverrideControls';
+import type { ManualOverrideState } from '@/lib/schemas/manualOverride';
+import type { StrategicScore, TaskWithScores } from '@/lib/schemas/strategicScore';
+import type { RetryStatusEntry } from '@/lib/schemas/retryStatus';
 
 type EditMode = 'idle' | 'editing' | 'saving' | 'error';
 
@@ -31,6 +38,11 @@ type DependencyLink = {
 type TaskRowProps = {
   taskId: string;
   order: number;
+  impact?: number | null;
+  effort?: number | null;
+  confidence?: number | null;
+  priority?: number | null;
+  strategicDetails?: TaskWithScores | null;
   title: string;
   category?: 'leverage' | 'neutral' | 'overhead' | null;
   isLocked: boolean;
@@ -40,6 +52,7 @@ type TaskRowProps = {
   isAiGenerated: boolean;
   isManual?: boolean;
   isPrioritizing?: boolean;
+  retryStatus?: RetryStatusEntry | null;
   isSelected: boolean;
   isHighlighted: boolean;
   onSelect: (taskId: string) => void;
@@ -49,6 +62,10 @@ type TaskRowProps = {
   onTaskTitleChange?: (taskId: string, nextTitle: string) => void;
   outcomeId?: string | null;
   onEditSuccess?: (taskId: string, options: { prioritizationTriggered: boolean }) => void;
+  hasManualOverride?: boolean;
+  manualOverride?: ManualOverrideState | null;
+  baselineScore?: StrategicScore | null;
+  onManualOverrideChange?: (override: ManualOverrideState | null) => void;
 };
 
 function MobileFieldLabel({ children }: { children: string }) {
@@ -62,6 +79,11 @@ function MobileFieldLabel({ children }: { children: string }) {
 export function TaskRow({
   taskId,
   order,
+  impact = null,
+  effort = null,
+  confidence = null,
+  priority = null,
+  strategicDetails = null,
   title,
   category,
   isLocked,
@@ -71,6 +93,7 @@ export function TaskRow({
   isAiGenerated,
   isManual = false,
   isPrioritizing = false,
+  retryStatus = null,
   isSelected,
   isHighlighted,
   onSelect,
@@ -80,6 +103,10 @@ export function TaskRow({
   onTaskTitleChange,
   outcomeId,
   onEditSuccess,
+  hasManualOverride = false,
+  manualOverride = null,
+  baselineScore = null,
+  onManualOverrideChange,
 }: TaskRowProps) {
   const categoryLabel = category
     ? category === 'leverage'
@@ -104,6 +131,20 @@ export function TaskRow({
   ) : (
     <span className="text-sm text-muted-foreground">None</span>
   );
+  const retryState = retryStatus?.status;
+  const maxRetryAttempts = retryStatus?.max_attempts ?? 3;
+  const retryAttempts = retryStatus?.attempts ?? 0;
+  const isScoring = retryState === 'pending' || retryState === 'in_progress';
+  const isRetryFailed = retryState === 'failed';
+  const scoringAttemptNumber = isScoring
+    ? Math.min(
+        maxRetryAttempts,
+        Math.max(
+          1,
+          retryState === 'pending' ? retryAttempts + 1 : retryAttempts === 0 ? 1 : retryAttempts
+        )
+      )
+    : null;
 
   const [editState, setEditState] = useState<EditState>({
     mode: 'idle',
@@ -113,6 +154,8 @@ export function TaskRow({
   });
   const [showSuccess, setShowSuccess] = useState(false);
   const [recentlyEdited, setRecentlyEdited] = useState(false);
+  const [isScoreModalOpen, setIsScoreModalOpen] = useState(false);
+  const [isManualOverrideOpen, setIsManualOverrideOpen] = useState(false);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const editorContentRef = useRef<string>(title);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -439,6 +482,71 @@ export function TaskRow({
     return null;
   }, [editState.mode, editState.errorMessage, showSuccess]);
 
+  const quadrant = useMemo(() => {
+    if (typeof impact === 'number' && typeof effort === 'number') {
+      return getQuadrant(impact, effort);
+    }
+    return null;
+  }, [impact, effort]);
+
+  const strategicSummary = useMemo(() => {
+    if (
+      typeof impact !== 'number' ||
+      typeof effort !== 'number' ||
+      typeof confidence !== 'number' ||
+      typeof priority !== 'number'
+    ) {
+      return null;
+    }
+    const formattedImpact = formatDecimal(impact, 1);
+    const formattedEffort = `${formatDecimal(effort, 1)}h`;
+    const formattedConfidence = confidence.toFixed(2);
+    const formattedPriority = Math.round(priority).toString();
+    return `Impact: ${formattedImpact} | Effort: ${formattedEffort} | Confidence: ${formattedConfidence} | Priority: ${formattedPriority}`;
+  }, [impact, effort, confidence, priority]);
+
+  const quadrantBadge = useMemo(() => {
+    if (!quadrant) {
+      return null;
+    }
+    const config = QUADRANT_CONFIGS[quadrant];
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            className={cn(
+              'inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide shadow-sm',
+              QUADRANT_BADGE_STYLES[quadrant]
+            )}
+          >
+            <span>{config.emoji}</span>
+            <span>{config.label}</span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p className="text-xs">{config.description}</p>
+        </TooltipContent>
+      </Tooltip>
+    );
+  }, [quadrant]);
+
+  const modalTask: TaskWithScores | null =
+    strategicDetails ??
+    (impact !== null && effort !== null && confidence !== null && priority !== null
+      ? {
+          id: taskId,
+          title,
+          content: title,
+          impact,
+          effort,
+          confidence,
+          priority,
+          hasManualOverride,
+          quadrant: quadrant ?? 'high_impact_low_effort',
+          confidenceBreakdown: null,
+        }
+      : null);
+
   return (
     <TooltipProvider delayDuration={200}>
     <div
@@ -565,6 +673,39 @@ export function TaskRow({
               {editState.mode === 'error' && editState.errorMessage && (
                 <span className="text-xs text-destructive">{editState.errorMessage}</span>
               )}
+                    {strategicSummary && (
+                <div className="flex flex-col gap-1">
+                  <MobileFieldLabel>Strategic Scores</MobileFieldLabel>
+                  <div
+                    className="flex flex-wrap items-center gap-2 rounded-md bg-bg-layer-2/80 px-3 py-2 text-xs text-muted-foreground shadow-sm"
+                    onClick={event => event.stopPropagation()}
+                    onKeyDown={event => event.stopPropagation()}
+                  >
+                    {quadrantBadge}
+                    <span className="font-medium text-foreground">{strategicSummary}</span>
+                    {modalTask && (
+                      <button
+                        type="button"
+                        className="text-xs font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={() => setIsScoreModalOpen(true)}
+                      >
+                        Why this score?
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-muted-foreground underline-offset-2 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={event => {
+                        event.stopPropagation();
+                        setIsManualOverrideOpen(true);
+                      }}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      Edit scores
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {category && categoryLabel && (
@@ -594,6 +735,35 @@ export function TaskRow({
                   <TooltipContent>
                     <p>This task was manually added by you</p>
                   </TooltipContent>
+                </Tooltip>
+              )}
+              {hasManualOverride && (
+                <Badge className="shrink-0 bg-emerald-500/10 text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-100">
+                  Manual override
+                </Badge>
+              )}
+              {isScoring && (
+                <Badge className="shrink-0 bg-amber-500/10 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-500/20 dark:text-amber-100">
+                  Scoring…
+                  {typeof scoringAttemptNumber === 'number' && maxRetryAttempts > 0 && (
+                    <span className="ml-1 normal-case">
+                      (Attempt {scoringAttemptNumber}/{maxRetryAttempts})
+                    </span>
+                  )}
+                </Badge>
+              )}
+              {isRetryFailed && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge className="shrink-0 border-destructive/40 bg-destructive/10 text-[11px] font-semibold uppercase tracking-wide text-destructive" variant="outline">
+                      Scores unavailable
+                    </Badge>
+                  </TooltipTrigger>
+                  {retryStatus?.last_error && (
+                    <TooltipContent>
+                      <p>{retryStatus.last_error}</p>
+                    </TooltipContent>
+                  )}
                 </Tooltip>
               )}
               {isPrioritizing && (
@@ -651,6 +821,34 @@ export function TaskRow({
         />
       </div>
     </div>
-    </TooltipProvider>
-  );
+    <ScoreBreakdownModal task={modalTask} open={isScoreModalOpen} onOpenChange={setIsScoreModalOpen} />
+    <Dialog open={isManualOverrideOpen} onOpenChange={setIsManualOverrideOpen}>
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>Edit impact & effort</DialogTitle>
+          <DialogDescription>Adjust the AI estimates to reflect your latest understanding.</DialogDescription>
+        </DialogHeader>
+        <ManualOverrideControls
+          taskId={taskId}
+          open={isManualOverrideOpen}
+          manualOverride={manualOverride}
+          aiScore={baselineScore}
+          onManualOverrideChange={onManualOverrideChange}
+        />
+      </DialogContent>
+    </Dialog>
+  </TooltipProvider>
+);
 }
+
+function formatDecimal(value: number, digits: number) {
+  const rounded = value.toFixed(digits);
+  return rounded.endsWith('.0') ? rounded.replace(/\.0$/, '') : rounded;
+}
+
+const QUADRANT_BADGE_STYLES: Record<Quadrant, string> = {
+  high_impact_low_effort: 'bg-emerald-500/15 text-emerald-700 ring-1 ring-inset ring-emerald-500/30',
+  high_impact_high_effort: 'bg-sky-500/15 text-sky-700 ring-1 ring-inset ring-sky-500/30',
+  low_impact_low_effort: 'bg-amber-500/20 text-amber-700 ring-1 ring-inset ring-amber-500/30',
+  low_impact_high_effort: 'bg-rose-500/15 text-rose-700 ring-1 ring-inset ring-rose-500/30',
+};

@@ -53,13 +53,34 @@ function sanitizeTaskIds(value: unknown): string[] {
       if (typeof entry === 'number' || typeof entry === 'boolean') {
         return String(entry);
       }
-      if (entry && typeof entry === 'object' && 'task_id' in entry && typeof (entry as { task_id?: unknown }).task_id === 'string') {
-        return ((entry as { task_id?: string }).task_id ?? '').trim();
+      if (entry && typeof entry === 'object') {
+        const candidate = entry as Record<string, unknown>;
+        if (typeof candidate.task_id === 'string') {
+          return candidate.task_id.trim();
+        }
+        if (typeof candidate.id === 'string') {
+          return candidate.id.trim();
+        }
       }
       return '';
     })
     .map(text => text.trim())
     .filter(text => text.length > 0);
+}
+
+function dedupeTaskIds(ids: string[]): string[] {
+  if (ids.length <= 1) {
+    return ids;
+  }
+  const seen = new Set<string>();
+  const result: string[] = [];
+  ids.forEach(id => {
+    if (!seen.has(id)) {
+      seen.add(id);
+      result.push(id);
+    }
+  });
+  return result;
 }
 
 function buildDefaultExecutionWaves(taskIds: string[]): ExecutionWave[] {
@@ -163,18 +184,135 @@ function parseRemovedTasks(source: unknown): TaskRemoval[] {
   return removals;
 }
 
+function collectTaskIdsFromWaves(source: unknown): string[] {
+  if (!Array.isArray(source)) {
+    return [];
+  }
+  const ids: string[] = [];
+  source.forEach(candidate => {
+    if (!isRecord(candidate)) {
+      return;
+    }
+    const waveIds = sanitizeTaskIds(candidate.task_ids);
+    ids.push(...waveIds);
+  });
+  return ids;
+}
+
+function collectTaskIdsFromAnnotations(source: unknown): string[] {
+  if (!Array.isArray(source)) {
+    return [];
+  }
+  const ids: string[] = [];
+  source.forEach(candidate => {
+    if (!isRecord(candidate)) {
+      return;
+    }
+    if (typeof candidate.task_id === 'string') {
+      ids.push(candidate.task_id.trim());
+    }
+  });
+  return ids.filter(id => id.length > 0);
+}
+
+const NESTED_PLAN_KEYS = ['prioritized_plan', 'plan', 'result', 'output', 'data'] as const;
+
+function looksLikePlanSource(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return (
+    Array.isArray(value.ordered_task_ids) ||
+    Array.isArray(value.execution_waves) ||
+    Array.isArray(value.prioritized_tasks) ||
+    Array.isArray(value.tasks) ||
+    Array.isArray(value.task_annotations)
+  );
+}
+
+function unwrapPlanRecord(
+  raw: Record<string, unknown>,
+  seen = new Set<Record<string, unknown>>()
+): Record<string, unknown> {
+  if (seen.has(raw)) {
+    return raw;
+  }
+  seen.add(raw);
+
+  if (looksLikePlanSource(raw)) {
+    return raw;
+  }
+
+  for (const key of NESTED_PLAN_KEYS) {
+    const candidate = raw[key];
+    if (isRecord(candidate)) {
+      const resolved = unwrapPlanRecord(candidate, seen);
+      if (resolved !== candidate || looksLikePlanSource(candidate)) {
+        return resolved;
+      }
+    }
+  }
+
+  return raw;
+}
+
 function coercePlanCandidate(raw: unknown, narrative?: string): PrioritizedTaskPlan {
   if (!isRecord(raw)) {
     throw new Error('Agent response was not a JSON object.');
   }
 
-  const orderedTaskIds = sanitizeTaskIds(raw.ordered_task_ids);
+  const planRecord = unwrapPlanRecord(raw);
+  const orderedIdSources = [
+    planRecord.ordered_task_ids,
+    planRecord.orderedTasks,
+    (planRecord as Record<string, unknown>).task_order,
+    (planRecord as Record<string, unknown>).tasks_ordered,
+  ];
+
+  let orderedTaskIds: string[] = [];
+  for (const source of orderedIdSources) {
+    const candidateIds = sanitizeTaskIds(source);
+    if (candidateIds.length > 0) {
+      orderedTaskIds = dedupeTaskIds(candidateIds);
+      break;
+    }
+  }
+
+  if (orderedTaskIds.length === 0) {
+    const derivedFromWaves = collectTaskIdsFromWaves(planRecord.execution_waves);
+    if (derivedFromWaves.length > 0) {
+      orderedTaskIds = dedupeTaskIds(derivedFromWaves);
+    }
+  }
+
+  if (orderedTaskIds.length === 0) {
+    const derivedFromAnnotations = collectTaskIdsFromAnnotations(planRecord.task_annotations);
+    if (derivedFromAnnotations.length > 0) {
+      orderedTaskIds = dedupeTaskIds(derivedFromAnnotations);
+    }
+  }
+
+  if (orderedTaskIds.length === 0) {
+    const derivedFromPrioritized = sanitizeTaskIds(
+      planRecord.prioritized_tasks ?? (planRecord as Record<string, unknown>).prioritizedTasks
+    );
+    if (derivedFromPrioritized.length > 0) {
+      orderedTaskIds = dedupeTaskIds(derivedFromPrioritized);
+    }
+  }
+
+  if (orderedTaskIds.length === 0) {
+    const derivedFromTasks = sanitizeTaskIds(planRecord.tasks);
+    if (derivedFromTasks.length > 0) {
+      orderedTaskIds = dedupeTaskIds(derivedFromTasks);
+    }
+  }
 
   if (orderedTaskIds.length === 0) {
     throw new Error('Agent response missing ordered_task_ids.');
   }
 
-  const waveCandidates = Array.isArray(raw.execution_waves) ? raw.execution_waves : [];
+  const waveCandidates = Array.isArray(planRecord.execution_waves) ? planRecord.execution_waves : [];
   const normalizedWaves: ExecutionWave[] = [];
 
   waveCandidates.forEach(candidate => {
@@ -218,7 +356,7 @@ function coercePlanCandidate(raw: unknown, narrative?: string): PrioritizedTaskP
   const fallbackWaves = buildDefaultExecutionWaves(orderedTaskIds);
   const executionWaves = normalizedWaves.length > 0 ? normalizedWaves : fallbackWaves;
 
-  const dependencyCandidates = Array.isArray(raw.dependencies) ? raw.dependencies : [];
+  const dependencyCandidates = Array.isArray(planRecord.dependencies) ? planRecord.dependencies : [];
   const dependencies: TaskDependency[] = dependencyCandidates
     .map(candidate => {
       if (!isRecord(candidate)) {
@@ -249,7 +387,7 @@ function coercePlanCandidate(raw: unknown, narrative?: string): PrioritizedTaskP
     })
     .filter((dependency): dependency is TaskDependency => dependency !== null);
 
-  const confidenceSource = isRecord(raw.confidence_scores) ? raw.confidence_scores : {};
+  const confidenceSource = isRecord(planRecord.confidence_scores) ? planRecord.confidence_scores : {};
   const confidenceScores = {
     ...buildConfidenceScores(orderedTaskIds),
   };
@@ -267,8 +405,8 @@ function coercePlanCandidate(raw: unknown, narrative?: string): PrioritizedTaskP
   }
 
   let summary =
-    typeof raw.synthesis_summary === 'string' && raw.synthesis_summary.trim().length > 0
-      ? raw.synthesis_summary.trim()
+    typeof planRecord.synthesis_summary === 'string' && planRecord.synthesis_summary.trim().length > 0
+      ? planRecord.synthesis_summary.trim()
       : '';
 
   if (!summary && narrative) {
@@ -279,8 +417,8 @@ function coercePlanCandidate(raw: unknown, narrative?: string): PrioritizedTaskP
     summary = 'Prioritization completed with limited data.';
   }
 
-  const taskAnnotations = parseTaskAnnotations(raw.task_annotations, orderedTaskIds);
-  const removedTasks = parseRemovedTasks(raw.removed_tasks);
+  const taskAnnotations = parseTaskAnnotations(planRecord.task_annotations, orderedTaskIds);
+  const removedTasks = parseRemovedTasks(planRecord.removed_tasks);
 
   const planCandidate = {
     ordered_task_ids: orderedTaskIds,
@@ -322,7 +460,7 @@ function sanitizeJsonString(jsonStr: string): string {
     .replace(/[\x00-\x07\x0B\x0C\x0E-\x1F\x7F]/g, ''); // Remove other control characters
 }
 
-function safeJsonParse(jsonStr: string): any {
+function safeJsonParse(jsonStr: string): unknown {
   try {
     // First try to parse as is
     return JSON.parse(jsonStr);

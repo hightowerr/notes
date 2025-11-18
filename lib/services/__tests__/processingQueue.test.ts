@@ -92,7 +92,7 @@ describe('ProcessingQueue', () => {
       const processed = await queue.complete('file-1');
 
       // file-4 should be processed (was first in queue)
-      expect(processed).toBe('file-4');
+      expect(processed?.fileId).toBe('file-4');
       expect(queue.getStatus().activeCount).toBe(3); // Still 3 active (2+3+4)
       expect(queue.getStatus().queuedCount).toBe(1); // Only file-5 queued now
     });
@@ -110,13 +110,13 @@ describe('ProcessingQueue', () => {
       const processedOrder: string[] = [];
 
       const next1 = await queue.complete('file-1');
-      if (next1) processedOrder.push(next1);
+      if (next1) processedOrder.push(next1.fileId);
 
       const next2 = await queue.complete('file-2');
-      if (next2) processedOrder.push(next2);
+      if (next2) processedOrder.push(next2.fileId);
 
       const next3 = await queue.complete('file-3');
-      if (next3) processedOrder.push(next3);
+      if (next3) processedOrder.push(next3.fileId);
 
       // Verify FIFO order
       expect(processedOrder).toEqual(['file-4', 'file-5', 'file-6']);
@@ -143,9 +143,9 @@ describe('ProcessingQueue', () => {
       queue.enqueue('file-4', 'test4.pdf'); // Queued
 
       // Complete one
-      const nextFileId = await queue.complete('file-1');
+      const nextFile = await queue.complete('file-1');
 
-      expect(nextFileId).toBe('file-4');
+      expect(nextFile?.fileId).toBe('file-4');
       expect(queue.getStatus().activeCount).toBe(3); // Still at max (2, 3, 4)
       expect(queue.getStatus().queuedCount).toBe(0); // Queue empty
     });

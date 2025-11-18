@@ -10,9 +10,17 @@ import { TaskList } from '@/app/priorities/components/TaskList';
 const mockedDiscardedRender = vi.fn();
 
 vi.mock('@/app/priorities/components/TaskRow', () => ({
-  TaskRow: ({ taskId, title }: { taskId: string; title: string }) => (
-    <div data-testid={`task-row-${taskId}`}>{title}</div>
-  ),
+  TaskRow: ({
+    taskId,
+    title,
+  }: {
+    taskId: string;
+    title: string;
+    impact?: number | null;
+    effort?: number | null;
+    confidence?: number | null;
+    priority?: number | null;
+  }) => <div data-testid={`task-row-${taskId}`}>{title}</div>,
 }));
 
 vi.mock('@/app/priorities/components/CompletedTasks', () => ({

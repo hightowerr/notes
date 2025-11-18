@@ -899,6 +899,10 @@ export default function DashboardPage() {
               : 'Processing...';
             const disableReprocess =
               doc.source === 'text_input' || isProcessingState || isReprocessing;
+            const lnoTasks = doc.summary?.lno_tasks ?? {};
+            const leverageTasks = lnoTasks.leverage ?? [];
+            const neutralTasks = lnoTasks.neutral ?? [];
+            const overheadTasks = lnoTasks.overhead ?? [];
 
             return (
               <div key={doc.id} className="relative">
@@ -1056,11 +1060,11 @@ export default function DashboardPage() {
                         <div className="space-y-2">
                           <div>
                             <p className="text-xs font-medium text-green-600 dark:text-green-400">
-                              Leverage ({doc.summary.lno_tasks.leverage?.length || 0})
+                              Leverage ({leverageTasks.length})
                             </p>
-                            {doc.summary.lno_tasks.leverage && doc.summary.lno_tasks.leverage.length > 0 ? (
+                            {leverageTasks.length > 0 ? (
                               <ul className="list-disc list-inside text-xs space-y-0.5 ml-2">
-                                {doc.summary.lno_tasks.leverage.map((task, idx) => (
+                                {leverageTasks.map((task, idx) => (
                                   <li key={idx} className="text-muted-foreground">
                                     {task}
                                   </li>
@@ -1073,11 +1077,11 @@ export default function DashboardPage() {
 
                           <div>
                             <p className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                              Neutral ({doc.summary.lno_tasks.neutral?.length || 0})
+                              Neutral ({neutralTasks.length})
                             </p>
-                            {doc.summary.lno_tasks.neutral && doc.summary.lno_tasks.neutral.length > 0 ? (
+                            {neutralTasks.length > 0 ? (
                               <ul className="list-disc list-inside text-xs space-y-0.5 ml-2">
-                                {doc.summary.lno_tasks.neutral.map((task, idx) => (
+                                {neutralTasks.map((task, idx) => (
                                   <li key={idx} className="text-muted-foreground">
                                     {task}
                                   </li>
@@ -1090,11 +1094,11 @@ export default function DashboardPage() {
 
                           <div>
                             <p className="text-xs font-medium text-orange-600 dark:text-orange-400">
-                              Overhead ({doc.summary.lno_tasks.overhead?.length || 0})
+                              Overhead ({overheadTasks.length})
                             </p>
-                            {doc.summary.lno_tasks.overhead && doc.summary.lno_tasks.overhead.length > 0 ? (
+                            {overheadTasks.length > 0 ? (
                               <ul className="list-disc list-inside text-xs space-y-0.5 ml-2">
-                                {doc.summary.lno_tasks.overhead.map((task, idx) => (
+                                {overheadTasks.map((task, idx) => (
                                   <li key={idx} className="text-muted-foreground">
                                     {task}
                                   </li>

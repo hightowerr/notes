@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -36,6 +36,8 @@ interface UploadedFileInfo {
   filteringApplied?: boolean; // T019: Whether filtering was applied
   exclusionReasons?: Array<{ action_text: string; reason: string }>; // T019: Exclusion reasons
 }
+
+const ERROR_TOAST_DEBOUNCE_MS = 5000;
 
 // Client-side file validation (T004)
 const validateFileBeforeUpload = (file: File): { valid: boolean; error?: string } => {
@@ -99,6 +101,24 @@ export default function Home() {
   const [reflectionPanelOpen, setReflectionPanelOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingIntervalsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const lastErrorToastRef = useRef(0);
+
+  const showDebouncedErrorToast = useCallback(
+    (message: string) => {
+      const now = Date.now();
+      if (now - lastErrorToastRef.current < ERROR_TOAST_DEBOUNCE_MS) {
+        console.log('[TOAST][SKIP]', {
+          message,
+          sinceLastMs: now - lastErrorToastRef.current,
+          debounceWindowMs: ERROR_TOAST_DEBOUNCE_MS,
+        });
+        return;
+      }
+      lastErrorToastRef.current = now;
+      toast.error(message);
+    },
+    []
+  );
 
   useEffect(() => {
     if (hasHandledOpenRef.current) {
@@ -174,7 +194,7 @@ export default function Home() {
           toast.success(`Summary ready for ${filename}`);
           stopPolling(fileId);
         } else if (statusData.status === 'failed') {
-          toast.error(`Processing failed for ${filename}`);
+          showDebouncedErrorToast(`Processing failed for ${filename}`);
           stopPolling(fileId);
         }
       } catch (error) {
@@ -332,8 +352,8 @@ export default function Home() {
             )
           );
 
-          // Show error toast
-          toast.error(`Failed to upload ${file.name}: ${result.error}`);
+          // Show error toast (rate-limited to avoid spam during outages)
+          showDebouncedErrorToast(`Failed to upload ${file.name}: ${result.error}`);
 
           // Log error to console
           console.error('[UPLOAD ERROR]', {
@@ -357,7 +377,7 @@ export default function Home() {
           )
         );
 
-        toast.error(`Failed to upload ${file.name}`);
+        showDebouncedErrorToast(`Failed to upload ${file.name}`);
 
         console.error('[UPLOAD NETWORK ERROR]', {
           filename: file.name,

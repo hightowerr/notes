@@ -1,0 +1,456 @@
+openapi: 3.0.3
+info:
+  title: Strategic Prioritization API
+  description: API endpoints for strategic task prioritization with Impact/Effort scoring
+  version: 1.0.0
+  contact:
+    name: API Support
+
+servers:
+  - url: http://localhost:3000/api
+    description: Local development
+  - url: https://app.example.com/api
+    description: Production
+
+paths:
+  /agent/prioritize:
+    post:
+      summary: Trigger strategic task prioritization
+      description: |
+        MODIFIED ENDPOINT: Now includes strategic scoring (Impact/Effort/Confidence/Priority)
+        in addition to semantic similarity ranking. LLM failures queue for async retry.
+      operationId: triggerPrioritization
+      tags:
+        - Agent Orchestration
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                outcome_id:
+                  type: string
+                  format: uuid
+                  description: Optional outcome ID to score tasks against
+              example:
+                outcome_id: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        '200':
+          description: Prioritization completed with strategic scores
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrioritizationResponse'
+              example:
+                session_id: "abc-123-def"
+                prioritized_tasks:
+                  - id: "task-001"
+                    content: "Implement payment processing"
+                    semantic_similarity: 0.85
+                    impact: 8.5
+                    effort: 16
+                    confidence: 0.78
+                    priority: 66.3
+                    quadrant: "high_impact_high_effort"
+                  - id: "task-002"
+                    content: "Fix typo in footer"
+                    semantic_similarity: 0.12
+                    impact: 1.0
+                    effort: 0.5
+                    confidence: 0.95
+                    priority: 19.0
+                    quadrant: "low_impact_low_effort"
+                reasoning_trace: "Prioritized 50 tasks based on outcome..."
+                strategic_scores:
+                  task-001:
+                    impact: 8.5
+                    effort: 16
+                    confidence: 0.78
+                    priority: 66.3
+                    reasoning:
+                      impact_keywords: ["payment", "revenue"]
+                      effort_source: "extracted"
+                      effort_hint: "16h"
+                    scored_at: "2025-11-17T14:30:00Z"
+                  task-002:
+                    impact: 1.0
+                    effort: 0.5
+                    confidence: 0.95
+                    priority: 19.0
+                    reasoning:
+                      impact_keywords: []
+                      effort_source: "heuristic"
+                      complexity_modifiers: ["simple"]
+                    scored_at: "2025-11-17T14:30:05Z"
+        '400':
+          description: Invalid request (e.g., outcome_id not found)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error during prioritization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /tasks/metadata:
+    get:
+      summary: Get task scoring metadata and retry status
+      description: |
+        NEW ENDPOINT: Poll for strategic scores and async retry queue status.
+        Used for reactive UI updates when background retries complete.
+      operationId: getTaskMetadata
+      tags:
+        - Tasks
+      parameters:
+        - name: session_id
+          in: query
+          description: Filter by agent session ID
+          schema:
+            type: string
+        - name: status
+          in: query
+          description: Filter by retry status
+          schema:
+            type: string
+            enum: [all, retry, failed]
+            default: all
+      responses:
+        '200':
+          description: Task metadata retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskMetadataResponse'
+              example:
+                scores:
+                  task-003:
+                    impact: 7.0
+                    effort: 8
+                    confidence: 0.82
+                    priority: 71.8
+                    reasoning:
+                      impact_keywords: ["launch"]
+                      effort_source: "extracted"
+                      effort_hint: "8h"
+                    scored_at: "2025-11-17T14:35:10Z"
+                retry_status:
+                  task-004:
+                    status: "retry_in_progress"
+                    attempts: 2
+                  task-005:
+                    status: "failed"
+                    attempts: 3
+                    last_error: "OpenAI API timeout"
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /tasks/{id}/override:
+    patch:
+      summary: Manually override Impact/Effort for a task
+      description: |
+        NEW ENDPOINT: Save user's manual adjustments to Impact/Effort scores.
+        Triggers instant priority recalculation. Overrides cleared on next agent run.
+      operationId: overrideTaskScores
+      tags:
+        - Tasks
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Task ID
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManualOverrideRequest'
+            example:
+              impact: 9.0
+              effort: 4.0
+              reason: "User knows this affects critical payment flow"
+      responses:
+        '200':
+          description: Override saved and priority recalculated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManualOverrideResponse'
+              example:
+                task_id: "task-001"
+                override:
+                  impact: 9.0
+                  effort: 4.0
+                  reason: "User knows this affects critical payment flow"
+                  timestamp: "2025-11-17T15:45:00Z"
+                  session_id: "abc-123-def"
+                updated_priority: 100
+        '400':
+          description: Invalid input (e.g., impact out of range)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+    PrioritizationResponse:
+      type: object
+      required:
+        - session_id
+        - prioritized_tasks
+        - reasoning_trace
+        - strategic_scores
+      properties:
+        session_id:
+          type: string
+          description: Unique session ID for this prioritization run
+        prioritized_tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/PrioritizedTask'
+        reasoning_trace:
+          type: string
+          description: Agent's reasoning for prioritization decisions
+        strategic_scores:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/StrategicScore'
+          description: Map of task_id to strategic scores
+
+    PrioritizedTask:
+      type: object
+      required:
+        - id
+        - content
+        - semantic_similarity
+        - impact
+        - effort
+        - confidence
+        - priority
+        - quadrant
+      properties:
+        id:
+          type: string
+          description: Task ID
+        content:
+          type: string
+          description: Task description
+        semantic_similarity:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: Cosine similarity to outcome (existing)
+        impact:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 10
+          description: Strategic impact score (NEW)
+        effort:
+          type: number
+          format: float
+          minimum: 0.5
+          maximum: 160
+          description: Estimated effort in hours (NEW)
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: Confidence that task helps achieve outcome (NEW)
+        priority:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+          description: Overall priority score (NEW)
+        quadrant:
+          type: string
+          enum:
+            - high_impact_low_effort
+            - high_impact_high_effort
+            - low_impact_low_effort
+            - low_impact_high_effort
+          description: Impact/Effort quadrant classification (NEW)
+
+    StrategicScore:
+      type: object
+      required:
+        - impact
+        - effort
+        - confidence
+        - priority
+        - reasoning
+        - scored_at
+      properties:
+        impact:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 10
+        effort:
+          type: number
+          format: float
+          minimum: 0.5
+          maximum: 160
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        priority:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+        reasoning:
+          type: object
+          properties:
+            impact_keywords:
+              type: array
+              items:
+                type: string
+            effort_source:
+              type: string
+              enum: [extracted, heuristic]
+            effort_hint:
+              type: string
+            complexity_modifiers:
+              type: array
+              items:
+                type: string
+        scored_at:
+          type: string
+          format: date-time
+
+    TaskMetadataResponse:
+      type: object
+      required:
+        - scores
+        - retry_status
+      properties:
+        scores:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/StrategicScore'
+          description: Map of task_id to completed scores
+        retry_status:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/RetryStatus'
+          description: Map of task_id to retry queue status
+
+    RetryStatus:
+      type: object
+      required:
+        - status
+        - attempts
+      properties:
+        status:
+          type: string
+          enum:
+            - pending
+            - in_progress
+            - completed
+            - failed
+        attempts:
+          type: integer
+          minimum: 0
+          maximum: 3
+        last_error:
+          type: string
+
+    ManualOverrideRequest:
+      type: object
+      properties:
+        impact:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 10
+        effort:
+          type: number
+          format: float
+          minimum: 0.5
+          maximum: 160
+        reason:
+          type: string
+          maxLength: 500
+      minProperties: 1
+
+    ManualOverrideResponse:
+      type: object
+      required:
+        - task_id
+        - override
+        - updated_priority
+      properties:
+        task_id:
+          type: string
+        override:
+          $ref: '#/components/schemas/ManualOverride'
+        updated_priority:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+
+    ManualOverride:
+      type: object
+      required:
+        - timestamp
+        - session_id
+      properties:
+        impact:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 10
+        effort:
+          type: number
+          format: float
+          minimum: 0.5
+          maximum: 160
+        reason:
+          type: string
+          maxLength: 500
+        timestamp:
+          type: string
+          format: date-time
+        session_id:
+          type: string
+
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+        details:
+          type: object
+          description: Additional error details
