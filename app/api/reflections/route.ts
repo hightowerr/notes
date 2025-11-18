@@ -3,8 +3,29 @@ import { reflectionInputSchema } from '@/lib/schemas/reflectionSchema';
 import { createReflection, fetchRecentReflections } from '@/lib/services/reflectionService';
 import { debounceRecompute } from '@/lib/services/recomputeDebounce';
 import { triggerRecomputeJob } from '@/lib/services/recomputeService';
-import { getAuthenticatedUserId } from '@/app/api/reflections/utils';
+import { DEFAULT_REFLECTION_USER_ID, getAuthenticatedUserId } from '@/app/api/reflections/utils';
 import { supabase } from '@/lib/supabase';
+
+async function hasActiveOutcome(): Promise<boolean> {
+  try {
+    const { data, error } = await supabase
+      .from('user_outcomes')
+      .select('id')
+      .eq('user_id', DEFAULT_REFLECTION_USER_ID)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[Reflections API] Unable to check active outcome state', error);
+      return false;
+    }
+
+    return Boolean(data);
+  } catch (error) {
+    console.error('[Reflections API] Unexpected outcome lookup failure', error);
+    return false;
+  }
+}
 
 /**
  * GET /api/reflections
@@ -42,6 +63,11 @@ export async function GET(request: NextRequest) {
       : 30;
 
     const activeOnly = activeOnlyParam === 'true';
+
+    const outcomeExists = await hasActiveOutcome();
+    if (!outcomeExists) {
+      return NextResponse.json({ reflections: [] }, { status: 200 });
+    }
 
     const reflections = await fetchRecentReflections(userId, {
       limit,
@@ -93,6 +119,17 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
+
+    const outcomeExists = await hasActiveOutcome();
+    if (!outcomeExists) {
+      return NextResponse.json(
+        {
+          error: 'OUTCOME_REQUIRED',
+          message: 'Create an outcome before adding reflections.',
+        },
+        { status: 400 }
+      );
+    }
 
     // Server-side validation with Zod
     const validation = reflectionInputSchema.safeParse(body);

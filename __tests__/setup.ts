@@ -10,6 +10,7 @@ beforeAll(() => {
   process.env.NEXT_PUBLIC_SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://test.supabase.co';
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'test-key';
   process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || 'test-key';
+  process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'service-role-test-key';
 
   // Polyfill Web Crypto API for Node.js environment
   // Use Object.defineProperty to ensure crypto is available in all test contexts
@@ -55,15 +56,45 @@ beforeAll(() => {
 
   if (!globalThis.ResizeObserver) {
     globalThis.ResizeObserver = class ResizeObserver {
-      observe() {
-        // do nothing
+      private callback: ResizeObserverCallback;
+
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
       }
-      unobserve() {
-        // do nothing
+
+      observe(target: Element) {
+        const element = target as HTMLElement;
+        const widthValue = parseInt(element.style.width || '', 10);
+        const heightValue = parseInt(element.style.height || '', 10);
+        const width =
+          element.clientWidth || (Number.isFinite(widthValue) && widthValue > 0 ? widthValue : 800);
+        const height =
+          element.clientHeight ||
+          (Number.isFinite(heightValue) && heightValue > 0 ? heightValue : 400);
+        setTimeout(() => {
+          this.callback(
+            [
+              {
+                target,
+                contentRect: {
+                  width,
+                  height,
+                  bottom: height,
+                  top: 0,
+                  left: 0,
+                  right: width,
+                  x: 0,
+                  y: 0,
+                },
+              } as ResizeObserverEntry,
+            ],
+            this
+          );
+        }, 0);
       }
-      disconnect() {
-        // do nothing
-      }
+
+      unobserve() {}
+      disconnect() {}
     };
   }
 
@@ -81,6 +112,18 @@ beforeAll(() => {
         dispatchEvent: () => false,
       }),
     });
+  }
+
+  if (typeof Element !== 'undefined') {
+    if (!Element.prototype.hasPointerCapture) {
+      Element.prototype.hasPointerCapture = () => false;
+    }
+    if (!Element.prototype.releasePointerCapture) {
+      Element.prototype.releasePointerCapture = () => {};
+    }
+    if (!Element.prototype.scrollIntoView) {
+      Element.prototype.scrollIntoView = () => {};
+    }
   }
 });
 

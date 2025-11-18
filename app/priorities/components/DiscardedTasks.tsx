@@ -36,9 +36,9 @@ export function DiscardedTasks({ tasks, onReturnToActive, onSelect }: DiscardedT
   );
 
   return (
-    <section className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <div>
+    <section className="relative z-20 rounded-xl border border-border/60 bg-bg-layer-2/60 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="space-y-1">
           <h2 className="text-base font-semibold text-foreground">Discarded</h2>
           <p className="text-sm text-muted-foreground">Hidden priorities from the last run.</p>
         </div>
@@ -63,7 +63,7 @@ export function DiscardedTasks({ tasks, onReturnToActive, onSelect }: DiscardedT
       </div>
 
       {isOpen && (
-        <div className="divide-y divide-border/60 border-y border-border/60">
+        <div className="mt-3 divide-y divide-border/60 rounded-lg border border-border/60 bg-background/80 shadow-1layer-sm">
           {tasks.length === 0 ? (
             <div className="px-3 py-4 text-sm text-muted-foreground">Nothing has been discarded.</div>
           ) : (

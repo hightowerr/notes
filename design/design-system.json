@@ -1,0 +1,309 @@
+{
+  "meta": {
+    "name": "AI Note Synthesiser – Design System (Machine-Friendly)",
+    "version": "1.0.0",
+    "sourceOfTruth": [
+      "design.json",
+      "app/globals.css",
+      "components/ui/*",
+      "components/main-nav.tsx",
+      "app/layout.tsx",
+      "app/page.tsx"
+    ],
+    "intendedFor": [
+      "AI agents generating new UI",
+      "developers implementing features",
+      "QA validating consistency"
+    ],
+    "lastUpdated": "2025-11-18"
+  },
+  "guidelines": {
+    "highLevelPrinciples": {
+      "clarityOverCleverness": "Prioritise hierarchy, contrast, and legibility. Every visual decision must make priorities, status, or next actions clearer.",
+      "depthNotDecor": "Use the depth layer and shadow utilities to communicate structure and interactivity. Avoid random borders/shadows.",
+      "calmByDefault": "Low-noise UI: minimal borders, generous spacing, muted colours. Colour and animation are reserved for state and focus, not decoration.",
+      "trustworthyAI": "AI actions must be observable: clear states, badges, toasts, and panels that explain what happened and why.",
+      "mobileFirstReality": "Design every component for comfortable use at 320–414px: full-width controls, 44px touch targets, zero horizontal scroll.",
+      "oneSystemAcrossScreens": "Same tokens, same component patterns, same interaction model on desktop, tablet, and mobile.",
+      "motionWithPurpose": "Animations exist to confirm actions and reduce cognitive load. Durations usually 150–300ms; no gratuitous bounce."
+    },
+    "accessibility": {
+      "focus": "All interactive components must support `focus-visible` with a 3px ring using `border-focus` tokens or equivalent Tailwind classes.",
+      "contrast": "Text and key icons must meet WCAG AA (4.5:1) using depth-layer and text tokens; never place body text on low-contrast gradients.",
+      "touchTargets": "Minimum 44px height on mobile (`h-11`) and at least 36px (`h-9`) on desktop for primary controls.",
+      "keyboard": "Use shadcn/Radix defaults for menus, dialogs, tabs. Do not override keyboard behaviour in a way that breaks accessibility."
+    },
+    "layout": {
+      "pageWidth": "Use `max-w-7xl mx-auto px-6` for primary pages.",
+      "verticalRhythm": "Use 24–32px spacing between major blocks; 12–16px inside components.",
+      "mobilePatterns": [
+        "Prefer stacked layouts (`flex-col sm:flex-row`).",
+        "No more than ~3 primary buttons in a single row on mobile.",
+        "Use badges and compact labels for metadata to avoid wide tables."
+      ]
+    }
+  },
+  "tokens": {
+    "typography": {
+      "fontFamilies": {
+        "sans": {
+          "cssVariable": "--font-geist-sans",
+          "fallback": "Geist, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+          "usage": "Primary UI font – navigation, headings, body text, and labels."
+        },
+        "mono": {
+          "cssVariable": "--font-geist-mono",
+          "fallback": "Geist Mono, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+          "usage": "Technical snippets, IDs, timings, and logs."
+        }
+      },
+      "scale": {
+        "display": { "size": "2.25rem–2.5rem", "weight": 600 },
+        "h1": { "size": "1.75rem–2rem", "weight": 600 },
+        "h2": { "size": "1.25rem–1.5rem", "weight": 600 },
+        "body": { "size": "0.95rem–1rem", "weight": 400 },
+        "bodyMuted": { "size": "0.9rem", "weight": 400 },
+        "label": { "size": "0.8rem–0.85rem", "weight": 500 }
+      },
+      "globalUsage": {
+        "bodyElement": "Use `body` with `bg-bg-layer-1 text-text-body antialiased` (see `app/layout.tsx` and `app/globals.css`).",
+        "headings": "Use `text-text-heading font-semibold` for page titles and key card titles.",
+        "mutedText": "Use `text-text-muted text-sm` for metadata and helper text."
+      }
+    },
+    "colors": {
+      "depthLayers": {
+        "bg-layer-1": {
+          "variable": "--bg-layer-1",
+          "light": "oklch(0.96 0 0)",
+          "dark": "oklch(0.08 0 0)",
+          "usage": "Page background (body)."
+        },
+        "bg-layer-2": {
+          "variable": "--bg-layer-2",
+          "light": "oklch(0.99 0 0)",
+          "dark": "oklch(0.12 0 0)",
+          "usage": "Card backgrounds, nav bar, footer."
+        },
+        "bg-layer-3": {
+          "variable": "--bg-layer-3",
+          "light": "oklch(1 0 0)",
+          "dark": "oklch(0.16 0 0)",
+          "usage": "Interactive elements: buttons, tabs, inputs."
+        },
+        "bg-layer-4": {
+          "variable": "--bg-layer-4",
+          "light": "oklch(1 0 0)",
+          "dark": "oklch(0.2 0 0)",
+          "usage": "Elevated/active/hover states."
+        }
+      },
+      "brand": {
+        "primary": {
+          "primary-1": { "variable": "--primary-1", "oklch": "0.45 0.22 264.53" },
+          "primary-2": { "variable": "--primary-2", "oklch": "0.55 0.22 264.53" },
+          "primary-3": { "variable": "--primary-3", "oklch": "0.65 0.22 264.53" },
+          "primary-4": { "variable": "--primary-4", "oklch": "0.75 0.22 264.53" },
+          "usage": "Buttons, icons, and highlights; primarily use `primary-2` for solid surfaces and `primary-3` for hover/active."
+        },
+        "accent": {
+          "accent-primary": { "variable": "--accent-primary" },
+          "accent-secondary": { "variable": "--accent-secondary" },
+          "gradients": {
+            "primary": "Use `.gradient-primary` and `.gradient-primary-subtle` for hero and highlight surfaces.",
+            "shiny": "Use `.gradient-shiny` or `.gradient-shiny-subtle` for premium-feeling CTA surfaces sparingly."
+          }
+        }
+      },
+      "semantic": {
+        "success": {
+          "bg": { "variable": "--success-bg" },
+          "hover": { "variable": "--success-hover" },
+          "text": { "variable": "--success-text" }
+        },
+        "warning": {
+          "bg": { "variable": "--warning-bg" },
+          "hover": { "variable": "--warning-hover" },
+          "text": { "variable": "--warning-text" }
+        },
+        "info": {
+          "bg": { "variable": "--info-bg" },
+          "hover": { "variable": "--info-hover" },
+          "text": { "variable": "--info-text" }
+        },
+        "destructive": {
+          "bg": { "variable": "--destructive-bg" },
+          "hover": { "variable": "--destructive-hover" },
+          "text": { "variable": "--destructive-text" }
+        }
+      },
+      "text": {
+        "heading": { "variable": "--text-heading", "usage": "Headings and high-emphasis labels." },
+        "body": { "variable": "--text-body", "usage": "Default body copy." },
+        "muted": { "variable": "--text-muted", "usage": "Secondary metadata and helper text." },
+        "onPrimary": { "variable": "--text-on-primary", "usage": "Text on primary and semantic solid backgrounds." }
+      },
+      "borders": {
+        "border-subtle": { "variable": "--border-subtle", "usage": "Only where a border is strictly needed; most cards and panels are borderless." },
+        "border-focus": { "variable": "--border-focus", "usage": "Focus rings for `focus-visible` states." }
+      }
+    },
+    "radius": {
+      "base": { "variable": "--radius", "approx": "8px" },
+      "sm": { "variable": "--radius-sm", "usage": "Pills, inputs, small chips." },
+      "md": { "variable": "--radius-md", "usage": "Buttons, mid-size controls." },
+      "lg": { "variable": "--radius-lg", "usage": "Cards, modals." },
+      "xl": { "variable": "--radius-xl", "usage": "Hero cards, prominent surfaces." }
+    },
+    "shadows": {
+      "twoLayer": {
+        "sm": { "class": "shadow-2layer-sm", "usage": "Nav, small cards, tabs on desktop." },
+        "md": { "class": "shadow-2layer-md", "usage": "Primary cards, dropdowns, dialogs." },
+        "lg": { "class": "shadow-2layer-lg", "usage": "Hover/focus on key interactive elements." },
+        "smMobile": { "class": "shadow-2layer-sm-mobile", "usage": "Nav/cards on mobile." },
+        "mdMobile": { "class": "shadow-2layer-md-mobile", "usage": "Elevated cards and modals on mobile." }
+      },
+      "elevationLevels": {
+        "elevation-0": "No shadow – flat surfaces.",
+        "elevation-1": "XS shadow, subtle depth.",
+        "elevation-2": "SM shadow, default cards.",
+        "elevation-3": "Standard `shadow` for elevated elements.",
+        "elevation-4": "MD shadow for dialogs/floating surfaces.",
+        "elevation-5": "LG shadow for very prominent focus.",
+        "elevation-6": "XL shadow for extremely elevated surfaces only."
+      },
+      "hover": {
+        "class": "hover-lift",
+        "behaviour": "On hover, translate Y by -2px and increase shadow to `shadow-lg`."
+      }
+    },
+    "spacing": {
+      "baseUnit": "0.25rem (4px)",
+      "rules": {
+        "micro": "4–8px for icon gaps and inline badges.",
+        "componentInternal": "12–16px padding in cards, inputs, and controls.",
+        "blockSpacing": "24–32px between sections and major layout blocks."
+      }
+    }
+  },
+  "components": {
+    "Button": {
+      "base": {
+        "component": "components/ui/button.tsx",
+        "rootClass": "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:ring-border-focus/50 focus-visible:ring-[3px] aria-invalid:ring-destructive-text/20 aria-invalid:border-destructive-text hover-shadow-lift touch-manipulation active:scale-[0.98] sm:active:scale-100 active:brightness-95 transition-transform duration-100 shadow-2layer-sm-mobile sm:shadow-2layer-sm",
+        "defaultVariant": { "variant": "default", "size": "default" }
+      },
+      "variants": {
+        "variant": {
+          "default": "bg-primary-2 text-text-on-primary hover:bg-primary-3 active:bg-primary-3 shadow-2layer-sm hover:shadow-2layer-md",
+          "destructive": "bg-destructive-text text-text-on-primary hover:bg-destructive-hover focus-visible:ring-destructive-text/20 shadow-2layer-sm hover:shadow-2layer-md",
+          "outline": "bg-bg-layer-3 text-text-body hover:bg-bg-layer-4 active:bg-bg-layer-4 shadow-2layer-sm hover:shadow-2layer-md border-0",
+          "secondary": "bg-bg-layer-2 text-text-body hover:bg-bg-layer-3 active:bg-bg-layer-3 shadow-2layer-sm hover:shadow-2layer-md",
+          "ghost": "text-text-body hover:bg-bg-layer-3 active:bg-bg-layer-3",
+          "link": "text-primary-2 underline-offset-4 hover:underline hover:text-primary-3"
+        },
+        "size": {
+          "default": "h-11 sm:h-9 px-4 py-2 has-[>svg]:px-3",
+          "sm": "h-10 sm:h-8 rounded-md gap-1.5 px-3 has-[>svg]:px-2.5",
+          "lg": "h-12 sm:h-10 rounded-md px-6 has-[>svg]:px-4",
+          "icon": "size-11 sm:size-9",
+          "icon-sm": "size-10 sm:size-8",
+          "icon-lg": "size-12 sm:size-10"
+        }
+      },
+      "usageGuidelines": [
+        "One visually dominant primary button per view.",
+        "Use concise, outcome-oriented labels like “Analyze Tasks” or “Upload Documents”.",
+        "On mobile, primary buttons should usually be full-width."
+      ]
+    },
+    "Input": {
+      "component": "components/ui/input.tsx",
+      "class": "file:text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground dark:bg-input/30 border-input h-12 sm:h-10 w-full min-w-0 rounded-md border bg-transparent px-3 py-2 text-base sm:text-sm shadow-xs transition-[color,box-shadow] outline-none touch-manipulation file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
+      "semantics": {
+        "labelRequirement": "Always pair with a visible label and helper text where needed.",
+        "errorState": "Use `aria-invalid` plus visible error text in destructive colours."
+      }
+    },
+    "Card": {
+      "component": "components/ui/card.tsx",
+      "rootClass": "bg-bg-layer-2 text-text-body flex flex-col gap-6 rounded-xl border-0 py-6 shadow-2layer-md-mobile hover-shadow-lift sm:shadow-2layer-md hover:shadow-2layer-lg",
+      "slots": {
+        "CardHeader": "@container/card-header grid auto-rows-min grid-rows-[auto_auto] items-start gap-2 px-6 has-data-[slot=card-action]:grid-cols-[1fr_auto] [.border-b]:pb-6",
+        "CardTitle": "leading-none font-semibold",
+        "CardDescription": "text-text-muted text-sm",
+        "CardAction": "col-start-2 row-span-2 row-start-1 self-start justify-self-end",
+        "CardContent": "px-6",
+        "CardFooter": "flex items-center px-6 [.border-t]:pt-6"
+      },
+      "usage": [
+        "Use for document tiles, AI summaries, analysis outputs, and contextual panels.",
+        "Avoid additional borders; rely on depth and spacing."
+      ]
+    },
+    "Badge": {
+      "component": "components/ui/badge.tsx",
+      "roles": [
+        "Display statuses like uploading, queued, processing, completed, review_required, failed.",
+        "Show counts and metadata such as number of docs, processing/queued/complete counts."
+      ],
+      "exampleClasses": {
+        "uploading": "flex items-center gap-1.5 px-3 py-1.5 bg-info-bg text-info-text border-0",
+        "processing": "flex items-center gap-1.5 px-3 py-1.5 bg-primary-2 text-text-on-primary border-0",
+        "completed": "flex items-center gap-1.5 px-3 py-1.5 bg-success-bg text-success-text border-0",
+        "reviewRequired": "flex items-center gap-1.5 px-3 py-1.5 bg-warning-bg text-warning-text border-0",
+        "failed": "flex items-center gap-1.5 px-3 py-1.5 bg-destructive-bg text-destructive-text border-0",
+        "secondary": "variant=\"secondary\" with neutral bg and text-text-body",
+        "outline": "variant=\"outline\" for neutral chips and counts"
+      }
+    },
+    "MainNav": {
+      "component": "components/main-nav.tsx",
+      "layout": "Sticky top bar using `bg-bg-layer-2 shadow-2layer-sm` with horizontal navigation and right-aligned actions.",
+      "usage": "Top-level navigation between Upload, Dashboard, Task Priorities. On mobile, nav items remain concise and horizontally scroll-free."
+    },
+    "ThemeToggle": {
+      "component": "components/theme-toggle.tsx",
+      "behaviour": "Toggles `dark` class on root, switching CSS variables for depth, brand, and text colours."
+    },
+    "QuickCapture": {
+      "component": "app/components/QuickCaptureShell.tsx",
+      "styleIntent": "Floating pill-shaped primary button anchored near bottom-right, using primary brand colours and high elevation.",
+      "guidelines": [
+        "Must not occlude critical content on small screens.",
+        "Remains discoverable without visually dominating the layout."
+      ]
+    },
+    "OutcomeBanner": {
+      "component": "app/components/OutcomeDisplay.tsx",
+      "intent": "Thin banner conveying the current outcome sentence with subtle background and clear edit affordance.",
+      "behaviour": "Appears at top of primary workflows; remains tap/click friendly on mobile."
+    },
+    "SummaryPanel": {
+      "component": "app/components/SummaryPanel.tsx",
+      "layout": "Card-based summary with clear sections for topics, decisions, and tasks, using badges and labels to call out key items.",
+      "interaction": "Appears below file cards once processing completes, with motion transitions (fade/slide)."
+    }
+  },
+  "pagePatterns": {
+    "Upload": {
+      "entryFile": "app/page.tsx",
+      "structure": {
+        "wrapper": "min-h-screen bg-bg-layer-1",
+        "headerRow": "mb-4 flex items-center gap-3 with Upload icon and `text-xl font-semibold text-text-heading` title",
+        "uploadCard": "Card with dashed border that changes from `border-border-subtle` to `border-primary-2 bg-primary-2/10` on drag, with internal centered content and large icon.",
+        "emptyState": "Card with subtle gradient background and centered icon/text when no files uploaded.",
+        "fileList": "Stack of Cards with file meta, status badges, and SummaryPanel below each completed file."
+      },
+      "motion": "Use `framer-motion` for fade/slide in of file list and summary panels with durations around 0.3–0.4s."
+    },
+    "Dashboard": {
+      "intent": "Grid of document cards with filters and exports. Use Card primitives, badges for statuses, and clear primary actions per card."
+    },
+    "TaskPriorities": {
+      "intent": "Structured, depth-aware view of prioritised tasks: context card, primary analysis card, and list/grid views using Card, Badge, and Tabs."
+    }
+  }
+}
+
+

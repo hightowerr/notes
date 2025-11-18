@@ -5,13 +5,39 @@ import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 
 import { orchestrateTaskPriorities } from '@/lib/mastra/services/agentOrchestration';
-import type { TaskDependency } from '@/lib/types/agent';
+import { scoreAllTasks } from '@/lib/services/strategicScoring';
+import { getQuadrant } from '@/lib/schemas/quadrant';
+import type { StrategicScoresMap } from '@/lib/schemas/strategicScore';
+import type { TaskDependency, TaskSummary } from '@/lib/types/agent';
+import { resetRetryQueue } from '@/lib/services/retryQueue';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 const DEFAULT_USER_ID = 'default-user';
+
+type TaskEmbeddingRow = {
+  task_id: string;
+  task_text: string | null;
+  document_id: string | null;
+  status?: string | null;
+  manual_override?: boolean | null;
+};
+
+type PreparedStrategicData = {
+  strategicScores: StrategicScoresMap;
+  prioritizedTasks: Array<{
+    id: string;
+    content: string;
+    semantic_similarity: number;
+    impact: number;
+    effort: number;
+    confidence: number;
+    priority: number;
+    quadrant: ReturnType<typeof getQuadrant>;
+  }>;
+};
 
 const defaultExecutionMetadata = {
   steps_taken: 0,
@@ -23,6 +49,66 @@ const defaultExecutionMetadata = {
   success_rate: 0,
   status_note: null,
 };
+
+async function prepareStrategicData(
+  sessionId: string,
+  outcomeText: string | null
+): Promise<PreparedStrategicData> {
+  try {
+    const { data: taskRows, error } = await supabase
+      .from('task_embeddings')
+      .select('task_id, task_text, document_id, status, manual_override')
+      .eq('status', 'completed')
+      .limit(200);
+
+    if (error) {
+      console.error('[Agent Prioritize API] Failed to load tasks for scoring', error);
+      return { strategicScores: {}, prioritizedTasks: [] };
+    }
+
+    const tasks: TaskSummary[] = (taskRows ?? [])
+      .filter((row): row is TaskEmbeddingRow => typeof row?.task_id === 'string')
+      .map(row => ({
+        task_id: row.task_id,
+        task_text: row.task_text ?? 'Task description unavailable',
+        document_id: row.document_id ?? null,
+        manual_override: Boolean(row.manual_override),
+      }));
+
+    if (tasks.length === 0) {
+      return { strategicScores: {}, prioritizedTasks: [] };
+    }
+
+    const strategicScores = await scoreAllTasks(tasks, outcomeText, {
+      sessionId,
+    });
+
+    const prioritizedTasks = tasks
+      .map(task => {
+        const score = strategicScores[task.task_id];
+        if (!score) {
+          return null;
+        }
+        return {
+          id: task.task_id,
+          content: task.task_text,
+          semantic_similarity: Number((score.confidence ?? 0.6).toFixed(2)),
+          impact: score.impact,
+          effort: score.effort,
+          confidence: score.confidence,
+          priority: score.priority,
+          quadrant: getQuadrant(score.impact, score.effort),
+        };
+      })
+      .filter((value): value is NonNullable<typeof value> => Boolean(value))
+      .sort((a, b) => b.priority - a.priority);
+
+    return { strategicScores, prioritizedTasks };
+  } catch (error) {
+    console.error('[Agent Prioritize API] Strategic scoring failed', error);
+    return { strategicScores: {}, prioritizedTasks: [] };
+  }
+}
 
 export async function POST(request: Request) {
   try {
@@ -69,7 +155,7 @@ const requestSchema = z.object({
 
     const { data: activeOutcome, error: outcomeError } = await supabase
       .from('user_outcomes')
-      .select('id')
+      .select('id, assembled_text')
       .eq('id', outcomeId)
       .eq('user_id', DEFAULT_USER_ID)
       .eq('is_active', true)
@@ -114,6 +200,21 @@ const requestSchema = z.object({
       }
     }
 
+    const { error: clearOverridesError } = await supabase
+      .from('task_embeddings')
+      .update({ manual_overrides: null })
+      .not('manual_overrides', 'is', null);
+
+    if (clearOverridesError) {
+      console.error('[Agent Prioritize API] Failed to clear manual overrides:', clearOverridesError);
+      return NextResponse.json(
+        { error: 'DATABASE_ERROR', message: 'Failed to reset manual overrides' },
+        { status: 500 }
+      );
+    }
+
+    resetRetryQueue({ clearCache: false });
+
     const sessionId = crypto.randomUUID();
     const now = new Date().toISOString();
 
@@ -154,12 +255,19 @@ const requestSchema = z.object({
       });
     });
 
+    const { strategicScores, prioritizedTasks } = await prepareStrategicData(
+      session.id,
+      activeOutcome.assembled_text ?? null
+    );
+
     return NextResponse.json(
       {
         session_id: session.id,
         status: session.status,
         prioritized_plan: session.prioritized_plan,
         execution_metadata: session.execution_metadata ?? defaultExecutionMetadata,
+        strategic_scores: strategicScores,
+        prioritized_tasks: prioritizedTasks,
       },
       { status: 200 }
     );

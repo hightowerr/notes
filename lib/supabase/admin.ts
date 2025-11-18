@@ -24,7 +24,8 @@ let adminClient: SupabaseClient<Database> | null = null;
  * @see https://supabase.com/docs/guides/api/api-keys#the-servicerole-key
  */
 export function getSupabaseAdminClient(): SupabaseClient<Database> {
-  if (typeof window !== 'undefined') {
+  const isBrowser = typeof window !== 'undefined' && typeof window.document !== 'undefined';
+  if (isBrowser && process.env.NODE_ENV !== 'test') {
     throw new Error('Admin client cannot be instantiated in the browser');
   }
 

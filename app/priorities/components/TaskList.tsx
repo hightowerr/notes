@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode, UIEvent } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -14,7 +15,6 @@ import type {
 import type { AdjustedPlan } from '@/lib/types/adjustment';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TaskRow } from '@/app/priorities/components/TaskRow';
 import { CompletedTasks } from '@/app/priorities/components/CompletedTasks';
@@ -25,15 +25,19 @@ import { useScrollToTask } from '@/app/priorities/components/useScrollToTask';
 import type { MovementInfo } from '@/app/priorities/components/MovementBadge';
 import { ManualTaskModal } from '@/app/components/ManualTaskModal';
 import { DiscardReviewModal, type DiscardCandidate } from '@/app/components/DiscardReviewModal';
-import { RefinementModal } from '@/app/priorities/components/RefinementModal';
 import {
   DEPENDENCY_OVERRIDE_STORAGE_KEY,
   type DependencyOverrideEntry,
   type DependencyOverrideStore,
 } from '@/lib/utils/dependencyOverrides';
 import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
-import type { RefinementAction } from '@/lib/services/qualityRefinement';
-import type { QualityMetadata } from '@/lib/schemas/taskIntelligence';
+import { getQuadrant, type Quadrant } from '@/lib/schemas/quadrant';
+import type { StrategicScore, StrategicScoresMap, TaskWithScores } from '@/lib/schemas/strategicScore';
+import type { SortingStrategy } from '@/lib/schemas/sortingStrategy';
+import type { RetryStatusEntry } from '@/lib/schemas/retryStatus';
+import { formatTaskId } from '@/app/priorities/utils/formatTaskId';
+import type { ManualOverrideState } from '@/lib/schemas/manualOverride';
+import { calculatePriority } from '@/lib/utils/strategicPriority';
 
 type TaskStatus = 'active' | 'completed' | 'discarded';
 
@@ -52,20 +56,9 @@ type TaskLookup = Record<
     rationale?: string | null;
     sourceText?: string | null;
     isManual?: boolean;
-    clarityScore?: number | null;
-    badgeColor?: 'green' | 'yellow' | 'red';
-    badgeLabel?: 'Clear' | 'Review' | 'Needs Work';
-    qualityMetadata?: QualityMetadata | null;
+    manualOverride?: ManualOverrideState | null;
   }
 >;
-
-type QualityUpdatePayload = {
-  taskId: string;
-  clarityScore: number;
-  badgeColor: 'green' | 'yellow' | 'red';
-  badgeLabel: 'Clear' | 'Review' | 'Needs Work';
-  qualityMetadata?: QualityMetadata;
-};
 
 type TaskRenderNode = {
   id: string;
@@ -87,15 +80,35 @@ type TaskRenderNode = {
   removalReason?: string | null;
 };
 
-type LockedTaskState = {
-  order: number;
+type TaskStrategicSnapshot = {
+  impact: number;
+  effort: number;
+  confidence: number;
+  priority: number;
+} | null;
+
+type ActiveTaskEntry = {
+  id: string;
+  title: string;
+  category: 'leverage' | 'neutral' | 'overhead' | null;
+  isLocked: boolean;
+  movement: MovementInfo | undefined;
+  dependencyLinks: ReturnType<typeof buildDependencyLinks>;
+  planOrder: number;
+  checked: boolean;
+  isAiGenerated: boolean;
+  isManual: boolean;
+  isPrioritizing: boolean;
+  strategicScore: TaskStrategicSnapshot;
+  strategicDetails: TaskWithScores | null;
+  retryStatus?: RetryStatusEntry | null;
+  manualOverride?: ManualOverrideState | null;
+  hasManualOverride?: boolean;
+  baselineScore?: StrategicScore | null;
 };
 
-type ApplyRefinementPayload = {
-  taskId: string;
-  suggestionId: string;
-  newTaskTexts: string[];
-  action: RefinementAction;
+type LockedTaskState = {
+  order: number;
 };
 
 type TaskOption = {
@@ -110,6 +123,36 @@ type CachedManualTask = {
   title: string;
 };
 
+const ACTIVE_LIST_MAX_HEIGHT_PX = 560;
+const VIRTUALIZATION_THRESHOLD = 500;
+const VIRTUALIZATION_ROW_HEIGHT = 160;
+const VIRTUALIZATION_BUFFER_ROWS = 8;
+const VIRTUALIZATION_ROW_HEIGHT_MIN = 120;
+const VIRTUALIZATION_ROW_HEIGHT_MAX = 360;
+const VIRTUALIZATION_ROW_HEIGHT_TOLERANCE = 12;
+const CATEGORY_FOCUS_COPY: Record<'leverage' | 'neutral' | 'overhead', string> = {
+  leverage: 'high-leverage bets',
+  neutral: 'core delivery work',
+  overhead: 'operational hygiene',
+};
+const CATEGORY_DISPLAY_ORDER: Array<'leverage' | 'neutral' | 'overhead'> = [
+  'leverage',
+  'neutral',
+  'overhead',
+];
+const TASK_LIST_PERF_LABEL = '[TaskList][Perf]';
+
+const getNowMs = () => {
+  if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+    return performance.now();
+  }
+  return Date.now();
+};
+
+const logTaskListPerf = (event: string, payload: Record<string, unknown>) => {
+  console.log(`${TASK_LIST_PERF_LABEL} ${event}`, payload);
+};
+
 type TaskListProps = {
   plan: PrioritizedTaskPlan;
   executionMetadata?: ExecutionMetadata | null;
@@ -121,31 +164,14 @@ type TaskListProps = {
   sessionStatus?: SessionStatus;
   canTriggerPrioritization?: boolean;
   onRequestPrioritization?: () => void | Promise<void>;
-  isRecalculating?: boolean;
+  strategicScores?: StrategicScoresMap | null;
+  retryStatuses?: Record<string, RetryStatusEntry> | null;
+  sortingStrategy?: SortingStrategy;
+  onTaskMetadataUpdate?: (metadata: Record<string, { title: string }>) => void;
 };
 
 const DEFAULT_REMOVAL_REASON =
   'Removed in the latest agent recalculation. Review and reinstate if still relevant.';
-
-function formatTaskId(taskId: string): string {
-  if (!taskId) {
-    console.log('[formatTaskId] 🔍 Called with empty taskId');
-    return 'Unknown task';
-  }
-
-  // Check if this is a raw UUID (32+ characters, hex only)
-  const isRawUuid = /^[0-9a-f]+$/.test(taskId.replace(/-/g, '')) && taskId.replace(/-/g, '').length >= 32;
-  
-  if (isRawUuid) {
-    console.log('[formatTaskId] 🔍 Called with raw UUID, returning placeholder:', taskId);
-    // For raw UUIDs, return a more user-friendly placeholder
-    return 'Untitled task';
-  }
-
-  const parts = taskId.split('::');
-  const last = parts[parts.length - 1];
-  return last.replace(/[-_]/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
-}
 
 function arraysEqual(a: string[], b: string[]) {
   if (a.length !== b.length) {
@@ -267,7 +293,15 @@ function buildDependentLinks(
   }));
 }
 
-export function TaskList({
+export function TaskList(props: TaskListProps) {
+  return (
+    <TaskListErrorBoundary>
+      <TaskListContent {...props} />
+    </TaskListErrorBoundary>
+  );
+}
+
+function TaskListContent({
   plan,
   executionMetadata,
   planVersion,
@@ -278,8 +312,14 @@ export function TaskList({
   sessionStatus = 'idle',
   canTriggerPrioritization = false,
   onRequestPrioritization,
-  isRecalculating = false,
+  strategicScores = null,
+  retryStatuses = null,
+  sortingStrategy = 'balanced',
+  onTaskMetadataUpdate,
 }: TaskListProps) {
+  const renderStartRef = useRef<number>(getNowMs());
+  const lastRenderLogRef = useRef<number>(0);
+  renderStartRef.current = getNowMs();
   const sanitizedTaskIds = useMemo(() => sanitizePlanOrder(plan), [plan]);
   const taskAnnotations = useMemo<TaskAnnotation[]>(() => plan.task_annotations ?? [], [plan.task_annotations]);
   const removedTasksFromPlan = useMemo<TaskRemoval[]>(() => plan.removed_tasks ?? [], [plan.removed_tasks]);
@@ -368,11 +408,18 @@ export function TaskList({
   const [recentlyDiscarded, setRecentlyDiscarded] = useState<Set<string>>(new Set());
   const [discardCandidates, setDiscardCandidates] = useState<DiscardCandidate[]>([]);
   const [showDiscardReview, setShowDiscardReview] = useState(false);
-  const [showRefinementModal, setShowRefinementModal] = useState(false);
-  const [refinementTaskId, setRefinementTaskId] = useState<string | null>(null);
-  const [refinementTaskText, setRefinementTaskText] = useState<string>('');
   const [lockStore, setLockStore] = useLocalStorage<Record<string, Record<string, LockedTaskState>>>('locked-tasks', {});
   const [dependencyStore, setDependencyStore] = useLocalStorage<DependencyOverrideStore>(DEPENDENCY_OVERRIDE_STORAGE_KEY, {});
+  useEffect(() => {
+    if (!onTaskMetadataUpdate) {
+      return;
+    }
+    const summary: Record<string, { title: string }> = {};
+    Object.entries(taskLookup).forEach(([taskId, metadata]) => {
+      summary[taskId] = { title: metadata.title };
+    });
+    onTaskMetadataUpdate(summary);
+  }, [taskLookup, onTaskMetadataUpdate]);
   const outcomeKey = outcomeId ?? 'global';
   const lockedTasks = lockStore[outcomeKey] ?? {};
   const dependencyOverrides = dependencyStore[outcomeKey] ?? {};
@@ -407,6 +454,25 @@ export function TaskList({
       });
     },
     [outcomeKey, setDependencyStore]
+  );
+
+  const applyManualOverride = useCallback(
+    (taskId: string, override: ManualOverrideState | null) => {
+      setTaskLookup(prev => {
+        const current = prev[taskId];
+        if (!current) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [taskId]: {
+            ...current,
+            manualOverride: override ? { ...override } : null,
+          },
+        };
+      });
+    },
+    []
   );
 
   const storageKey = outcomeId ? `priority-state:${outcomeId}` : null;
@@ -663,28 +729,6 @@ export function TaskList({
       }
     },
     [outcomeId, triggerAutoPrioritization]
-  );
-
-  const handleQualityUpdate = useCallback(
-    ({ taskId, clarityScore, badgeColor, badgeLabel, qualityMetadata }: QualityUpdatePayload) => {
-      setTaskLookup(prev => {
-        const current = prev[taskId] ?? {
-          title: formatTaskId(taskId),
-          qualityMetadata: null,
-        };
-        return {
-          ...prev,
-          [taskId]: {
-            ...current,
-            clarityScore,
-            badgeColor,
-            badgeLabel,
-            qualityMetadata: qualityMetadata ?? current.qualityMetadata ?? null,
-          },
-        };
-      });
-    },
-    [setTaskLookup]
   );
 
   useEffect(() => {
@@ -1154,10 +1198,18 @@ export function TaskList({
     taskLookup,
   ]);
 
-  const trackedTaskIds = useMemo(
-    () => Array.from(new Set([...sanitizedTaskIds, ...Object.keys(priorityState.statuses)])),
-    [sanitizedTaskIds, priorityState.statuses]
-  );
+  const trackedTaskIds = useMemo(() => {
+    const ids = new Set<string>();
+    sanitizedTaskIds.forEach(id => ids.add(id));
+    Object.keys(priorityState.statuses).forEach(id => ids.add(id));
+    removedTasksFromPlan.forEach(removal => {
+      if (removal?.task_id) {
+        ids.add(removal.task_id);
+      }
+    });
+    discardCandidates.forEach(candidate => ids.add(candidate.taskId));
+    return Array.from(ids);
+  }, [sanitizedTaskIds, priorityState.statuses, removedTasksFromPlan, discardCandidates]);
 
   useEffect(() => {
     // 🔍 DIAGNOSTIC: Log useEffect trigger
@@ -1219,6 +1271,7 @@ export function TaskList({
             rationale?: string | null;
             original_text?: string | null;
             is_manual?: boolean;
+            manual_override?: ManualOverrideState | null;
           }>;
         };
 
@@ -1227,6 +1280,15 @@ export function TaskList({
           didUnmount: didUnmountRef.current,
           sampleTitles: (payload.tasks || []).slice(0, 2).map(t => t.title?.slice(0, 40))
         });
+
+        const returnedIds = new Set((payload.tasks ?? []).map(task => task.task_id));
+        const missingMetadataIds = trackedTaskIds.filter(id => !returnedIds.has(id));
+        if (missingMetadataIds.length > 0) {
+          console.warn('[TaskList] Missing metadata for task IDs', {
+            missingCount: missingMetadataIds.length,
+            sampleMissing: missingMetadataIds.slice(0, 5),
+          });
+        }
 
         if (didUnmountRef.current) {
           console.log('[TaskList] ⚠️ Component unmounted, skipping state update');
@@ -1251,8 +1313,8 @@ export function TaskList({
                 documentId: task.document_id,
               });
             }
-
-            const previousEntry = next[task.task_id];
+            
+            const manualOverride = task.manual_override ?? null;
             next[task.task_id] = {
               title: task.title ?? formatTaskId(task.task_id),
               documentId: task.document_id ?? null,
@@ -1260,10 +1322,7 @@ export function TaskList({
               rationale: task.rationale ?? null,
               sourceText: task.original_text ?? null,
               isManual: Boolean(task.is_manual),
-              clarityScore: task.clarity_score ?? previousEntry?.clarityScore ?? null,
-              badgeColor: task.badge_color ?? previousEntry?.badgeColor ?? null,
-              badgeLabel: task.badge_label ?? previousEntry?.badgeLabel ?? null,
-              qualityMetadata: task.quality_metadata ?? previousEntry?.qualityMetadata ?? null,
+              manualOverride,
             };
           }
 
@@ -1274,8 +1333,7 @@ export function TaskList({
             sampleTasks: Object.entries(next).slice(0, 2).map(([id, data]) => ({
               id: id.slice(0, 16) + '...',
               title: data.title?.slice(0, 30) + '...',
-              hasCategory: !!data.category,
-              hasQuality: !!data.clarityScore
+              hasCategory: !!data.category
             }))
           });
 
@@ -1648,6 +1706,39 @@ export function TaskList({
         movement = { ...movement, reason: adjustmentReason };
       }
 
+      const score = strategicScores?.[taskId];
+      const retryState = retryStatuses?.[taskId] ?? null;
+      const manualOverride = taskLookup[taskId]?.manualOverride ?? null;
+
+      let strategicSnapshot: TaskStrategicSnapshot = null;
+      const aiImpact = typeof score?.impact === 'number' ? score.impact : null;
+      const aiEffort = typeof score?.effort === 'number' ? score.effort : null;
+      const aiConfidence = typeof score?.confidence === 'number' ? score.confidence : null;
+
+      const resolvedImpact =
+        typeof manualOverride?.impact === 'number' ? manualOverride.impact : aiImpact;
+      const resolvedEffort =
+        typeof manualOverride?.effort === 'number' ? manualOverride.effort : aiEffort;
+
+      if (
+        typeof resolvedImpact === 'number' &&
+        typeof resolvedEffort === 'number' &&
+        typeof aiConfidence === 'number'
+      ) {
+        const resolvedPriority = calculatePriority(resolvedImpact, resolvedEffort, aiConfidence);
+        strategicSnapshot = {
+          impact: resolvedImpact,
+          effort: resolvedEffort,
+          confidence: aiConfidence,
+          priority: resolvedPriority,
+        };
+      }
+
+      const quadrant =
+        strategicSnapshot && typeof strategicSnapshot.impact === 'number' && typeof strategicSnapshot.effort === 'number'
+          ? getQuadrant(strategicSnapshot.impact, strategicSnapshot.effort)
+          : 'high_impact_low_effort';
+
       return {
         id: taskId,
         title: node.title,
@@ -1655,31 +1746,302 @@ export function TaskList({
         isLocked: Boolean(lockedTasks[taskId]),
         movement,
         dependencyLinks: buildDependencyLinks(node.dependencies, priorityState.ranks, getTaskTitle),
-        displayOrder: index + 1,
+        planOrder: index + 1,
         checked: priorityState.statuses[taskId] === 'completed',
         isAiGenerated: Boolean(node.manualOverride),
         isManual: Boolean(node.isManual),
         isPrioritizing: Boolean(prioritizingTasks[taskId]),
+        strategicScore: strategicSnapshot,
+        strategicDetails:
+          score && strategicSnapshot
+            ? {
+                id: taskId,
+                title: node.title,
+                content: node.title,
+                impact: strategicSnapshot.impact,
+                effort: strategicSnapshot.effort,
+                confidence: strategicSnapshot.confidence,
+                priority: strategicSnapshot.priority,
+                hasManualOverride: Boolean(manualOverride),
+                quadrant,
+                reasoning: score.reasoning,
+                confidenceBreakdown: score.confidence_breakdown ?? null,
+              }
+            : null,
+        retryStatus: retryState,
+        manualOverride,
+        hasManualOverride: Boolean(manualOverride),
+        baselineScore: score ?? null,
       };
     })
-    .filter(Boolean) as Array<{
-      id: string;
-      title: string;
-      category: 'leverage' | 'neutral' | 'overhead' | null;
-      isLocked: boolean;
-      movement: MovementInfo | undefined;
-      dependencyLinks: ReturnType<typeof buildDependencyLinks>;
-      displayOrder: number;
-      checked: boolean;
-      isAiGenerated: boolean;
-      isManual: boolean;
-      isPrioritizing: boolean;
-    }>;
+    .filter(Boolean) as ActiveTaskEntry[];
 
-  const topTaskHighlights = useMemo(
-    () =>
-      activeTasks.slice(0, 3).map(task => `#${task.displayOrder} ${task.title}`),
-    [activeTasks]
+  const strategyScoreCache = useMemo(() => buildStrategyScoreCache(activeTasks), [activeTasks]);
+
+  const displayedActiveTasks = useMemo(() => {
+    const start = getNowMs();
+    if (activeTasks.length === 0) {
+      const durationMs = Number((getNowMs() - start).toFixed(2));
+      logTaskListPerf('build_displayed_tasks', {
+        durationMs,
+        totalActiveTasks: 0,
+        filteredCount: 0,
+        sortingStrategy,
+      });
+      return [];
+    }
+    const filtered = activeTasks.filter(task =>
+      matchesStrategyFilters(task, sortingStrategy, strategyScoreCache)
+    );
+    const sorted = [...filtered].sort((a, b) =>
+      compareTasksByStrategy(a, b, sortingStrategy, strategyScoreCache)
+    );
+    const mapped = sorted.map((task, index) => ({
+      ...task,
+      displayOrder: index + 1,
+    }));
+    const durationMs = Number((getNowMs() - start).toFixed(2));
+    logTaskListPerf('build_displayed_tasks', {
+      durationMs,
+      totalActiveTasks: activeTasks.length,
+      filteredCount: filtered.length,
+      sortingStrategy,
+    });
+    return mapped;
+  }, [activeTasks, sortingStrategy, strategyScoreCache]);
+
+  const [virtualRowHeight, setVirtualRowHeight] = useState(VIRTUALIZATION_ROW_HEIGHT);
+  const virtualRowHeightRef = useRef(VIRTUALIZATION_ROW_HEIGHT);
+  const virtualListRef = useRef<HTMLDivElement | null>(null);
+  const measureFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    virtualRowHeightRef.current = virtualRowHeight;
+  }, [virtualRowHeight]);
+
+  const [virtualStartIndex, setVirtualStartIndex] = useState(0);
+  const virtualizationEnabled = displayedActiveTasks.length > VIRTUALIZATION_THRESHOLD;
+  const safeRowHeight = Math.max(virtualRowHeight, VIRTUALIZATION_ROW_HEIGHT_MIN);
+  const virtualVisibleCount = virtualizationEnabled
+    ? Math.ceil(ACTIVE_LIST_MAX_HEIGHT_PX / safeRowHeight) + VIRTUALIZATION_BUFFER_ROWS
+    : displayedActiveTasks.length;
+  const maxStartIndex = Math.max(displayedActiveTasks.length - virtualVisibleCount, 0);
+  const clampedStartIndex = virtualizationEnabled ? Math.min(virtualStartIndex, maxStartIndex) : 0;
+  const totalVirtualHeight = displayedActiveTasks.length * safeRowHeight;
+  const paddingTop = virtualizationEnabled ? clampedStartIndex * safeRowHeight : 0;
+  const visibleTasks = virtualizationEnabled
+    ? displayedActiveTasks.slice(
+        clampedStartIndex,
+        Math.min(clampedStartIndex + virtualVisibleCount, displayedActiveTasks.length)
+      )
+    : displayedActiveTasks;
+  const paddingBottom = virtualizationEnabled
+    ? Math.max(totalVirtualHeight - paddingTop - visibleTasks.length * safeRowHeight, 0)
+    : 0;
+  const displayedTaskCount = displayedActiveTasks.length;
+  const visibleTaskCount = visibleTasks.length;
+
+  useEffect(() => {
+    if (!virtualizationEnabled) {
+      setVirtualStartIndex(0);
+    } else if (virtualStartIndex > maxStartIndex) {
+      setVirtualStartIndex(maxStartIndex);
+    }
+  }, [virtualizationEnabled, maxStartIndex, virtualStartIndex]);
+
+  useEffect(() => {
+    const durationMs = Number((getNowMs() - renderStartRef.current).toFixed(2));
+    const previousDurationMs = lastRenderLogRef.current || null;
+    logTaskListPerf('commit', {
+      durationMs,
+      previousDurationMs,
+      planVersion,
+      totalTasks: displayedTaskCount,
+      visibleTasks: visibleTaskCount,
+      virtualizationEnabled,
+      virtualWindowSize: virtualizationEnabled ? virtualVisibleCount : visibleTaskCount,
+      virtualRowHeight: safeRowHeight,
+    });
+    lastRenderLogRef.current = durationMs;
+  }, [
+    planVersion,
+    displayedTaskCount,
+    visibleTaskCount,
+    virtualizationEnabled,
+    virtualVisibleCount,
+    safeRowHeight,
+  ]);
+
+  useEffect(() => {
+    if (!virtualizationEnabled) {
+      if (typeof window !== 'undefined' && measureFrameRef.current !== null) {
+        window.cancelAnimationFrame(measureFrameRef.current);
+        measureFrameRef.current = null;
+      }
+      return;
+    }
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const container = virtualListRef.current;
+    if (!container) {
+      return;
+    }
+    if (measureFrameRef.current !== null) {
+      window.cancelAnimationFrame(measureFrameRef.current);
+    }
+    measureFrameRef.current = window.requestAnimationFrame(() => {
+      measureFrameRef.current = null;
+      const rowNodes = Array.from(
+        container.querySelectorAll<HTMLElement>('[data-virtual-row="true"]')
+      );
+      if (!rowNodes.length) {
+        return;
+      }
+      const heights = rowNodes
+        .map(node => node.getBoundingClientRect().height)
+        .filter(height => Number.isFinite(height) && height > 0);
+      if (!heights.length) {
+        return;
+      }
+      const totalHeight = heights.reduce((total, value) => total + value, 0);
+      const averageHeight = totalHeight / heights.length;
+      const roundedAverage = Math.round(averageHeight);
+      const previousHeight = virtualRowHeightRef.current;
+      if (Math.abs(roundedAverage - previousHeight) > VIRTUALIZATION_ROW_HEIGHT_TOLERANCE) {
+        const nextHeight = Math.max(
+          VIRTUALIZATION_ROW_HEIGHT_MIN,
+          Math.min(roundedAverage, VIRTUALIZATION_ROW_HEIGHT_MAX)
+        );
+        if (nextHeight !== previousHeight) {
+          virtualRowHeightRef.current = nextHeight;
+          setVirtualRowHeight(nextHeight);
+          logTaskListPerf('virtual_row_height_adjusted', {
+            previousHeight,
+            nextHeight,
+            sampleSize: heights.length,
+            averageMeasuredHeight: roundedAverage,
+          });
+        }
+      }
+      const maxHeight = Math.max(...heights);
+      if (maxHeight - virtualRowHeightRef.current > VIRTUALIZATION_ROW_HEIGHT_TOLERANCE * 2) {
+        logTaskListPerf('virtual_row_height_violation', {
+          configuredHeight: virtualRowHeightRef.current,
+          maxHeight,
+          sampleSize: heights.length,
+          sortingStrategy,
+        });
+      }
+    });
+    return () => {
+      if (measureFrameRef.current !== null) {
+        window.cancelAnimationFrame(measureFrameRef.current);
+        measureFrameRef.current = null;
+      }
+    };
+  }, [visibleTasks, virtualizationEnabled, sortingStrategy]);
+
+  const handleVirtualScroll = useCallback(
+    (event: UIEvent<HTMLDivElement>) => {
+      if (!virtualizationEnabled) {
+        return;
+      }
+      const scrollTop = event.currentTarget.scrollTop;
+      const nextIndex = Math.max(0, Math.floor(scrollTop / safeRowHeight));
+      if (nextIndex !== virtualStartIndex) {
+        setVirtualStartIndex(nextIndex);
+      }
+    },
+    [virtualizationEnabled, virtualStartIndex, safeRowHeight]
+  );
+
+  const showPrioritizingSkeleton = sessionStatus === 'running';
+
+  const priorityFocusAreas = useMemo(() => {
+    const firstWave = displayedActiveTasks.slice(0, 3);
+    if (firstWave.length === 0) {
+      return [];
+    }
+    const counts: Partial<Record<'leverage' | 'neutral' | 'overhead', number>> = {};
+    for (const task of firstWave) {
+      if (!task.category) {
+        continue;
+      }
+      counts[task.category] = (counts[task.category] ?? 0) + 1;
+    }
+    const orderedAreas = CATEGORY_DISPLAY_ORDER.filter(category => counts[category]);
+    if (orderedAreas.length === 0) {
+      return [
+        {
+          label: 'clearing the earliest blockers so later work can flow',
+          count: firstWave.length,
+        },
+      ];
+    }
+    return orderedAreas.map(category => ({
+      label: CATEGORY_FOCUS_COPY[category],
+      count: counts[category] ?? 0,
+    }));
+  }, [displayedActiveTasks]);
+
+  const renderTaskRowContent = (task: ActiveTaskEntry) => (
+    <TaskRow
+      taskId={task.id}
+      order={task.displayOrder}
+      impact={task.strategicScore?.impact ?? null}
+      effort={task.strategicScore?.effort ?? null}
+      confidence={task.strategicScore?.confidence ?? null}
+      priority={task.strategicScore?.priority ?? null}
+      strategicDetails={task.strategicDetails ?? undefined}
+      title={task.title}
+      category={task.category}
+      isLocked={task.isLocked}
+      dependencyLinks={task.dependencyLinks}
+      movement={task.movement}
+      checked={task.checked}
+      isAiGenerated={task.isAiGenerated}
+      isManual={task.isManual}
+      isPrioritizing={task.isPrioritizing}
+      retryStatus={task.retryStatus ?? undefined}
+      isSelected={selectedTaskId === task.id && isDrawerOpen}
+      isHighlighted={highlightedIds.has(task.id)}
+      onSelect={handleSelectTask}
+      onToggleCompleted={handleToggleCompleted}
+      onToggleLock={() => handleToggleLock(task.id, task.planOrder)}
+      isEditingDisabled={sessionStatus === 'running'}
+      onTaskTitleChange={handleTaskTitleChange}
+      outcomeId={outcomeId}
+      onEditSuccess={handleTaskEditSuccess}
+      hasManualOverride={task.hasManualOverride ?? false}
+      manualOverride={task.manualOverride ?? null}
+      baselineScore={task.baselineScore ?? null}
+      onManualOverrideChange={override => applyManualOverride(task.id, override)}
+    />
+  );
+
+  const renderTaskRows = (tasksToRender: ActiveTaskEntry[], options?: { virtualized?: boolean }) => (
+    <div className="flex flex-col gap-4 lg:gap-0 lg:divide-y lg:divide-border/60">
+      {tasksToRender.map(task => (
+        <div
+          key={`active-${task.id}`}
+          data-virtual-row={options?.virtualized ? 'true' : undefined}
+          style={options?.virtualized ? { minHeight: safeRowHeight } : undefined}
+        >
+          {renderTaskRowContent(task)}
+        </div>
+      ))}
+    </div>
+  );
+
+  const activeListHeader = (
+    <div className="sticky top-0 z-10 hidden grid-cols-[48px_minmax(0,1fr)_120px_96px_48px] gap-2 border-b border-border/60 bg-background/95 px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground backdrop-blur lg:grid">
+      <span>#</span>
+      <span className="text-left">Task</span>
+      <span className="text-left">Depends</span>
+      <span className="text-right">Movement</span>
+      <span className="text-right">Done</span>
+    </div>
   );
 
   const normalizedOutcome = useMemo(() => {
@@ -1692,18 +2054,25 @@ export function TaskList({
 
   const planNarrative = useMemo(() => {
     const summary = plan.synthesis_summary?.trim();
-    const segments: string[] = [];
-    if (normalizedOutcome) {
-      segments.push(`Keeps focus on “${normalizedOutcome}”.`);
+    if (!summary && !normalizedOutcome && priorityFocusAreas.length === 0) {
+      return '';
     }
-    if (summary) {
-      segments.push(summary);
-    }
-    if (topTaskHighlights.length) {
-      segments.push(`Immediate next steps: ${topTaskHighlights.join(', ')}.`);
-    }
-    return segments.join(' ');
-  }, [normalizedOutcome, plan.synthesis_summary, topTaskHighlights]);
+    const focusPrefix = normalizedOutcome ? `To advance “${normalizedOutcome}”, ` : '';
+    const primarySentence = summary
+      ? `${focusPrefix}${summary}`
+      : `${focusPrefix}The agent sequenced the most blocking dependencies first.`.trim();
+    const themeSentence =
+      priorityFocusAreas.length > 0
+        ? `Focus areas: ${priorityFocusAreas
+            .map((area, index) => {
+              const countLabel =
+                area.count > 1 ? `${area.count} tasks` : area.count === 1 ? '1 task' : '';
+              return `${index + 1}) ${area.label}${countLabel ? ` (${countLabel})` : ''}`;
+            })
+            .join('; ')}.`
+        : '';
+    return [primarySentence.trim(), themeSentence].filter(Boolean).join(' ');
+  }, [normalizedOutcome, plan.synthesis_summary, priorityFocusAreas]);
 
   const completedTasks = useMemo(
     () =>
@@ -1826,51 +2195,6 @@ export function TaskList({
     setIsDrawerOpen(true);
   }, []);
 
-  const handleRefineTask = useCallback((taskId: string, taskText: string) => {
-    setRefinementTaskId(taskId);
-    setRefinementTaskText(taskText);
-    setShowRefinementModal(true);
-  }, []);
-
-  const handleApplyRefinement = useCallback(
-    async ({ taskId, suggestionId, newTaskTexts, action }: ApplyRefinementPayload) => {
-      try {
-        const response = await fetch(`/api/tasks/${taskId}/apply-refinement`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            suggestion_id: suggestionId,
-            new_task_texts: newTaskTexts,
-            action,
-          }),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => null);
-          throw new Error(errorData?.error || 'Failed to apply refinement');
-        }
-
-        setShowRefinementModal(false);
-
-        toast.success(
-          `${action.charAt(0).toUpperCase() + action.slice(1)} operation applied. ${
-            newTaskTexts.length
-          } new task(s) created.`
-        );
-
-        if (outcomeId) {
-          triggerAutoPrioritization();
-        }
-      } catch (error) {
-        console.error('Error applying refinement:', error);
-        toast.error('Failed to apply refinement. Please try again.');
-      }
-    },
-    [outcomeId, triggerAutoPrioritization]
-  );
-
   const selectedNode = selectedTaskId ? nodeMap[selectedTaskId] ?? null : null;
   const selectedStatus: TaskStatus = selectedTaskId
     ? priorityState.statuses[selectedTaskId] ?? 'active'
@@ -1947,59 +2271,42 @@ export function TaskList({
 
         <div className="rounded-xl border border-border/60">
           {isLoadingTasks ? (
-            <div className="space-y-2 p-4">
-              {Array.from({ length: 5 }).map((_, index) => (
-                <Skeleton key={index} className="h-12 rounded-lg" />
-              ))}
+            <div className="p-4">
+              <TaskListSkeleton rows={5} />
             </div>
-          ) : activeTasks.length === 0 ? (
+          ) : displayedActiveTasks.length === 0 ? (
             <div className="px-2 py-4 text-sm text-muted-foreground">
               All current priorities are complete. Rerun the agent when new work arrives.
             </div>
+          ) : virtualizationEnabled ? (
+            <div
+              ref={virtualListRef}
+              className="relative max-h-[560px] overflow-y-auto"
+              onScroll={handleVirtualScroll}
+              role="region"
+              aria-label="Virtualized active tasks"
+              aria-busy={isLoadingTasks || showPrioritizingSkeleton}
+            >
+              {activeListHeader}
+              {showPrioritizingSkeleton && !isLoadingTasks && (
+                <div className="space-y-2 bg-bg-layer-2/40 px-4 py-3" aria-live="polite">
+                  <TaskListSkeleton rows={3} />
+                </div>
+              )}
+              <div style={{ height: paddingTop }} />
+              {renderTaskRows(visibleTasks, { virtualized: true })}
+              <div style={{ height: paddingBottom }} />
+            </div>
           ) : (
-            <ScrollArea className="max-h-[560px]">
-              <div className="sticky top-0 z-10 hidden grid-cols-[48px_minmax(0,1fr)_120px_96px_48px] gap-2 border-b border-border/60 bg-background/95 px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground backdrop-blur lg:grid">
-                <span>#</span>
-                <span className="text-left">Task</span>
-                <span className="text-left">Depends</span>
-                <span className="text-right">Movement</span>
-                <span className="text-right">Done</span>
-              </div>
-        <div className="flex flex-col gap-4 lg:gap-0 lg:divide-y lg:divide-border/60">
-          {activeTasks.map(task => (
-            <TaskRow
-              key={`active-${task.id}`}
-              taskId={task.id}
-              order={task.displayOrder}
-              title={task.title}
-              category={task.category}
-              isLocked={task.isLocked}
-              dependencyLinks={task.dependencyLinks}
-              movement={task.movement}
-              checked={task.checked}
-              isAiGenerated={task.isAiGenerated}
-              isManual={task.isManual}
-              isPrioritizing={task.isPrioritizing}
-              isSelected={selectedTaskId === task.id && isDrawerOpen}
-              isHighlighted={highlightedIds.has(task.id)}
-              onSelect={handleSelectTask}
-              onToggleCompleted={handleToggleCompleted}
-              onToggleLock={() => handleToggleLock(task.id, task.displayOrder)}
-              isEditingDisabled={sessionStatus === 'running'}
-              onTaskTitleChange={handleTaskTitleChange}
-              outcomeId={outcomeId}
-              onEditSuccess={handleTaskEditSuccess}
-              clarityScore={taskLookup[task.id]?.clarityScore}
-              badgeColor={taskLookup[task.id]?.badgeColor}
-              badgeLabel={taskLookup[task.id]?.badgeLabel}
-              qualityMetadata={taskLookup[task.id]?.qualityMetadata}
-              onRefineClick={() => handleRefineTask(task.id, task.title)}
-              isRecalculating={isRecalculating}
-              onQualityUpdate={handleQualityUpdate}
-            />
-          ))}
-              </div>
-            </ScrollArea>
+            <div>
+              {activeListHeader}
+              {showPrioritizingSkeleton && !isLoadingTasks && (
+                <div className="space-y-2 bg-bg-layer-2/40 px-4 py-3" aria-live="polite">
+                  <TaskListSkeleton rows={3} />
+                </div>
+              )}
+              {renderTaskRows(visibleTasks)}
+            </div>
           )}
         </div>
       </section>
@@ -2097,14 +2404,176 @@ export function TaskList({
         onApplyChanges={handleApplyDiscardDecisions}
         onCancelAll={handleCancelAllDiscards}
       />
-
-      <RefinementModal
-        isOpen={showRefinementModal}
-        onClose={() => setShowRefinementModal(false)}
-        originalTaskId={refinementTaskId || ''}
-        originalTaskText={refinementTaskText}
-        onApplyRefinement={handleApplyRefinement}
-      />
     </div>
   );
+}
+
+function TaskListSkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: rows }).map((_, index) => (
+        <Skeleton key={`task-skeleton-${index}`} className="h-12 rounded-lg" />
+      ))}
+    </div>
+  );
+}
+
+const URGENT_KEYWORDS = /\b(urgent|critical|blocking|blocker)\b/i;
+
+type StrategyScoreEntry = {
+  priorityScore: number;
+  quickWinScore: number;
+  strategicBetScore: number;
+  urgentScore: number;
+  matchesQuickWin: boolean;
+  matchesStrategicBet: boolean;
+};
+
+type StrategyScoreCache = Record<string, StrategyScoreEntry>;
+
+function matchesStrategyFilters(
+  task: ActiveTaskEntry,
+  strategy: SortingStrategy,
+  cache: StrategyScoreCache
+): boolean {
+  if (strategy === 'balanced' || strategy === 'urgent') {
+    return true;
+  }
+  const entry = cache[task.id];
+  if (!entry) {
+    return false;
+  }
+  if (strategy === 'quick_wins') {
+    return entry.matchesQuickWin;
+  }
+  if (strategy === 'strategic_bets') {
+    return entry.matchesStrategicBet;
+  }
+  return true;
+}
+
+function compareTasksByStrategy(
+  a: ActiveTaskEntry,
+  b: ActiveTaskEntry,
+  strategy: SortingStrategy,
+  cache: StrategyScoreCache
+) {
+  if (strategy === 'quick_wins') {
+    return compareWithFallback(
+      getQuickWinScore(a, cache),
+      getQuickWinScore(b, cache),
+      a.planOrder,
+      b.planOrder
+    );
+  }
+  if (strategy === 'strategic_bets') {
+    return compareWithFallback(
+      getStrategicBetScore(a, cache),
+      getStrategicBetScore(b, cache),
+      a.planOrder,
+      b.planOrder
+    );
+  }
+  if (strategy === 'urgent') {
+    return compareWithFallback(getUrgentScore(a, cache), getUrgentScore(b, cache), a.planOrder, b.planOrder);
+  }
+  return compareWithFallback(getPriorityScore(a, cache), getPriorityScore(b, cache), a.planOrder, b.planOrder);
+}
+
+function compareWithFallback(aScore: number, bScore: number, aOrder: number, bOrder: number) {
+  if (aScore === bScore) {
+    return aOrder - bOrder;
+  }
+  return bScore - aScore;
+}
+
+function getPriorityScore(task: ActiveTaskEntry, cache: StrategyScoreCache) {
+  return cache[task.id]?.priorityScore ?? Number.NEGATIVE_INFINITY;
+}
+
+function getQuickWinScore(task: ActiveTaskEntry, cache: StrategyScoreCache) {
+  return cache[task.id]?.quickWinScore ?? Number.NEGATIVE_INFINITY;
+}
+
+function getStrategicBetScore(task: ActiveTaskEntry, cache: StrategyScoreCache) {
+  return cache[task.id]?.strategicBetScore ?? Number.NEGATIVE_INFINITY;
+}
+
+function getUrgentScore(task: ActiveTaskEntry, cache: StrategyScoreCache) {
+  return cache[task.id]?.urgentScore ?? Number.NEGATIVE_INFINITY;
+}
+
+function hasUrgentKeyword(title: string) {
+  return URGENT_KEYWORDS.test(title);
+}
+
+function buildStrategyScoreCache(tasks: ActiveTaskEntry[]): StrategyScoreCache {
+  const cache: StrategyScoreCache = {};
+  tasks.forEach(task => {
+    const priorityScore =
+      typeof task.strategicScore?.priority === 'number' ? task.strategicScore.priority : Number.NEGATIVE_INFINITY;
+    const quickWinEligible = Boolean(
+      task.strategicScore && task.strategicScore.effort <= 8 && task.strategicScore.impact > 0
+    );
+    const quickWinScore = quickWinEligible
+      ? task.strategicScore!.impact * task.strategicScore!.confidence
+      : Number.NEGATIVE_INFINITY;
+    const strategicBetEligible = Boolean(
+      task.strategicScore && task.strategicScore.impact >= 7 && task.strategicScore.effort > 40
+    );
+    const strategicBetScore = strategicBetEligible ? task.strategicScore!.impact : Number.NEGATIVE_INFINITY;
+    const urgencyMultiplier = hasUrgentKeyword(task.title) ? 2 : 1;
+    const urgentScore =
+      typeof task.strategicScore?.priority === 'number'
+        ? task.strategicScore.priority * urgencyMultiplier
+        : Number.NEGATIVE_INFINITY;
+
+    cache[task.id] = {
+      priorityScore,
+      quickWinScore,
+      strategicBetScore,
+      urgentScore,
+      matchesQuickWin: quickWinEligible,
+      matchesStrategicBet: strategicBetEligible,
+    };
+  });
+  return cache;
+}
+
+type TaskListErrorBoundaryProps = {
+  children: ReactNode;
+};
+
+type TaskListErrorBoundaryState = {
+  hasError: boolean;
+};
+
+class TaskListErrorBoundary extends Component<TaskListErrorBoundaryProps, TaskListErrorBoundaryState> {
+  state: TaskListErrorBoundaryState = {
+    hasError: false,
+  };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: unknown, errorInfo: unknown) {
+    console.error('[TaskList] Error caught by boundary', error, errorInfo);
+    toast.error('Task list failed to render. Please refresh or rerun prioritization.');
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div
+          role="alert"
+          className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive"
+        >
+          <p className="font-semibold">Unable to render task list</p>
+          <p className="text-destructive/80">Please refresh the page or run prioritization again.</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }

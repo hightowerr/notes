@@ -1,0 +1,400 @@
+{
+  "meta": {
+    "projectName": "AI Note Synthesiser",
+    "version": "1.0.0",
+    "lastUpdated": "2025-11-18",
+    "description": "High-level visual and interaction design guidelines for the AI Note Synthesiser, expressed as a design-system spec. This file is written from a creative director’s perspective so it can guide future UI work, not just mirror current implementation.",
+    "designIntent": [
+      "Feel like a focused, premium productivity cockpit rather than a generic dashboard.",
+      "Balance analytical clarity with a calm, low-noise visual tone.",
+      "Make AI-powered decisions feel trustworthy and explainable, not magical and opaque.",
+      "Be genuinely usable on small mobile screens, not just “responsive” on paper."
+    ]
+  },
+  "designPrinciples": {
+    "clarityOverCleverness": "Prioritise information hierarchy and legibility over decorative visuals. Every visual decision should make it easier to understand status, priorities, or next actions.",
+    "depthNotDecor": "Use the depth layer system (bg-layer-1–4, two-layer shadows) to convey structure and importance, not as eye candy. Stronger elevation means more interactivity or current focus.",
+    "calmByDefault": "Avoid visual noise. Keep borders subtle, rely on spacing, typography, and depth to separate sections. Use colour sparingly to call attention to decisions, errors, and key actions.",
+    "trustworthyAI": "When AI acts, show status, progress, and results clearly. Use consistent badges, toasts, and panels so users can trace what happened and why.",
+    "mobileFirstReality": "Design every surface to work comfortably at 320–414px. No horizontal scrolling, no cramped controls, and touch targets at least 44px high.",
+    "oneSystemAcrossScreens": "Desktop, tablet, and mobile should feel like the same product: same tokens, same component behaviours, and consistent microinteractions.",
+    "motionWithPurpose": "Use motion (Framer Motion, CSS transitions) to confirm state changes (uploads, status changes, AI results) and reduce cognitive load. Avoid gratuitous animation loops."
+  },
+  "typography": {
+    "families": {
+      "sans": {
+        "name": "Geist",
+        "cssVariable": "--font-geist-sans",
+        "usage": "Primary UI typeface for navigation, headings, labels, and body text."
+      },
+      "mono": {
+        "name": "Geist Mono",
+        "cssVariable": "--font-geist-mono",
+        "usage": "Optional for technical snippets, IDs, and metadata when monospace improves scanability."
+      },
+      "serif": {
+        "name": "System serif (e.g., Georgia)",
+        "cssVariable": "--font-serif",
+        "usage": "Very sparingly, if at all, for narrative content or long-form documents inside the app."
+      }
+    },
+    "scale": {
+      "display": {
+        "size": "2.25rem–2.5rem",
+        "weight": 600,
+        "tracking": "tight",
+        "usage": "Top-level page titles (e.g., Task Priorities), mostly on desktop and tablet."
+      },
+      "h1": {
+        "size": "1.75rem–2rem",
+        "weight": 600,
+        "usage": "Primary section headers and nav brand lockup."
+      },
+      "h2": {
+        "size": "1.25rem–1.5rem",
+        "weight": 600,
+        "usage": "Card titles, panel headers, and important sub-sections."
+      },
+      "body": {
+        "size": "0.95rem–1rem",
+        "weight": 400,
+        "usage": "Default copy, list items, and summaries."
+      },
+      "bodyMuted": {
+        "size": "0.9rem",
+        "weight": 400,
+        "usage": "Secondary metadata, helper text, and captions."
+      },
+      "label": {
+        "size": "0.8rem–0.85rem",
+        "weight": 500,
+        "usage": "Form labels, badge text, and small UI labels."
+      }
+    },
+    "responsiveGuidelines": {
+      "mobileMinimum": "Maintain at least 16px (1rem) for interactive form fields to prevent iOS zoom. Use `text-base sm:text-sm` patterns where inputs drop slightly on larger screens.",
+      "headingBehaviour": "Headings may step down one size on very small screens (e.g., display → h1), but never use condensed or all-caps treatments that harm legibility.",
+      "truncation": "Favor line-clamp (1–2 lines) over hard truncation for key statements like outcomes. Only truncate when the surrounding layout cannot gracefully expand."
+    }
+  },
+  "colorSystem": {
+    "brand": {
+      "primaryHue": "Cool purple/indigo",
+      "tokens": {
+        "primary_1": "var(--primary-1) – deepest brand shade, used rarely for text or strong accents.",
+        "primary_2": "var(--primary-2) – core brand colour for primary buttons, key badges, and highlights.",
+        "primary_3": "var(--primary-3) – hover/active state for primary surfaces.",
+        "primary_4": "var(--primary-4) – subtle tints, gradients, and backgrounds."
+      },
+      "secondaryHue": "Magenta/pink accent via `--accent-secondary` to support gradients and celebratory moments.",
+      "usage": [
+        "Primary CTA buttons and key AI state indicators (e.g., running analyses).",
+        "Icons in the nav logo, LNO leverage markers, and outcome highlights.",
+        "Gradients behind high-value surfaces like hero upload state or key metrics."
+      ]
+    },
+    "depthLayers": {
+      "bg_layer_1": {
+        "token": "var(--bg-layer-1)",
+        "role": "Page canvas, behind everything. Slightly tinted rather than pure white to reduce glare."
+      },
+      "bg_layer_2": {
+        "token": "var(--bg-layer-2)",
+        "role": "Primary card and header backgrounds. Feels like the main sheet the UI is printed on."
+      },
+      "bg_layer_3": {
+        "token": "var(--bg-layer-3)",
+        "role": "Interactive elements (buttons, tabs, inputs) that sit above cards."
+      },
+      "bg_layer_4": {
+        "token": "var(--bg-layer-4)",
+        "role": "Hovered, active, and highly elevated states (chips, selected tabs, focused cards)."
+      }
+    },
+    "semantic": {
+      "success": {
+        "bg": "var(--success-bg)",
+        "text": "var(--success-text)",
+        "usage": "Completed processing, successful exports, and green-path AI outcomes."
+      },
+      "warning": {
+        "bg": "var(--warning-bg)",
+        "text": "var(--warning-text)",
+        "usage": "Review-required states, edge-case AI confidence, or upcoming limits."
+      },
+      "info": {
+        "bg": "var(--info-bg)",
+        "text": "var(--info-text)",
+        "usage": "Neutral status information, queue telemetry, and system hints."
+      },
+      "destructive": {
+        "bg": "var(--destructive-bg)",
+        "text": "var(--destructive-text)",
+        "usage": "Errors, failed processing, and destructive actions like delete."
+      }
+    },
+    "text": {
+      "heading": "var(--text-heading) – near-black, high contrast.",
+      "body": "var(--text-body) – dark grey for comfortable reading.",
+      "muted": "var(--text-muted) – secondary copy and low-priority metadata.",
+      "onPrimary": "var(--text-on-primary) – white text on coloured surfaces."
+    },
+    "darkMode": {
+      "strategy": "Invert depth layers so darker backgrounds recede and lighter surfaces indicate elevation. Brand colours brighten slightly in dark mode for equivalent contrast.",
+      "expectations": [
+        "All semantic colours maintain at least AA contrast (4.5:1) against their backgrounds.",
+        "Glass effects and gradients should remain subtle; avoid neon glow.",
+        "Borders stay minimal; depth is mostly communicated through light-on-dark shadows and elevations."
+      ]
+    }
+  },
+  "spacingAndLayout": {
+    "grid": {
+      "pageMaxWidth": "max-w-7xl (~1120px) for primary surfaces like upload and dashboard.",
+      "gutter": "16–24px horizontal padding on mobile, 24–32px on desktop.",
+      "columns": "Use 1 column on mobile, 2 columns on tablets for grids like document cards, and 3 columns only at desktop widths."
+    },
+    "spacingScale": {
+      "baseUnit": "0.25rem (4px) mapped from `--spacing`.",
+      "rules": [
+        "4px–8px: micro spacing between icon and label, within badges.",
+        "12px–16px: default spacing inside components (card padding, form field spacing).",
+        "24px–32px: section spacing, vertical rhythm between major blocks."
+      ]
+    },
+    "touchTargets": {
+      "minimumHeight": "44px for primary interactive elements on mobile (`h-11`), 36px on desktop (`h-9`).",
+      "horizontalPadding": "At least 12px each side for buttons and tabs.",
+      "hitAreaRule": "Icon-only controls must still live inside 44x44px containers on mobile."
+    },
+    "responsiveness": {
+      "breakpoints": {
+        "mobile": "≤ 414px – vertical stacking, full-width controls, no horizontal scroll.",
+        "tablet": "768–1024px – 2-column card grids, controls begin to align in rows.",
+        "desktop": "≥ 1024px – 2–3 column layouts, denser controls where appropriate."
+      },
+      "generalGuidelines": [
+        "Avoid placing more than 3 primary controls in a single row on mobile.",
+        "Prefer stacking (flex-col sm:flex-row) for complex control groups.",
+        "Use line-clamp and responsive font sizes to prevent layout breakage in long copy."
+      ]
+    }
+  },
+  "radiiAndShape": {
+    "baseRadius": "var(--radius) ≈ 8px; cards and dialogs typically use `rounded-xl` for a slightly softer feel.",
+    "tokens": {
+      "radius_sm": "Subtle rounding for input controls and pills.",
+      "radius_md": "Default rounding for most components (buttons, chips).",
+      "radius_lg": "Cards, modals, and larger surfaces.",
+      "roundedFull": "Pill buttons and floating quick capture button."
+    },
+    "philosophy": "Corners are softened but not bubbly. Shapes should feel modern and precise, aligning with a productivity tool rather than a playful app."
+  },
+  "shadowsAndDepth": {
+    "system": {
+      "shadow_2xs": "Tiny internal elevation for small surfaces.",
+      "shadow_xs_sm": "Default card and nav bar elevation using two-layer system (inset highlight + soft drop shadow).",
+      "shadow_md_lg": "Used sparingly for modals, floating actions (Quick Capture), and elevated interactive panels.",
+      "elevationClasses": {
+        "shadow-2layer-sm": "Small depth for nav, small cards, and chips.",
+        "shadow-2layer-md": "Standard depth for primary cards and dropdowns.",
+        "shadow-2layer-lg": "Prominent depth for hover and focus states of key interactive surfaces."
+      }
+    },
+    "behaviour": {
+      "hoverLift": "Use `.hover-lift` or `.hover-shadow-lift` to subtly raise cards and buttons on hover.",
+      "consistency": "Avoid mixing raw Tailwind shadows with custom two-layer shadows; prefer the custom utilities for a coherent look."
+    }
+  },
+  "motionAndFeedback": {
+    "principles": {
+      "confirmActions": "Uploads starting, AI orchestration, and state transitions should always have visible feedback via loaders, toasts, or card animation.",
+      "keepSnappy": "Animations should generally complete within 150–300ms. Ease-out for entrances, ease-in for exits.",
+      "avoidOverload": "Do not animate more than one major property (scale, opacity, position) at once on dense screens."
+    },
+    "usagePatterns": {
+      "listsAndCards": "Fade/slide in for new file cards and AI summaries using Framer Motion; minimal bounce for a professional feel.",
+      "statusChanges": "Badges and status labels may crossfade or slide; avoid jarring reflows.",
+      "modalsAndDrawers": "Use scale+opacity transitions for dialogs; slide for drawers on mobile."
+    }
+  },
+  "interactionAndAccessibility": {
+    "focusManagement": {
+      "focusRings": "Use `focus-visible:ring-[3px]` with `var(--border-focus)` for all keyboard-focusable elements.",
+      "skipHoverOnly": "Do not rely on hover colour alone to show interactive state; combine with shape, shadow, or underlines."
+    },
+    "stateCommunication": {
+      "statuses": "Use consistent badge styles for states (uploading, pending, processing, completed, failed, review_required). Combine icons and verbs (e.g., ‘Processing’).",
+      "toasts": "Use `sonner` to present time-bounded feedback (summary ready, failure, network issues). Toasts must never be the only place critical errors are shown."
+    },
+    "mobileSpecific": {
+      "noHorizontalScroll": "Primary experiences (upload, dashboard, priorities, outcome builder) must never require horizontal scrolling at mobile widths.",
+      "gestureFriendly": "Controls that appear near screen edges should have padding to avoid accidental OS gesture conflicts."
+    }
+  },
+  "components": {
+    "Button": {
+      "role": "Primary interactive element for actions across the app.",
+      "anatomy": ["container", "icon (optional)", "label"],
+      "variants": {
+        "default": "Solid primary button using `bg-primary-2` with white text. Used for key actions like Analyze Tasks, Quick Capture, and primary confirmations.",
+        "outline": "Neutral background (`bg-bg-layer-3`) with subtle shadow and no visible border. Used for secondary CTAs, filters, and navigation actions.",
+        "secondary": "Subtle background (`bg-bg-layer-2`) for neutral actions within cards and panels.",
+        "ghost": "Minimal chrome, used for icon or tertiary actions in dense layouts (e.g., overflow menus).",
+        "destructive": "Red semantic surface for irreversible operations like delete.",
+        "link": "Text-style button, used sparingly where navigation semantics matter more than ‘action’ semantics."
+      },
+      "sizes": {
+        "default": "Desktop: h-9, Mobile: h-11 via `h-11 sm:h-9`. Horizontal padding: 16–24px.",
+        "sm": "Only used where density is essential; avoid on mobile for primary actions.",
+        "lg": "Prominent call-to-action (e.g., Quick Capture floating button).",
+        "icon": "Square buttons used with clear iconography and tooltips; always wrapped in 44px hit areas on mobile."
+      },
+      "states": ["rest", "hover", "active (scale 0.98)", "disabled", "loading (with spinner)"],
+      "responsiveness": "Stacks into full-width buttons on mobile for multi-action bars (e.g., bulk export, modal footers).",
+      "principles": [
+        "Every screen should have at most one visually dominant primary button.",
+        "Label verbs should be concrete and outcome-oriented (e.g., ‘Analyze Tasks’, ‘Upload Documents’)."
+      ]
+    },
+    "Badge": {
+      "role": "Compact status and count indicators for files, AI confidence, LNO classes, and document counts.",
+      "variants": {
+        "default": "Primary-coloured badges for most-prominent labels (e.g., Leverage count).",
+        "secondary": "Neutral badges for metadata counts and filters.",
+        "outline": "Lightly elevated chip for summary metadata (e.g., queue summaries).",
+        "destructive": "Red-tinted backgrounds for failure or exclusion indicators."
+      },
+      "behaviour": "Badges should never be the only place a user can discover a critical state; they are visual summaries that reinforce text nearby."
+    },
+    "Card": {
+      "role": "Primary content container for documents, summaries, outcomes, and dashboards.",
+      "anatomy": ["CardHeader", "CardTitle", "CardDescription", "CardContent", "CardFooter", "CardAction"],
+      "visualStyle": "Rounded-xl, background at bg-layer-2, two-layer shadow by default with hover lift. Minimal borders.",
+      "usage": [
+        "Document tiles in dashboard with clear title, metadata, status badges, and actions.",
+        "Context cards (reflections, outcomes) that summarise the current strategic direction.",
+        "LNO columns and AI-generated lists."
+      ]
+    },
+    "Input": {
+      "role": "Single-line text entry for object, metric, capacity, and filters.",
+      "visualStyle": "Transparent background, subtle border using `border-input`, focus ring at 3px with brand colour. Light background overlay in dark mode.",
+      "behaviour": "Always accompanied by a label and potential helper text; error states show in red with `aria-invalid` and visible text.",
+      "mobile": "Use 16px font size and `h-12 sm:h-10` to avoid zoom and ensure comfortable tapping."
+    },
+    "Textarea": {
+      "role": "Multi-line text for reflections, clarifiers, and notes.",
+      "visualStyle": "Matches Input but with taller content area and flexible height; uses the same border and focus behaviours.",
+      "guidelines": [
+        "Line length should remain comfortable; use max-width containers and avoid full-bleed text.",
+        "Offer character counters for fields with limits (e.g., clarifier), and keep helper text concise."
+      ]
+    },
+    "Tabs": {
+      "role": "Switch between related views in a constrained area (e.g., SummaryPanel tabs, dashboard filters).",
+      "anatomy": ["TabsList", "TabsTrigger", "TabsContent"],
+      "visualStyle": "Pill-like triggers on a muted background, with active tab appearing raised with background contrast and subtle shadow.",
+      "responsiveness": "TabsList should wrap gracefully and, on small screens, use smaller text and potentially icon-plus-label or icon-only treatments where space is tight."
+    },
+    "Alert": {
+      "role": "Inline messaging for errors, warnings, and informational notices.",
+      "variants": {
+        "default": "Neutral panel for non-critical messages and guidance.",
+        "destructive": "Error-focused, using destructive colour tokens, and emphasising the description."
+      },
+      "anatomy": ["icon (optional)", "AlertTitle", "AlertDescription"],
+      "usage": "Prefer inline alerts in context (inside cards or modals) rather than global banners unless the entire workflow is blocked."
+    },
+    "Dialog": {
+      "role": "Blocking interactions where users must focus on one structured flow (e.g., OutcomeBuilder, text input modals).",
+      "visualStyle": "Centered over semi-opaque dark overlay; rounded corners, high elevation shadow. Content scrollable when long, with sticky footers where needed.",
+      "mobileGuidelines": [
+        "Max height near 90–95vh with generous internal padding that adapts to small screens.",
+        "Buttons in the footer should be full-width on mobile and comfortably spaced.",
+        "Avoid cramming too many form fields; group and sequence where necessary."
+      ]
+    },
+    "Drawer": {
+      "role": "Non-blocking, contextual surfaces that slide in, primarily for mobile (e.g., detail views, filters).",
+      "expectations": "Use sparingly. Content should be concise and easily dismissible; main actions remain within reach of thumb on mobile."
+    },
+    "DropdownMenu": {
+      "role": "Compact menus for per-item actions (e.g., document reprocess/delete).",
+      "behaviour": "Always anchored to a clearly identifiable trigger (icon button). Items use concise verbs and include icons where helpful.",
+      "accessibility": "Ensure proper ARIA roles and keyboard navigation via shadcn/Radix defaults."
+    },
+    "Switch": {
+      "role": "Binary toggles for persistent settings (e.g., sync on/off).",
+      "visualStyle": "Rounded track with clear thumb, using semantic colours on checked state. Label should be adjacent and clearly describe what is toggled."
+    },
+    "Checkbox": {
+      "role": "Multi-select within lists (e.g., selecting documents for bulk export).",
+      "mobileGuidelines": "Increase tap area (`h-5 w-5` on mobile) and pair with labels and spacing to avoid accidental taps.",
+      "usage": "Use primarily in contexts where bulk actions are clearly visible and explained."
+    },
+    "Tooltip": {
+      "role": "Clarify icon-only actions and subtle controls.",
+      "behaviour": "Appear on hover and focus; content should be short, action-oriented, and never critical to task completion."
+    },
+    "Toast": {
+      "role": "Transient notifications for success, failure, or background progress updates.",
+      "style": "Use subtle depth and semantic colours; multiple toasts should stack but not cover primary controls.",
+      "usage": "Reserve toasts for events that just occurred, not reminders or persistent states."
+    },
+    "Skeleton": {
+      "role": "Loading placeholders for cards and lists while data is fetched.",
+      "style": "Soft edges and muted colours aligned with bg-layer-3; shimmer effects, if used, should be subtle and not distracting."
+    },
+    "Nav_Main": {
+      "role": "Top-level navigation across Upload, Dashboard, and Task Priorities.",
+      "visualStyle": "Sticky top bar with bg-layer-2, two-layer shadow, and brand lockup on the left. Tabs-like nav items with clear active states.",
+      "behaviour": "On mobile, nav remains slim and scannable; brand text may truncate, but the app name should remain recognisable."
+    },
+    "QuickCapture": {
+      "role": "Floating CTA to capture thoughts or text from any page.",
+      "visualStyle": "Rounded-full primary button anchored bottom-right with strong elevation and clear icon+label (‘Quick Capture’).",
+      "principles": [
+        "Visible but not overwhelming; should not cover critical content.",
+        "Always available on primary screens, reinforcing the app’s ‘capture-first’ workflow."
+      ]
+    },
+    "OutcomeBanner": {
+      "role": "Persistent, subtle reminder of the active outcome driving AI decisions.",
+      "visualStyle": "Thin strip at the top of relevant pages, with icon, outcome sentence, and lightweight edit affordance.",
+      "mobileGuidelines": "Allow two lines of text via line-clamp, avoid truncation that removes meaning, and ensure the edit action remains tappable."
+    }
+  },
+  "pagePatterns": {
+    "UploadFlow": {
+      "purpose": "Ingest user documents in a calm, reassuring way that sets expectations about processing.",
+      "structure": [
+        "Header with brand and quick access to reflections/outcome.",
+        "Hero upload card with large dropzone and simple copy.",
+        "Queue summary and file list with clear statuses and eventual summaries."
+      ],
+      "tone": "Reassuring and explanatory. Users should never wonder what to do next or whether the system is working."
+    },
+    "Dashboard": {
+      "purpose": "Provide a bird’s-eye view of documents and their AI summaries, with bulk operations and exports.",
+      "structure": [
+        "Nav + Outcome banner.",
+        "Filter and sort controls in a flexible, stackable layout.",
+        "Document grid of cards with consistent metadata and actions."
+      ],
+      "interactionModel": "Scan → filter/sort → expand a card for depth → export or reprocess."
+    },
+    "TaskPriorities": {
+      "purpose": "Express AI-prioritised tasks as a focused, dependency-aware plan with visual supports.",
+      "structure": [
+        "Context card for reflections and outcome state.",
+        "Primary analysis card to run or rerun prioritisation.",
+        "Task list with movement markers, LNO classification, and strategic scores.",
+        "Quadrant visualization to make impact/effort relationships visible at a glance."
+      ],
+      "tone": "Analytical but not intimidating. The user should feel guided by the system, not overruled."
+    }
+  }
+}
+
+

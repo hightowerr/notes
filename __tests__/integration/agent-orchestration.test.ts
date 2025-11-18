@@ -1,201 +1,12 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 
+import {
+  agentMockTables,
+  resetAgentMockTables,
+} from '../mocks/agentSupabaseMock';
+
 const DEFAULT_USER_ID = 'default-user';
-
-type OutcomeRecord = {
-  id: string;
-  user_id: string;
-  direction: string;
-  object_text: string;
-  metric_text: string;
-  clarifier: string;
-  assembled_text: string;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-};
-
-type AgentSessionRecord = {
-  id: string;
-  user_id: string;
-  outcome_id: string;
-  status: 'running' | 'completed' | 'failed';
-  prioritized_plan: Record<string, unknown> | null;
-  baseline_plan: Record<string, unknown> | null;
-  execution_metadata: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
-};
-
-type ReasoningTraceRecord = {
-  id: string;
-  session_id: string;
-  steps: Array<Record<string, unknown>>;
-  total_duration_ms: number;
-  total_steps: number;
-  tools_used_count: Record<string, number>;
-  created_at: string;
-};
-
-interface MockTables {
-  user_outcomes: OutcomeRecord[];
-  agent_sessions: AgentSessionRecord[];
-  reasoning_traces: ReasoningTraceRecord[];
-}
-
-const tables: MockTables = {
-  user_outcomes: [],
-  agent_sessions: [],
-  reasoning_traces: [],
-};
-
-const resetTables = () => {
-  tables.user_outcomes.length = 0;
-  tables.agent_sessions.length = 0;
-  tables.reasoning_traces.length = 0;
-};
-
-const clone = <T>(value: T): T => structuredClone(value);
-
-vi.mock('@supabase/supabase-js', () => {
-  const buildSelect = (tableName: keyof MockTables) => {
-    const filters: Array<(row: any) => boolean> = [];
-    let orderField: string | null = null;
-    let orderAscending = true;
-    let limitCount: number | null = null;
-
-    const applyFilters = () => {
-      let results = tables[tableName].filter((row) => filters.every((predicate) => predicate(row)));
-
-      if (orderField) {
-        const factor = orderAscending ? 1 : -1;
-        results = [...results].sort((a, b) => {
-          const aValue = (a as any)[orderField!];
-          const bValue = (b as any)[orderField!];
-          if (aValue === bValue) return 0;
-          return aValue > bValue ? factor : -factor;
-        });
-      }
-
-      if (limitCount !== null) {
-        results = results.slice(0, limitCount);
-      }
-
-      return results;
-    };
-
-    const builder: any = {
-      eq(field: string, value: unknown) {
-        filters.push((row: any) => row[field] === value);
-        return builder;
-      },
-      in(field: string, values: unknown[]) {
-        filters.push((row: any) => values.includes(row[field]));
-        return builder;
-      },
-      order(field: string, options?: { ascending?: boolean }) {
-        orderField = field;
-        orderAscending = options?.ascending ?? true;
-        return builder;
-      },
-      limit(count: number) {
-        limitCount = count;
-        return builder;
-      },
-      async maybeSingle() {
-        const results = applyFilters();
-        return { data: results.length > 0 ? clone(results[0]) : null, error: null };
-      },
-      async single() {
-        const results = applyFilters();
-        if (results.length === 0) {
-          return { data: null, error: { message: 'No rows found' } };
-        }
-        return { data: clone(results[0]), error: null };
-      },
-    };
-
-    return builder;
-  };
-
-  const createFrom = (tableName: keyof MockTables) => ({
-    select(_columns = '*') {
-      return buildSelect(tableName);
-    },
-    insert(payload: any) {
-      const entries = Array.isArray(payload) ? payload : [payload];
-      const now = new Date().toISOString();
-
-      const inserted = entries.map((entry) => {
-        const record = { ...entry };
-        if (!record.id) record.id = randomUUID();
-        if (!record.created_at) record.created_at = now;
-        if (!record.updated_at) record.updated_at = now;
-        if (!Object.prototype.hasOwnProperty.call(record, 'baseline_plan')) {
-          record.baseline_plan = null;
-        }
-        tables[tableName].push(record);
-        return record;
-      });
-
-      const first = inserted[0];
-      return {
-        select: () => ({
-          single: async () => ({ data: clone(first), error: null }),
-        }),
-      };
-    },
-    delete() {
-      return {
-        eq(field: string, value: unknown) {
-          const rows = tables[tableName];
-          for (let index = rows.length - 1; index >= 0; index -= 1) {
-            if ((rows[index] as any)[field] === value) {
-              rows.splice(index, 1);
-            }
-          }
-          return { data: null, error: null };
-        },
-        in(field: string, values: unknown[]) {
-          const rows = tables[tableName];
-          for (let index = rows.length - 1; index >= 0; index -= 1) {
-            if (values.includes((rows[index] as any)[field])) {
-              rows.splice(index, 1);
-            }
-          }
-          return { data: null, error: null };
-        },
-      };
-    },
-    update(values: Record<string, unknown>) {
-      return {
-        async eq(field: string, value: unknown) {
-          const rows = tables[tableName];
-          const updated: any[] = [];
-          for (const row of rows) {
-            if ((row as any)[field] === value) {
-              Object.assign(row as any, values);
-              if (!('updated_at' in values)) {
-                (row as any).updated_at = new Date().toISOString();
-              }
-              updated.push(clone(row));
-            }
-          }
-          return { data: updated, error: null };
-        },
-      };
-    },
-  });
-
-  return {
-    createClient: () => ({
-      from: (tableName: keyof MockTables) => createFrom(tableName),
-    }),
-    __tables: tables,
-    __resetTables: resetTables,
-  };
-});
 
 type OrchestrateOptions = {
   sessionId: string;
@@ -205,7 +16,7 @@ type OrchestrateOptions = {
 };
 
 const orchestrateTaskPrioritiesImpl = async ({ sessionId }: OrchestrateOptions) => {
-  const session = tables.agent_sessions.find((entry) => entry.id === sessionId);
+  const session = agentMockTables.agent_sessions.find((entry) => entry.id === sessionId);
   if (!session) {
     return;
   }
@@ -264,7 +75,7 @@ const orchestrateTaskPrioritiesImpl = async ({ sessionId }: OrchestrateOptions) 
     updated_at: new Date().toISOString(),
   });
 
-  tables.reasoning_traces.push({
+  agentMockTables.reasoning_traces.push({
     id: randomUUID(),
     session_id: sessionId,
     steps: [
@@ -379,7 +190,7 @@ describe('Agent Orchestration Integration (T012)', () => {
   });
 
   beforeEach(async () => {
-    resetTables();
+    resetAgentMockTables();
     vi.clearAllMocks();
     orchestrateTaskPriorities.mockImplementation(orchestrateTaskPrioritiesImpl);
 
@@ -516,4 +327,3 @@ describe('Agent Orchestration Integration (T012)', () => {
     });
   });
 });
-

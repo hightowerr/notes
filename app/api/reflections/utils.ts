@@ -1,13 +1,12 @@
 import { createClient } from '@/lib/supabase/server';
 
+export const DEFAULT_REFLECTION_USER_ID = 'default-user';
+
 /**
  * Get authenticated user ID from Supabase session.
- * Falls back to anonymous user during P0 while auth is optional.
- *
- * Uses auth.getUser() instead of auth.getSession() for better security on server-side.
- * @see https://supabase.com/docs/guides/auth/server-side/nextjs#creating-a-supabase-client
+ * Falls back to DEFAULT_USER_ID while auth is optional.
  */
-export async function getAuthenticatedUserId(): Promise<string | null> {
+export async function getAuthenticatedUserId(): Promise<string> {
   try {
     const supabase = await createClient();
     const {
@@ -16,17 +15,17 @@ export async function getAuthenticatedUserId(): Promise<string | null> {
     } = await supabase.auth.getUser();
 
     if (error) {
-      console.error('Auth error:', error);
-      return 'anonymous-user-p0';
+      console.warn('[Reflections] Auth lookup failed, using default user', error);
+      return DEFAULT_REFLECTION_USER_ID;
     }
 
     if (user?.id) {
       return user.id;
     }
 
-    return 'anonymous-user-p0';
+    return DEFAULT_REFLECTION_USER_ID;
   } catch (error) {
-    console.error('Auth error:', error);
-    return null;
+    console.error('[Reflections] Auth error, using default user', error);
+    return DEFAULT_REFLECTION_USER_ID;
   }
 }

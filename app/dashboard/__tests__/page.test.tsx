@@ -189,7 +189,12 @@ describe('Dashboard Page', () => {
       expect(screen.getByText('removable.pdf')).toBeInTheDocument();
     });
 
-    await user.click(screen.getByRole('button', { name: /Delete removable.pdf/i }));
+    const deleteButton = screen.getByRole('button', { name: /Actions for removable.pdf/i });
+    await user.click(deleteButton);
+
+    // Click the actual delete option from the dropdown menu
+    const deleteOption = screen.getByRole('menuitem', { name: /Delete/i });
+    await user.click(deleteOption);
 
     await waitFor(() => {
       expect(screen.queryByText('removable.pdf')).not.toBeInTheDocument();

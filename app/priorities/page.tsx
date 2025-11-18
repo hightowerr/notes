@@ -10,8 +10,10 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { MainNav } from '@/components/main-nav';
 import { TaskList } from '@/app/priorities/components/TaskList';
+import { SortingStrategySelector } from '@/app/priorities/components/SortingStrategySelector';
+import type { QuadrantVizTask } from '@/app/priorities/components/QuadrantViz';
+import { QuadrantViz } from '@/app/priorities/components/QuadrantViz';
 import { ContextCard } from '@/app/priorities/components/ContextCard';
-import CoverageBar from '@/app/components/CoverageBar';
 import { ReflectionPanel } from '@/app/components/ReflectionPanel';
 import { prioritizedPlanSchema } from '@/lib/schemas/prioritizedPlanSchema';
 import { executionMetadataSchema } from '@/lib/schemas/executionMetadataSchema';
@@ -21,6 +23,11 @@ import { reflectionWithWeightSchema } from '@/lib/schemas/reflectionSchema';
 import type { ExecutionMetadata, PrioritizedTaskPlan } from '@/lib/types/agent';
 import { adjustedPlanSchema, type AdjustedPlan } from '@/lib/types/adjustment';
 import type { ReflectionWithWeight } from '@/lib/schemas/reflectionSchema';
+import { StrategicScoresMapSchema, type StrategicScoresMap } from '@/lib/schemas/strategicScore';
+import type { SortingStrategy } from '@/lib/schemas/sortingStrategy';
+import type { RetryStatusEntry } from '@/lib/schemas/retryStatus';
+import { useScrollToTask } from '@/app/priorities/components/useScrollToTask';
+import { formatTaskId } from '@/app/priorities/utils/formatTaskId';
 import {
   GapDetectionModal,
   type GapSuggestionState,
@@ -40,6 +47,8 @@ import {
 
 const DEFAULT_USER_ID = 'default-user';
 const POLL_INTERVAL_MS = 2000;
+// 2s strike a balance: quick enough for reactive UI, light enough for Supabase/API load
+const METADATA_POLL_INTERVAL_MS = 2000;
 const MAX_SESSION_DURATION_MS = 120_000;
 const DEFAULT_RELATIVE_TIME = 'just now';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -47,7 +56,7 @@ const MINUTE_IN_MS = 60 * 1000;
 const HOUR_IN_MS = 60 * 60 * 1000;
 const DAY_IN_MS = 24 * HOUR_IN_MS;
 const WEEK_IN_MS = 7 * DAY_IN_MS;
-const MAX_COVERAGE_TASKS = 50;
+const HIGHLIGHT_CLASSES = ['ring-amber-400/60', 'ring-4', 'ring-offset-2', 'ring-offset-background'];
 
 function describeBaselineAge(ageMs: number): string {
   if (ageMs <= 0) {
@@ -216,6 +225,7 @@ type SessionStatus = 'idle' | 'running' | 'completed' | 'failed';
 type PrioritizeResponse = {
   session_id: string;
   status: SessionStatus | 'running' | 'completed' | 'failed';
+  strategic_scores?: StrategicScoresMap;
 };
 
 export default function TaskPrioritiesPage() {
@@ -236,7 +246,141 @@ export default function TaskPrioritiesPage() {
   const [hasTriggered, setHasTriggered] = useState(false);
   const [isRecalculating, setIsRecalculating] = useState(false);
   const [planVersion, setPlanVersion] = useState(0);
+  const [strategicScores, setStrategicScores] = useState<StrategicScoresMap | null>(null);
+  const [retryStatuses, setRetryStatuses] = useState<Record<string, RetryStatusEntry>>({});
+  const [sortingStrategy, setSortingStrategy] = useState<SortingStrategy>('balanced');
+  const [taskMetadata, setTaskMetadata] = useState<Record<string, { title: string }>>({});
   const [planStatusMessage, setPlanStatusMessage] = useState<string | null>(null);
+  const scorePollingHaltedRef = useRef(false);
+  const hasStrategicScores = useMemo(() => {
+    if (!strategicScores) {
+      return false;
+    }
+    return Object.keys(strategicScores).length > 0;
+  }, [strategicScores]);
+  const scrollToTaskFromViz = useScrollToTask();
+  const handleTaskMetadataUpdate = useCallback(
+    (metadata: Record<string, { title: string }>) => {
+      setTaskMetadata(metadata);
+    },
+    []
+  );
+  useEffect(() => {
+    scorePollingHaltedRef.current = false;
+    if (!currentSessionId) {
+      setRetryStatuses({});
+      return;
+    }
+
+    let cancelled = false;
+    let pollHandle: ReturnType<typeof setInterval> | null = null;
+    let consecutiveFailures = 0;
+    const MAX_CONSECUTIVE_FAILURES = 5;
+
+    const pollScores = async () => {
+      // Stop polling if too many consecutive failures (prevents fetch spam)
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        console.warn('[Task Priorities] Stopping score polling after', MAX_CONSECUTIVE_FAILURES, 'consecutive failures');
+        if (!scorePollingHaltedRef.current) {
+          scorePollingHaltedRef.current = true;
+          toast.error('Lost connection to score updates. Reload the page to resume polling.');
+        }
+        if (pollHandle) {
+          clearInterval(pollHandle);
+          pollHandle = null;
+        }
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          `/api/tasks/metadata?session_id=${currentSessionId}&status=all`
+        );
+        if (!response.ok) {
+          if (response.status === 404) {
+            consecutiveFailures += 1;
+            return;
+          }
+          throw new Error('Failed to load scoring metadata');
+        }
+        const payload = await response.json();
+        if (cancelled) {
+          return;
+        }
+
+        // Reset failure counter on success
+        consecutiveFailures = 0;
+        scorePollingHaltedRef.current = false;
+
+        const scoresResult = StrategicScoresMapSchema.safeParse(payload.scores ?? {});
+        if (scoresResult.success) {
+          setStrategicScores(prev => ({
+            ...(prev ?? {}),
+            ...scoresResult.data,
+          }));
+        }
+        if (payload.retry_status && typeof payload.retry_status === 'object') {
+          setRetryStatuses(payload.retry_status as Record<string, RetryStatusEntry>);
+        } else {
+          setRetryStatuses({});
+        }
+      } catch (error) {
+        consecutiveFailures += 1;
+        // Only log every 3rd failure to reduce console spam
+        if (consecutiveFailures % 3 === 1) {
+          console.error('[Task Priorities] Failed to poll scoring metadata:', error);
+        }
+      }
+    };
+
+    pollScores();
+    pollHandle = setInterval(pollScores, METADATA_POLL_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      if (pollHandle) {
+        clearInterval(pollHandle);
+      }
+    };
+  }, [currentSessionId]);
+  const quadrantTasks = useMemo(() => {
+    if (!strategicScores || !prioritizedPlan) {
+      return [] as QuadrantVizTask[];
+    }
+    const ids = prioritizedPlan.ordered_task_ids ?? [];
+    const tasks = ids
+      .map(taskId => {
+        const score = strategicScores[taskId];
+        if (!score) {
+          return null;
+        }
+        return {
+          id: taskId,
+          title: taskMetadata[taskId]?.title ?? formatTaskId(taskId),
+          impact: score.impact,
+          effort: Math.max(score.effort, 1),
+          confidence: Math.max(score.confidence ?? 0, 0),
+        };
+      })
+      .filter((task): task is QuadrantVizTask => Boolean(task));
+    return tasks;
+  }, [strategicScores, prioritizedPlan, taskMetadata]);
+  const handleQuadrantTaskClick = useCallback(
+    (taskId: string) => {
+      if (!taskId) {
+        return;
+      }
+      scrollToTaskFromViz(taskId);
+      const element = document.querySelector<HTMLElement>(`[data-task-id="${taskId}"]`);
+      if (element) {
+        element.classList.add(...HIGHLIGHT_CLASSES);
+        window.setTimeout(() => {
+          element.classList.remove(...HIGHLIGHT_CLASSES);
+        }, 1200);
+      }
+    },
+    [scrollToTaskFromViz]
+  );
   const [hasFetchedInitialPlan, setHasFetchedInitialPlan] = useState(false);
   const [reflections, setReflections] = useState<ReflectionWithWeight[]>([]);
   const [reflectionsLoading, setReflectionsLoading] = useState(true);
@@ -270,12 +414,6 @@ export default function TaskPrioritiesPage() {
     total_ms: number;
     search_query_count?: number;
   } | null>(null);
-
-  // Coverage analysis state
-  const [coverageData, setCoverageData] = useState<{ coveragePercentage: number; missingAreas: string[] } | null>(null);
-  const [coverageLoading, setCoverageLoading] = useState(false);
-  const [coverageError, setCoverageError] = useState<string | null>(null);
-  const [coverageLimitedToTop50, setCoverageLimitedToTop50] = useState(false);
 
   const readDependencyOverrideEdges = useCallback(() => {
     if (typeof window === 'undefined') {
@@ -323,6 +461,7 @@ export default function TaskPrioritiesPage() {
       } catch (error) {
         console.error('[Task Priorities] Failed to load outcome:', error);
         setFetchError('Unable to load active outcome. Please try again.');
+        toast.error('Unable to load active outcome. Please try again.');
       } finally {
         setOutcomeLoading(false);
       }
@@ -357,6 +496,10 @@ export default function TaskPrioritiesPage() {
     if (!session || typeof session !== 'object' || session === null) {
       return;
     }
+
+    const rawStrategicScores = (session as { strategic_scores?: unknown }).strategic_scores;
+    const strategicResult = StrategicScoresMapSchema.safeParse(rawStrategicScores);
+    setStrategicScores(strategicResult.success ? strategicResult.data : null);
 
     let statusNote: string | null | undefined;
 
@@ -602,7 +745,9 @@ export default function TaskPrioritiesPage() {
             typeof errorPayload?.error === 'string'
               ? errorPayload.error
               : 'Failed to adjust priorities';
-          throw new Error(message);
+          setAdjustmentError(message);
+          setPlanStatusMessage(null);
+          return;
         }
 
         const payload = await response.json();
@@ -782,6 +927,7 @@ export default function TaskPrioritiesPage() {
       } catch (error) {
         console.error('[Task Priorities] Polling error:', error);
         setTriggerError('Lost connection while checking progress. Retrying…');
+        toast.error('Lost connection while checking progress. Retrying…');
       }
     };
 
@@ -854,6 +1000,8 @@ export default function TaskPrioritiesPage() {
       }
 
       const data: PrioritizeResponse = await response.json();
+      const initialScores = StrategicScoresMapSchema.safeParse(data.strategic_scores);
+      setStrategicScores(initialScores.success ? initialScores.data : null);
       setBaselineReflectionIds(validActiveReflectionIds);
       lastActiveReflectionIdsRef.current = validActiveReflectionIds;
       setSessionStatus('running');
@@ -861,7 +1009,9 @@ export default function TaskPrioritiesPage() {
       pollSessionStatus(data.session_id);
     } catch (error) {
       console.error('[Task Priorities] Failed to trigger agent:', error);
-      setTriggerError('Could not start prioritization. Please retry.');
+      const message = 'Could not start prioritization. Please retry.';
+      setTriggerError(message);
+      toast.error(message);
       setSessionStatus('failed');
       setIsLoadingResults(false);
       setIsRecalculating(false);
@@ -1796,6 +1946,7 @@ export default function TaskPrioritiesPage() {
         if (response.status === 404) {
           setIsLoadingResults(false);
           setHasFetchedInitialPlan(true);
+          setStrategicScores(null);
           return;
         }
 
@@ -1837,80 +1988,6 @@ export default function TaskPrioritiesPage() {
       isCancelled = true;
     };
   }, [activeOutcome, prioritizedPlan, hasFetchedInitialPlan, applySessionResults, reflections]);
-
-  // Fetch coverage analysis when a plan is available
-  useEffect(() => {
-    if (!prioritizedPlan || !activeOutcome?.id || !currentSessionId) {
-      setCoverageLimitedToTop50(false);
-      return;
-    }
-
-    const orderedTaskIds = prioritizedPlan.ordered_task_ids ?? [];
-    if (orderedTaskIds.length === 0) {
-      setCoverageLimitedToTop50(false);
-      return;
-    }
-
-    const shouldLimitCoverage = orderedTaskIds.length > MAX_COVERAGE_TASKS;
-    const taskIdsForAnalysis = shouldLimitCoverage
-      ? orderedTaskIds.slice(0, MAX_COVERAGE_TASKS)
-      : orderedTaskIds;
-
-    // FR-017: Only analyze the top 50 prioritized tasks when coverage is computed
-    setCoverageLimitedToTop50(shouldLimitCoverage);
-
-    const fetchCoverage = async () => {
-      try {
-        setCoverageLoading(true);
-        setCoverageError(null);
-
-        const response = await fetch('/api/agent/coverage-analysis', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            outcome_id: activeOutcome.id,
-            task_ids: taskIdsForAnalysis,
-            session_id: currentSessionId
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error('Failed to fetch coverage analysis');
-        }
-
-        const data = await response.json();
-
-        setCoverageData({
-          coveragePercentage: data.coverage_percentage,
-          missingAreas: data.missing_areas
-        });
-
-        // If coverage is less than 70%, automatically open the gap detection modal
-        if (data.coverage_percentage < 70) {
-          setIsGapModalOpen(true);
-        }
-      } catch (error) {
-        console.error('[Task Priorities] Coverage analysis failed:', error);
-        setCoverageError('Unable to calculate goal coverage. Please try again.');
-      } finally {
-        setCoverageLoading(false);
-      }
-    };
-
-    // Fetch coverage data after a short delay to ensure plan is fully loaded
-    const timer = setTimeout(fetchCoverage, 2000);
-
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [prioritizedPlan, activeOutcome, currentSessionId]);
-
-  // Auto-open gap modal when coverage falls below threshold (FR-010)
-  useEffect(() => {
-    if (coverageData?.coveragePercentage !== undefined && coverageData.coveragePercentage < 70) {
-      setIsGapModalOpen(true);
-    }
-  }, [coverageData?.coveragePercentage]);
 
   return (
     <div className="min-h-screen bg-muted/30">
@@ -2195,61 +2272,18 @@ export default function TaskPrioritiesPage() {
                 </AlertDescription>
               </Alert>
             )}
-            {/* Coverage Analysis Bar */}
-            {coverageLimitedToTop50 && (
-              <Alert className="border-amber-300 bg-amber-50">
-                <AlertTitle className="text-amber-900">50-task limit reached</AlertTitle>
-                <AlertDescription className="text-amber-900">
-                  Analysis limited to top 50 tasks. Consider archiving completed tasks to improve coverage accuracy.
-                </AlertDescription>
-              </Alert>
-            )}
-            {coverageData && !coverageLoading && (
-              <Card className="border-border/70 shadow-1layer-sm">
-                <CardHeader>
-                  <CardTitle className="flex justify-between items-center">
-                    <span>Goal Coverage Analysis</span>
-                    <span className={`text-lg font-bold ${coverageData.coveragePercentage < 70 ? 'text-red-700' : coverageData.coveragePercentage < 85 ? 'text-yellow-700' : 'text-green-700'}`}>
-                      {coverageData.coveragePercentage}%
-                    </span>
-                  </CardTitle>
-                  <CardDescription>
-                    How well your tasks align with your outcome goal
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="mb-4">
-                    <CoverageBar
-                      coveragePercentage={coverageData.coveragePercentage}
-                      missingAreas={coverageData.missingAreas}
-                      onGenerateDraftsClick={() => setIsGapModalOpen(true)}
-                      taskCount={prioritizedPlan?.ordered_task_ids?.length ?? 0}
-                    />
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-            {coverageLoading && (
-              <Card className="border-dashed border-border/70 bg-muted/40">
-                <CardHeader>
-                  <CardTitle>Calculating goal coverage</CardTitle>
-                  <CardDescription>
-                    Analyzing how well your tasks align with your outcome goal.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <Skeleton className="h-5 w-48" />
-                  <Skeleton className="h-4 w-full" />
-                  <Skeleton className="h-4 w-3/4" />
-                </CardContent>
-              </Card>
-            )}
-            {coverageError && (
-              <Alert variant="destructive">
-                <AlertTitle>Coverage analysis failed</AlertTitle>
-                <AlertDescription>{coverageError}</AlertDescription>
-              </Alert>
-            )}
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-bg-layer-2/40 px-4 py-3">
+              <SortingStrategySelector
+                value={sortingStrategy}
+                onChange={setSortingStrategy}
+                disabled={!hasStrategicScores}
+              />
+              {!hasStrategicScores && (
+                <span className="text-xs text-muted-foreground">
+                  Strategic scores will appear after the next prioritization run.
+                </span>
+              )}
+            </div>
             <TaskList
               plan={prioritizedPlan}
               executionMetadata={executionMetadata ?? undefined}
@@ -2261,11 +2295,28 @@ export default function TaskPrioritiesPage() {
               sessionStatus={sessionStatus}
               canTriggerPrioritization={canAutoTriggerPrioritization}
               onRequestPrioritization={handleAnalyzeTasks}
-              isRecalculating={isRecalculating}
+              strategicScores={strategicScores}
+              retryStatuses={retryStatuses}
+              sortingStrategy={sortingStrategy}
+              onTaskMetadataUpdate={handleTaskMetadataUpdate}
             />
-            <div className="mt-6 flex justify-between">
+            {quadrantTasks.length > 0 && (
+              <section className="mt-8 rounded-xl border border-border/70 bg-bg-layer-3/40 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-semibold text-foreground">Impact/Effort Quadrant</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Bubble size tracks confidence; click a point to jump to that task.
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-4 h-[420px] w-full">
+                  <QuadrantViz tasks={quadrantTasks} onTaskClick={handleQuadrantTaskClick} />
+                </div>
+              </section>
+            )}
+            <div className="mt-6 flex justify-end">
               <Button
-                variant="outline"
                 onClick={handleDetectGaps}
                 disabled={isSuggestingGaps || !prioritizedPlan}
               >
@@ -2326,6 +2377,7 @@ export default function TaskPrioritiesPage() {
           // When a reflection is added, fetch latest reflections and trigger recompute
           fetchReflections();
         }}
+        outcomeId={activeOutcome?.id ?? null}
       />
     </div>
   );

@@ -159,6 +159,7 @@ notes/
 - Agent transcripts & debugging context – `.claude/`
 - Implementation examples & standards – `IMPLEMENTATION_EXAMPLES.md`, `standards.md`
 - Mobile QA and visual baselines – `MOBILE_RESPONSIVENESS_REPORT.md`, `VISUAL_COMPARISON.md`
+- High-level visual and component guidelines – `design.json`
 - Need to validate Mastra wiring? `npx tsx scripts/test-mastra.ts`
 
 ---
