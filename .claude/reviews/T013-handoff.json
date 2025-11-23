@@ -1,0 +1,26 @@
+{
+  "review_file": "/home/yunix/learning-agentic/ideas/Note-synth/notes/.claude/reviews/T013.md",
+  "status": "fail",
+  "critical_issues": 1,
+  "high_issues": 2,
+  "return_to": "backend-engineer",
+  "fixes_required": [
+    "Add Vercel Cron Secret authentication header validation to prevent unauthorized webhook renewal triggers",
+    "Explicitly set updated_at timestamp in database updates (lines 151-160, 189-197) to prevent infinite renewal loops",
+    "Add CRON_SECRET environment variable to .env.local and document in feature context"
+  ],
+  "task_id": "T013",
+  "modified_files": [
+    "/home/yunix/learning-agentic/ideas/Note-synth/notes/app/api/cron/renew-webhooks/route.ts",
+    "/home/yunix/learning-agentic/ideas/Note-synth/notes/vercel.json"
+  ],
+  "acceptance_criteria": [
+    "Daily cron job renews webhook channels before 24-hour expiration",
+    "Query cloud_connections WHERE updated_at < NOW() - 23 hours",
+    "For each connection: stop old webhook, register new webhook, update database",
+    "Log renewal events in sync_events table",
+    "Vercel cron configuration matches spec (0 2 * * * schedule)"
+  ],
+  "implementation_agent": "backend-engineer",
+  "context_doc": "/home/yunix/learning-agentic/ideas/Note-synth/notes/specs/010-cloud-sync/tasks.md"
+}

@@ -3,15 +3,17 @@ import { reflectionInputSchema } from '@/lib/schemas/reflectionSchema';
 import { createReflection, fetchRecentReflections } from '@/lib/services/reflectionService';
 import { debounceRecompute } from '@/lib/services/recomputeDebounce';
 import { triggerRecomputeJob } from '@/lib/services/recomputeService';
-import { DEFAULT_REFLECTION_USER_ID, getAuthenticatedUserId } from '@/app/api/reflections/utils';
-import { supabase } from '@/lib/supabase';
+import { getAuthenticatedUserId } from '@/app/api/reflections/utils';
+import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 
-async function hasActiveOutcome(): Promise<boolean> {
+const supabaseAdmin = getSupabaseAdminClient();
+
+async function hasActiveOutcome(userId: string): Promise<boolean> {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('user_outcomes')
       .select('id')
-      .eq('user_id', DEFAULT_REFLECTION_USER_ID)
+      .eq('user_id', userId)
       .eq('is_active', true)
       .maybeSingle();
 
@@ -64,7 +66,7 @@ export async function GET(request: NextRequest) {
 
     const activeOnly = activeOnlyParam === 'true';
 
-    const outcomeExists = await hasActiveOutcome();
+    const outcomeExists = await hasActiveOutcome(userId);
     if (!outcomeExists) {
       return NextResponse.json({ reflections: [] }, { status: 200 });
     }

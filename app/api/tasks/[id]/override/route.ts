@@ -181,6 +181,28 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       aiScore.confidence
     );
 
+    await supabase.from('processing_logs').insert({
+      operation: 'manual_override',
+      status: 'completed',
+      timestamp: now,
+      metadata: {
+        session_id: session.id,
+        task_id: taskId,
+        override_type: 'manual_score_change',
+        original_decision: {
+          impact: aiScore.impact,
+          effort: aiScore.effort,
+          confidence: aiScore.confidence,
+        },
+        user_decision: {
+          impact: overridePayload.impact,
+          effort: overridePayload.effort,
+          confidence: aiScore.confidence,
+          reason: overridePayload.reason ?? null,
+        },
+      },
+    });
+
     return NextResponse.json(
       {
         task_id: taskId,

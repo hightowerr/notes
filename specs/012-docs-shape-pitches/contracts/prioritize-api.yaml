@@ -1,0 +1,471 @@
+openapi: 3.0.0
+info:
+  title: Unified Prioritization API
+  version: 1.0.0
+  description: |
+    Phase 14 API specification for outcome-driven task prioritization
+    using the evaluator-optimizer pattern with hybrid evaluation loop.
+
+    Key Changes from Previous System:
+    - Returns excluded_tasks with reasoning (FR-002, FR-011)
+    - Includes evaluation_metadata for transparency (FR-012)
+    - Supports progressive disclosure via streaming (FR-021)
+    - Implements feature flag for gradual rollout (FR-019)
+
+paths:
+  /api/agent/prioritize:
+    post:
+      summary: Trigger unified task prioritization with hybrid evaluation loop
+      description: |
+        Initiates outcome-driven prioritization with inline self-evaluation
+        and conditional quality loop. Returns both included and excluded tasks
+        with transparent reasoning.
+
+        Performance Targets:
+        - Fast path (confidence ≥0.85): <18s (80% of cases)
+        - Quality path (evaluation loop): <30s (20% of cases)
+        - Average: ≤20s
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - outcome_id
+                - user_id
+              properties:
+                outcome_id:
+                  type: string
+                  format: uuid
+                  description: User outcome to optimize for
+                  example: "550e8400-e29b-41d4-a716-446655440000"
+
+                user_id:
+                  type: string
+                  format: uuid
+                  description: User requesting prioritization
+                  example: "123e4567-e89b-12d3-a456-426614174000"
+
+                active_reflection_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: Specific reflections to incorporate (optional)
+                  example: ["7f3e8400-e29b-41d4-a716-446655440001"]
+
+                dependency_overrides:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/TaskDependency'
+                  description: User-locked dependencies (manual overrides)
+
+                use_progressive_disclosure:
+                  type: boolean
+                  default: true
+                  description: Enable streaming partial results during processing (FR-021)
+
+      responses:
+        '202':
+          description: |
+            Prioritization initiated successfully. Session created in pending state.
+            Use session_id to poll for results or subscribe to WebSocket for updates.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - session_id
+                  - status
+                properties:
+                  session_id:
+                    type: string
+                    format: uuid
+                    example: "abc12345-e29b-41d4-a716-446655440099"
+
+                  status:
+                    type: string
+                    enum: [pending, running]
+                    example: "running"
+
+                  estimated_duration_s:
+                    type: number
+                    minimum: 0
+                    maximum: 30
+                    description: Estimated completion time based on historical data
+                    example: 18
+
+        '400':
+          description: Invalid request (missing outcome, user not found, etc.)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+        '500':
+          description: Server error during initialization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/agent/sessions/{session_id}:
+    get:
+      summary: Get prioritization session results
+      description: |
+        Retrieves the current state of a prioritization session.
+        For completed sessions, includes full prioritization result
+        with excluded tasks and evaluation metadata.
+
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+
+      responses:
+        '200':
+          description: Session found
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/PendingSessionResponse'
+                  - $ref: '#/components/schemas/CompletedSessionResponse'
+                  - $ref: '#/components/schemas/FailedSessionResponse'
+
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/agent/sessions/latest:
+    get:
+      summary: Get latest prioritization session for user
+      description: Retrieves the most recent session for the authenticated user
+
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+
+      responses:
+        '200':
+          description: Latest session found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompletedSessionResponse'
+
+        '404':
+          description: No sessions found for user
+
+components:
+  schemas:
+    TaskDependency:
+      type: object
+      required:
+        - source_task_id
+        - target_task_id
+        - relationship_type
+      properties:
+        source_task_id:
+          type: string
+          format: uuid
+        target_task_id:
+          type: string
+          format: uuid
+        relationship_type:
+          type: string
+          enum: [prerequisite, blocks, related]
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        detection_method:
+          type: string
+          enum: [ai_inference, stored_relationship, manual_override]
+
+    IncludedTask:
+      type: object
+      required:
+        - task_id
+        - inclusion_reason
+        - alignment_score
+      properties:
+        task_id:
+          type: string
+          format: uuid
+        inclusion_reason:
+          type: string
+          minLength: 10
+          maxLength: 300
+          description: Why this task advances the outcome
+        alignment_score:
+          type: number
+          minimum: 0
+          maximum: 10
+          description: Strength of connection to outcome metric (0-10)
+
+    ExcludedTask:
+      type: object
+      required:
+        - task_id
+        - task_text
+        - exclusion_reason
+        - alignment_score
+      properties:
+        task_id:
+          type: string
+          format: uuid
+        task_text:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        exclusion_reason:
+          type: string
+          minLength: 10
+          maxLength: 300
+          description: Why this task doesn't advance the outcome
+        alignment_score:
+          type: number
+          minimum: 0
+          maximum: 10
+          description: Outcome alignment (still scored for transparency)
+
+    TaskScore:
+      type: object
+      required:
+        - impact
+        - effort
+        - confidence
+        - reasoning
+      properties:
+        impact:
+          type: number
+          minimum: 0
+          maximum: 10
+          description: Business value score (0-10)
+        effort:
+          type: number
+          minimum: 0.5
+          maximum: 160
+          description: Estimated hours (0.5h minimum)
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Scoring confidence (0-1)
+        reasoning:
+          type: string
+          minLength: 10
+          maxLength: 500
+          description: Explanation for this scoring
+        dependencies:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Prerequisite task IDs
+
+    ChainOfThoughtStep:
+      type: object
+      required:
+        - iteration
+        - confidence
+        - corrections
+        - timestamp
+      properties:
+        iteration:
+          type: integer
+          minimum: 1
+          maximum: 3
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        corrections:
+          type: string
+          maxLength: 500
+          description: What was fixed in this iteration
+        evaluator_feedback:
+          type: string
+          maxLength: 1000
+          description: Feedback from evaluator (only if evaluation triggered)
+        timestamp:
+          type: string
+          format: date-time
+
+    EvaluationMetadata:
+      type: object
+      required:
+        - iterations
+        - duration_ms
+        - evaluation_triggered
+        - chain_of_thought
+        - converged
+        - final_confidence
+      properties:
+        iterations:
+          type: integer
+          minimum: 1
+          maximum: 3
+        duration_ms:
+          type: integer
+          minimum: 0
+        evaluation_triggered:
+          type: boolean
+          description: Did quality loop run?
+        chain_of_thought:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChainOfThoughtStep'
+          minItems: 1
+          maxItems: 3
+        converged:
+          type: boolean
+          description: Did we reach PASS before max iterations?
+        final_confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+
+    PendingSessionResponse:
+      type: object
+      required:
+        - session_id
+        - status
+        - created_at
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, running]
+        created_at:
+          type: string
+          format: date-time
+        estimated_completion_s:
+          type: number
+          description: Estimated seconds until completion
+
+    CompletedSessionResponse:
+      type: object
+      required:
+        - session_id
+        - status
+        - prioritized_plan
+        - excluded_tasks
+        - evaluation_metadata
+        - created_at
+        - updated_at
+      properties:
+        session_id:
+          type: string
+          format: uuid
+
+        status:
+          type: string
+          enum: [completed]
+
+        prioritized_plan:
+          type: object
+          description: Standard PrioritizedTaskPlan format (existing schema)
+          required:
+            - ordered_task_ids
+            - confidence_scores
+          properties:
+            ordered_task_ids:
+              type: array
+              items:
+                type: string
+                format: uuid
+            confidence_scores:
+              type: object
+              additionalProperties:
+                type: number
+                minimum: 0
+                maximum: 1
+            dependencies:
+              type: array
+              items:
+                $ref: '#/components/schemas/TaskDependency'
+            synthesis_summary:
+              type: string
+            critical_path_reasoning:
+              type: string
+
+        excluded_tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExcludedTask'
+          description: Tasks filtered out during outcome alignment (NEW in Phase 14)
+
+        evaluation_metadata:
+          $ref: '#/components/schemas/EvaluationMetadata'
+
+        per_task_scores:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/TaskScore'
+          description: Detailed scoring breakdown for each included task
+
+        created_at:
+          type: string
+          format: date-time
+
+        updated_at:
+          type: string
+          format: date-time
+
+    FailedSessionResponse:
+      type: object
+      required:
+        - session_id
+        - status
+        - error
+        - created_at
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [failed]
+        error:
+          type: string
+          description: Error message explaining failure
+        partial_results:
+          type: object
+          description: Best-effort results if available
+        created_at:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - status_code
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+          example: "Outcome not found for user"
+        status_code:
+          type: integer
+          example: 400
+        details:
+          type: object
+          description: Additional error context
+          additionalProperties: true

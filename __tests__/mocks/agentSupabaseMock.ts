@@ -21,6 +21,8 @@ export type AgentSessionRecord = {
   status: 'running' | 'completed' | 'failed';
   prioritized_plan: Record<string, unknown> | null;
   baseline_plan: Record<string, unknown> | null;
+  excluded_tasks?: Array<Record<string, unknown>> | null;
+  evaluation_metadata?: Record<string, unknown> | null;
   strategic_scores?: Record<string, unknown> | null;
   execution_metadata: Record<string, unknown>;
   created_at: string;
@@ -61,6 +63,7 @@ type AgentMockTables = {
   agent_sessions: AgentSessionRecord[];
   reasoning_traces: ReasoningTraceRecord[];
   task_embeddings: TaskEmbeddingRecord[];
+  processing_logs: Array<Record<string, unknown>>;
   reflections: ReflectionRecord[];
 };
 
@@ -69,6 +72,7 @@ const tables: AgentMockTables = {
   agent_sessions: [],
   reasoning_traces: [],
   task_embeddings: [],
+  processing_logs: [],
   reflections: [],
 };
 
@@ -84,6 +88,7 @@ const resetTables = () => {
   tables.agent_sessions.length = 0;
   tables.reasoning_traces.length = 0;
   tables.task_embeddings.length = 0;
+  tables.processing_logs.length = 0;
   tables.reflections.length = 0;
 };
 
@@ -214,34 +219,66 @@ const createFrom = <K extends keyof AgentMockTables>(tableName: K) => ({
     };
   },
   delete() {
-    return {
-      eq(field: string, value: unknown) {
-        const rows = ensureTable(tableName) as Array<Record<string, unknown>>;
-        for (let index = rows.length - 1; index >= 0; index -= 1) {
-          if (rows[index][field] === value) {
-            rows.splice(index, 1);
-          }
+    const deleteFilters: Array<(row: Record<string, unknown>) => boolean> = [];
+
+    const applyDelete = () => {
+      const rows = ensureTable(tableName) as Array<Record<string, unknown>>;
+      const deleted: Array<Record<string, unknown>> = [];
+      for (let index = rows.length - 1; index >= 0; index -= 1) {
+        if (deleteFilters.every(predicate => predicate(rows[index]))) {
+          deleted.push(rows[index]);
+          rows.splice(index, 1);
         }
-        return { data: null, error: null };
+      }
+      return deleted;
+    };
+
+    const builder: any = {
+      eq(field: string, value: unknown) {
+        deleteFilters.push((row: any) => row[field] === value);
+        return builder;
       },
       in(field: string, values: unknown[]) {
-        const rows = ensureTable(tableName) as Array<Record<string, unknown>>;
-        for (let index = rows.length - 1; index >= 0; index -= 1) {
-          if (values.includes(rows[index][field])) {
-            rows.splice(index, 1);
-          }
-        }
-        return { data: null, error: null };
+        deleteFilters.push((row: any) => values.includes(row[field]));
+        return builder;
+      },
+      lt(field: string, value: unknown) {
+        deleteFilters.push((row: any) => {
+          const rowValue = row[field];
+          return typeof rowValue === 'number' || typeof rowValue === 'string'
+            ? rowValue < value
+            : false;
+        });
+        return builder;
+      },
+      select(columns = '*') {
+        return {
+          then(onFulfilled?: (value: { data: unknown; error: null }) => unknown) {
+            const deleted = applyDelete();
+            const result = { data: clone(deleted), error: null };
+            return Promise.resolve(onFulfilled ? onFulfilled(result) : result);
+          },
+        };
+      },
+      then(onFulfilled?: (value: { data: null; error: null }) => unknown) {
+        applyDelete();
+        const result = { data: null, error: null };
+        return Promise.resolve(onFulfilled ? onFulfilled(result) : result);
       },
     };
+
+    return builder;
   },
   update(values: Record<string, unknown>) {
-    return {
+    const updateFilters: Array<(row: Record<string, unknown>) => boolean> = [];
+
+    const builder: any = {
       async eq(field: string, value: unknown) {
+        updateFilters.push((row: any) => row[field] === value);
         const rows = ensureTable(tableName) as Array<Record<string, unknown>>;
         const updated: Array<Record<string, unknown>> = [];
         for (const row of rows) {
-          if (row[field] === value) {
+          if (updateFilters.every(predicate => predicate(row))) {
             Object.assign(row, values);
             if (values.updated_at === undefined) {
               row.updated_at = new Date().toISOString();
@@ -251,7 +288,15 @@ const createFrom = <K extends keyof AgentMockTables>(tableName: K) => ({
         }
         return { data: updated, error: null };
       },
+      not(field: string, operator: string, value: unknown) {
+        if (operator === 'is') {
+          updateFilters.push((row: any) => row[field] !== value);
+        }
+        return builder;
+      },
     };
+
+    return builder;
   },
 });
 

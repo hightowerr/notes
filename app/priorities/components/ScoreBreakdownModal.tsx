@@ -20,8 +20,12 @@ export function ScoreBreakdownModal({ task, open, onOpenChange }: ScoreBreakdown
     return null;
   }
 
-  const impactKeywords = task.reasoning?.impact_keywords ?? [];
-  const effortModifiers = task.reasoning?.complexity_modifiers ?? [];
+  const isReasoningString = typeof task.reasoning === 'string';
+  const reasoningText = isReasoningString ? (task.reasoning as string) : null;
+  const reasoningObject = !isReasoningString && typeof task.reasoning === 'object' ? task.reasoning : null;
+
+  const impactKeywords = reasoningObject?.impact_keywords ?? [];
+  const effortModifiers = reasoningObject?.complexity_modifiers ?? [];
   const breakdownComponents = task.confidenceBreakdown
     ? [
         task.confidenceBreakdown.similarity,
@@ -52,6 +56,17 @@ export function ScoreBreakdownModal({ task, open, onOpenChange }: ScoreBreakdown
           <DialogDescription>{task.title}</DialogDescription>
         </DialogHeader>
         <div className="space-y-6 text-sm">
+          {reasoningText && (
+            <section>
+              <header>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Reasoning
+                </p>
+              </header>
+              <p className="mt-1 text-sm text-foreground">{reasoningText}</p>
+            </section>
+          )}
+
           <section>
             <header className="flex items-center justify-between">
               <div>
@@ -69,7 +84,7 @@ export function ScoreBreakdownModal({ task, open, onOpenChange }: ScoreBreakdown
                 <p className="mt-1 text-sm text-foreground">{impactKeywords.join(', ')}</p>
               </div>
             )}
-            {task.reasoning?.impact_keywords && (
+            {reasoningObject?.impact_keywords && (
               <p className="mt-2 text-muted-foreground">
                 The scoring agent emphasized these signals to estimate the expected outcome change.
               </p>
@@ -85,12 +100,12 @@ export function ScoreBreakdownModal({ task, open, onOpenChange }: ScoreBreakdown
                 <p className="text-2xl font-bold text-foreground">{task.effort.toFixed(1)}h</p>
               </div>
               <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                Source: {task.reasoning?.effort_source ?? 'unknown'}
+                Source: {reasoningObject?.effort_source ?? 'unknown'}
               </span>
             </header>
-            {task.reasoning?.effort_hint && task.reasoning.effort_hint.length > 0 && (
+            {reasoningObject?.effort_hint && reasoningObject.effort_hint.length > 0 && (
               <p className="mt-2 text-muted-foreground">
-                Hint: “{task.reasoning.effort_hint}”
+                Hint: “{reasoningObject.effort_hint}”
               </p>
             )}
             {effortModifiers.length > 0 && (

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { excludedTaskSchema } from './excludedTaskSchema';
 
 export const executionWaveSchema = z.object({
   wave_number: z.number().int().min(1),
@@ -42,6 +43,7 @@ export const prioritizedPlanSchema = z.object({
   synthesis_summary: z.string().min(1),
   task_annotations: z.array(taskAnnotationSchema).optional(),
   removed_tasks: z.array(taskRemovalSchema).optional(),
+  excluded_tasks: z.array(excludedTaskSchema).optional(),
   created_at: z.string().datetime().optional(),
 });
 

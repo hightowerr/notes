@@ -58,6 +58,28 @@ const orchestrateTaskPrioritiesImpl = async ({ sessionId }: OrchestrateOptions) 
       ...prioritizedPlan,
       created_at: new Date().toISOString(),
     },
+    evaluation_metadata: {
+      iterations: 2,
+      duration_ms: 16250,
+      evaluation_triggered: true,
+      chain_of_thought: [
+        {
+          iteration: 1,
+          confidence: 0.64,
+          corrections: 'Initial pass - evaluator flagged missing payment coverage.',
+          evaluator_feedback: 'Add checkout stabilization tasks back to the plan.',
+          timestamp: new Date().toISOString(),
+        },
+        {
+          iteration: 2,
+          confidence: 0.86,
+          corrections: 'Restored payment focus and re-ordered for dependencies.',
+          timestamp: new Date().toISOString(),
+        },
+      ],
+      converged: true,
+      final_confidence: 0.86,
+    },
     execution_metadata: {
       steps_taken: 3,
       tool_call_count: {
@@ -264,6 +286,7 @@ describe('Agent Orchestration Integration (T012)', () => {
     expect(triggerPayload.status).toBe('running');
     expect(triggerPayload.session_id).toBeDefined();
     expect(triggerPayload.prioritized_plan).toBeNull();
+    expect(triggerPayload.evaluation_metadata).toBeNull();
 
     const sessionId: string = triggerPayload.session_id;
 
@@ -294,6 +317,13 @@ describe('Agent Orchestration Integration (T012)', () => {
       ordered_task_ids: ['task-001', 'task-002', 'task-003'],
       created_at: expect.any(String),
     });
+    expect(session.evaluation_metadata).toBeDefined();
+    expect(session.evaluation_metadata.iterations).toBeGreaterThanOrEqual(1);
+    expect(session.evaluation_metadata.iterations).toBeLessThanOrEqual(3);
+    expect(session.evaluation_metadata.chain_of_thought).toHaveLength(
+      session.evaluation_metadata.iterations,
+    );
+    expect(session.evaluation_metadata.evaluation_triggered).toBe(true);
 
     const traceResponse = await fetch(
       `http://localhost/api/agent/sessions/${sessionId}/trace`,
@@ -324,6 +354,7 @@ describe('Agent Orchestration Integration (T012)', () => {
       userId: DEFAULT_USER_ID,
       outcomeId: activeOutcomeId,
       activeReflectionIds: [],
+      dependencyOverrides: [],
     });
   });
 });

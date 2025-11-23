@@ -1,65 +1,70 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# Dependencies
+node_modules/
+.pnpm-store/
 
-# dependencies
-/node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
+# Build outputs
+dist/
+build/
+.next/
+coverage/
 
-# testing
-/coverage
+# Environment variables
+.env*
+!.env.example
 
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# claude
-.claude/
-
-# gemini
-.gemini/
-
-# codex
-.codex/
-
-# debug
+# Logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.pnpm-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Icon?
+# */
 
-# vercel
-.vercel
+# Editor specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
-# typescript
+# Testing
+coverage/
+.nyc_output/
+.jest/
+
+# TypeScript
 *.tsbuildinfo
-next-env.d.ts
-*Zone.Identifier
-*dropbox.attrs
+*.js.map
+*.ts.map
 
-# OAuth & API credentials (NEVER COMMIT THESE)
-client_secret*.json
-*_secret*.json
-service-account*.json
-credentials.json
+# Next.js
+.next/
+out/
+.next/cache/
 
-# Temporary documentation (remove if these should be tracked)
-# OCR_IMPLEMENTATION_GUIDE.md
-# WEBHOOK_FIX_GUIDE.md
-# WEBHOOK_FIX_SUMMARY.md
-# WEBHOOK_TEST_GUIDE.md
-# T006_MANUAL_TEST.md
+# Supabase
+.supabase/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Mac
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Icon?

@@ -20,9 +20,45 @@ export type StrategyConfig = {
 
 const URGENT_KEYWORDS = /\b(urgent|critical|blocking|blocker)\b/i;
 
+export const LOW_EFFORT_THRESHOLD = 8;
+export const HIGH_IMPACT_THRESHOLD = 5;
+const STRICT_STRATEGIC_IMPACT = 7;
+const STRICT_STRATEGIC_EFFORT = 40;
+
+const hasScores = (impact?: number, effort?: number): boolean =>
+  typeof impact === 'number' && Number.isFinite(impact) && typeof effort === 'number' && Number.isFinite(effort);
+
+export function isQuickWinTask(task: TaskWithScores): boolean {
+  const { matchesQuickWin } = classifyStrategyScores(task.impact, task.effort);
+  return matchesQuickWin;
+}
+
+export function isStrategicBetTask(task: TaskWithScores): boolean {
+  const { matchesStrategicBet } = classifyStrategyScores(task.impact, task.effort);
+  return matchesStrategicBet;
+}
+
 export function isUrgent(task: TaskWithScores): boolean {
   const haystack = task.title ?? task.content;
   return URGENT_KEYWORDS.test(haystack);
+}
+
+export function classifyStrategyScores(impact?: number | null, effort?: number | null) {
+  if (!hasScores(impact ?? undefined, effort ?? undefined)) {
+    return {
+      matchesQuickWin: false,
+      matchesStrategicBet: false,
+    };
+  }
+
+  const matchesQuickWin = impact! >= HIGH_IMPACT_THRESHOLD && effort! <= LOW_EFFORT_THRESHOLD;
+  const strictStrategicBet = impact! >= STRICT_STRATEGIC_IMPACT && effort! > STRICT_STRATEGIC_EFFORT;
+  const fallbackStrategicBet = impact! >= HIGH_IMPACT_THRESHOLD && effort! > LOW_EFFORT_THRESHOLD;
+
+  return {
+    matchesQuickWin,
+    matchesStrategicBet: strictStrategicBet || fallbackStrategicBet,
+  };
 }
 
 export const STRATEGY_CONFIGS: Record<SortingStrategy, StrategyConfig> = {
@@ -33,14 +69,14 @@ export const STRATEGY_CONFIGS: Record<SortingStrategy, StrategyConfig> = {
   },
   quick_wins: {
     label: 'Quick Wins',
-    description: 'Tasks ≤8h effort, ranked by impact × confidence',
-    filter: task => task.effort <= 8,
+    description: 'High-impact tasks ≤8h effort, ranked by impact × confidence',
+    filter: task => isQuickWinTask(task),
     sort: (a, b) => b.impact * b.confidence - a.impact * a.confidence,
   },
   strategic_bets: {
     label: 'Strategic Bets',
-    description: 'High-impact (≥7) longer efforts (>40h)',
-    filter: task => task.impact >= 7 && task.effort > 40,
+    description: 'High-impact bets that need more than a quick win window',
+    filter: task => isStrategicBetTask(task),
     sort: (a, b) => b.impact - a.impact,
   },
   urgent: {

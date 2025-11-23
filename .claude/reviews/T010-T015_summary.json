@@ -1,0 +1,45 @@
+{
+  "review_file": ".claude/reviews/T010-T015_task-intelligence-draft-quality.md",
+  "status": "fail",
+  "critical_issues": 7,
+  "high_issues": 7,
+  "medium_issues": 8,
+  "low_issues": 3,
+  "return_to": "backend-engineer",
+  "tasks_reviewed": ["T010", "T011", "T012", "T013", "T014", "T015"],
+  "fixes_required": [
+    "Create missing T014 contract test file (__tests__/contract/quality-refinement.test.ts)",
+    "Fix Supabase client imports in 3 files (use createClient from @/lib/supabase/server)",
+    "Fix evaluateQuality() call signature in accept-draft-tasks/route.ts line 94",
+    "Implement cycle detection in accept-draft-tasks/route.ts line 217",
+    "Fix analyzeCoverage() call signature in accept-draft-tasks/route.ts line 185",
+    "Fix P5 trigger logic in generate-draft-tasks/route.ts line 66",
+    "Add duplicate ID validation before task insertion"
+  ],
+  "estimated_fix_time": "4-6 hours",
+  "re_review_required": true,
+  "security_concerns": [
+    "Session ownership validation happens after data access (generate-draft-tasks/route.ts:115-120)",
+    "Supabase browser client used in API routes bypasses RLS policies"
+  ],
+  "test_coverage": {
+    "total_tests": 3,
+    "existing_tests": 2,
+    "missing_tests": 1,
+    "pass_rate_estimate": "85%"
+  },
+  "vertical_slice_status": {
+    "user_story_3": {
+      "see_it": true,
+      "do_it": true,
+      "verify_it": false,
+      "reason": "Cycle detection not implemented"
+    },
+    "user_story_4": {
+      "see_it": true,
+      "do_it": true,
+      "verify_it": "partial",
+      "reason": "Refinement applies but action type not passed to parent"
+    }
+  }
+}

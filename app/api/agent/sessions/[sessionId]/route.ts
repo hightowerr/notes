@@ -67,6 +67,7 @@ export async function GET(_: Request, { params }: { params: Promise<RouteParams>
     const sanitizedSession = {
       ...session,
       prioritized_plan: prioritizedPlan,
+      excluded_tasks: session.excluded_tasks,
     };
 
     return NextResponse.json(

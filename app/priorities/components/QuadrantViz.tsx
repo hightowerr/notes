@@ -16,6 +16,10 @@ import {
 } from 'recharts';
 
 import { QUADRANT_CONFIGS, getQuadrant, type Quadrant } from '@/lib/schemas/quadrant';
+import {
+  HIGH_IMPACT_THRESHOLD,
+  LOW_EFFORT_THRESHOLD,
+} from '@/lib/schemas/sortingStrategy';
 
 export type QuadrantVizTask = {
   id: string;
@@ -28,6 +32,7 @@ export type QuadrantVizTask = {
 type QuadrantVizProps = {
   tasks: QuadrantVizTask[];
   onTaskClick?: (taskId: string) => void;
+  showCountBadge?: boolean;
 };
 
 type ClusterPoint = {
@@ -47,10 +52,27 @@ type ClusterPoint = {
 const LOG_EFFORT_DELTA = Math.log(1.2);
 const MIN_CONFIDENCE = 0.05;
 
-export function QuadrantViz({ tasks, onTaskClick }: QuadrantVizProps) {
+export function QuadrantViz({ tasks, onTaskClick, showCountBadge = true }: QuadrantVizProps) {
   const [isHighContrastMode, setIsHighContrastMode] = useState(false);
-  const clusters = useMemo(() => clusterTasks(tasks), [tasks]);
+  const normalizedTasks = useMemo(
+    () =>
+      tasks.map(task => ({
+        ...task,
+        // Clamp values to keep the log axis stable and avoid NaN/Infinity rendering artifacts.
+        impact: Math.max(0, Math.min(10, task.impact)),
+        effort: Math.max(1, task.effort),
+        confidence: Math.max(MIN_CONFIDENCE, task.confidence),
+      })),
+    [tasks]
+  );
+  const clusters = useMemo(() => clusterTasks(normalizedTasks), [normalizedTasks]);
   const isStaticRender = Boolean((process as { env?: Record<string, string> })?.env?.VITEST);
+  const plottedCount = clusters.reduce((total, cluster) => total + cluster.count, 0);
+  const maxEffort = useMemo(
+    () => Math.max(LOW_EFFORT_THRESHOLD * 2, ...normalizedTasks.map(task => task.effort || 1)),
+    [normalizedTasks]
+  );
+  const xDomain: [number, number] = [1, Math.max(maxEffort * 1.25, LOW_EFFORT_THRESHOLD * 2)];
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -89,7 +111,7 @@ export function QuadrantViz({ tasks, onTaskClick }: QuadrantVizProps) {
           dataKey="effort"
           name="Effort"
           scale="log"
-          domain={[1, 160]}
+          domain={xDomain}
           tickFormatter={value => `${value}h`}
         >
           <Label value="Effort (hours, log scale)" offset={-10} position="insideBottom" />
@@ -100,12 +122,12 @@ export function QuadrantViz({ tasks, onTaskClick }: QuadrantVizProps) {
         <ZAxis
           type="number"
           dataKey="confidence"
-          range={[50, 400]}
+          range={[12, 48]}
           domain={[MIN_CONFIDENCE, 1]}
           name="Confidence"
         />
-        <ReferenceLine x={8} stroke="#94a3b8" strokeDasharray="4 4" />
-        <ReferenceLine y={5} stroke="#94a3b8" strokeDasharray="4 4" />
+        <ReferenceLine x={LOW_EFFORT_THRESHOLD} stroke="#94a3b8" strokeDasharray="4 4" />
+        <ReferenceLine y={HIGH_IMPACT_THRESHOLD} stroke="#94a3b8" strokeDasharray="4 4" />
         {renderQuadrantAreas()}
         <Tooltip content={<QuadrantTooltip />} />
       <Scatter
@@ -177,16 +199,44 @@ function clusterTasks(tasks: QuadrantVizTask[]): ClusterPoint[] {
 function renderQuadrantAreas() {
   return (
     <>
-      <ReferenceArea x1={1} x2={8} y1={5} y2={10} fill="#10b981" fillOpacity={0.1}>
+      <ReferenceArea
+        x1={1}
+        x2={LOW_EFFORT_THRESHOLD}
+        y1={HIGH_IMPACT_THRESHOLD}
+        y2={10}
+        fill="#10b981"
+        fillOpacity={0.1}
+      >
         <Label value="Quick Wins" position="insideTopLeft" fill="#047857" />
       </ReferenceArea>
-      <ReferenceArea x1={8} x2={160} y1={5} y2={10} fill="#3b82f6" fillOpacity={0.1}>
+      <ReferenceArea
+        x1={LOW_EFFORT_THRESHOLD}
+        x2="max"
+        y1={HIGH_IMPACT_THRESHOLD}
+        y2={10}
+        fill="#3b82f6"
+        fillOpacity={0.1}
+      >
         <Label value="Strategic Bets" position="insideTopRight" fill="#1d4ed8" />
       </ReferenceArea>
-      <ReferenceArea x1={1} x2={8} y1={0} y2={5} fill="#eab308" fillOpacity={0.1}>
+      <ReferenceArea
+        x1={1}
+        x2={LOW_EFFORT_THRESHOLD}
+        y1={0}
+        y2={HIGH_IMPACT_THRESHOLD}
+        fill="#eab308"
+        fillOpacity={0.1}
+      >
         <Label value="Incremental" position="insideBottomLeft" fill="#a16207" />
       </ReferenceArea>
-      <ReferenceArea x1={8} x2={160} y1={0} y2={5} fill="#ef4444" fillOpacity={0.1}>
+      <ReferenceArea
+        x1={LOW_EFFORT_THRESHOLD}
+        x2="max"
+        y1={0}
+        y2={HIGH_IMPACT_THRESHOLD}
+        fill="#ef4444"
+        fillOpacity={0.1}
+      >
         <Label value="Deprioritize" position="insideBottomRight" fill="#b91c1c" />
       </ReferenceArea>
     </>
@@ -211,7 +261,7 @@ function renderBubble(props: any, options: BubbleRenderOptions) {
   delete safeProps.tooltipPosition;
 
   const badgeRadius = 10;
-  const bubbleRadius = Math.max(6, size);
+  const bubbleRadius = Math.max(6, Math.min(48, size));
   const ariaLabel =
     payload.count > 1
       ? `${payload.label} group with ${payload.count} tasks`

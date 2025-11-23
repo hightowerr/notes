@@ -8,12 +8,20 @@ import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Progress } from '@/components/ui/progress';
 import { MainNav } from '@/components/main-nav';
 import { TaskList } from '@/app/priorities/components/TaskList';
 import { SortingStrategySelector } from '@/app/priorities/components/SortingStrategySelector';
 import type { QuadrantVizTask } from '@/app/priorities/components/QuadrantViz';
 import { QuadrantViz } from '@/app/priorities/components/QuadrantViz';
 import { ContextCard } from '@/app/priorities/components/ContextCard';
+import { ExcludedTasksSection } from '@/app/priorities/components/ExcludedTasksSection';
+import {
+  QualitySurvey,
+  nextSurveyStateAfterRun,
+  type SurveyRating,
+  type SurveyState,
+} from '@/app/priorities/components/QualitySurvey';
 import { ReflectionPanel } from '@/app/components/ReflectionPanel';
 import { prioritizedPlanSchema } from '@/lib/schemas/prioritizedPlanSchema';
 import { executionMetadataSchema } from '@/lib/schemas/executionMetadataSchema';
@@ -28,6 +36,9 @@ import type { SortingStrategy } from '@/lib/schemas/sortingStrategy';
 import type { RetryStatusEntry } from '@/lib/schemas/retryStatus';
 import { useScrollToTask } from '@/app/priorities/components/useScrollToTask';
 import { formatTaskId } from '@/app/priorities/utils/formatTaskId';
+import { hybridLoopMetadataSchema, type HybridLoopMetadata } from '@/lib/schemas/hybridLoopMetadataSchema';
+import ReasoningChain from '@/app/priorities/components/ReasoningChain';
+import ErrorBanner from '@/app/components/ErrorBanner';
 import {
   GapDetectionModal,
   type GapSuggestionState,
@@ -44,6 +55,8 @@ import {
   buildDependencyOverrideEdges,
   getOutcomeDependencyOverrides,
 } from '@/lib/utils/dependencyOverrides';
+import { usePrioritizationStream } from '@/lib/hooks/usePrioritizationStream';
+import { PrioritizationSummary } from '@/app/priorities/components/PrioritizationSummary';
 
 const DEFAULT_USER_ID = 'default-user';
 const POLL_INTERVAL_MS = 2000;
@@ -57,6 +70,7 @@ const HOUR_IN_MS = 60 * 60 * 1000;
 const DAY_IN_MS = 24 * HOUR_IN_MS;
 const WEEK_IN_MS = 7 * DAY_IN_MS;
 const HIGHLIGHT_CLASSES = ['ring-amber-400/60', 'ring-4', 'ring-offset-2', 'ring-offset-background'];
+const REFLECTION_SURVEY_STORAGE_KEY = 'reflection-quality-survey';
 
 function describeBaselineAge(ageMs: number): string {
   if (ageMs <= 0) {
@@ -233,25 +247,62 @@ export default function TaskPrioritiesPage() {
   const [activeOutcome, setActiveOutcome] = useState<OutcomeResponse | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [showOutcomePrompt, setShowOutcomePrompt] = useState(true);
+  const [showQualitySurvey, setShowQualitySurvey] = useState(false);
+  const [isSurveySubmitting, setIsSurveySubmitting] = useState(false);
 
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>('idle');
   const [triggerError, setTriggerError] = useState<string | null>(null);
   const [isTriggering, setIsTriggering] = useState(false);
 
   const [prioritizedPlan, setPrioritizedPlan] = useState<PrioritizedTaskPlan | null>(null);
-  const [executionMetadata, setExecutionMetadata] = useState<ExecutionMetadata | null>(null);
+const [executionMetadata, setExecutionMetadata] = useState<ExecutionMetadata | null>(null);
+const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata | null>(null);
   const [resultsError, setResultsError] = useState<string | null>(null);
   const [isLoadingResults, setIsLoadingResults] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [hasTriggered, setHasTriggered] = useState(false);
   const [isRecalculating, setIsRecalculating] = useState(false);
   const [planVersion, setPlanVersion] = useState(0);
+  const [prioritizationError, setPrioritizationError] = useState<string | null>(null);
+  const [prioritizationRetryCount, setPrioritizationRetryCount] = useState(0);
   const [strategicScores, setStrategicScores] = useState<StrategicScoresMap | null>(null);
   const [retryStatuses, setRetryStatuses] = useState<Record<string, RetryStatusEntry>>({});
   const [sortingStrategy, setSortingStrategy] = useState<SortingStrategy>('balanced');
   const [taskMetadata, setTaskMetadata] = useState<Record<string, { title: string }>>({});
   const [planStatusMessage, setPlanStatusMessage] = useState<string | null>(null);
+  const [isSessionStreamConnected, setSessionStreamConnected] = useState(false);
+  const sessionStreamFailuresRef = useRef(0);
+  const [hasFetchedInitialPlan, setHasFetchedInitialPlan] = useState(false);
+  const [reflections, setReflections] = useState<ReflectionWithWeight[]>([]);
+  const [reflectionsLoading, setReflectionsLoading] = useState(true);
+  const [reflectionsError, setReflectionsError] = useState<string | null>(null);
+  const [reflectionPanelOpen, setReflectionPanelOpen] = useState(false);
+  const [activeReflectionIds, setActiveReflectionIds] = useState<string[]>([]);
+  const [latestAdjustment, setLatestAdjustment] = useState<AdjustedPlan | null>(null);
+  const [isInstantAdjusting, setIsInstantAdjusting] = useState(false);
+  const [adjustmentPerformance, setAdjustmentPerformance] = useState<{ total_ms: number; ranking_ms: number } | null>(null);
+  const [adjustmentError, setAdjustmentError] = useState<string | null>(null);
+  const [adjustmentWarnings, setAdjustmentWarnings] = useState<string[]>([]);
+  const [baselineCreatedAt, setBaselineCreatedAt] = useState<string | null>(null);
+  const [baselineReflectionIds, setBaselineReflectionIds] = useState<string[]>([]);
+  const {
+    progressPct: prioritizationProgress,
+    connectionState: streamConnectionState,
+    partialPlan: streamedPlan,
+    stage: streamStage,
+  } = usePrioritizationStream(currentSessionId);
+  const lastStreamSignatureRef = useRef<string | null>(null);
+  const completionDurationMs =
+    evaluationMetadata?.duration_ms ??
+    (executionMetadata?.total_time_ms ? Number(executionMetadata.total_time_ms) : null);
+  const evaluationWasTriggered = Boolean(evaluationMetadata?.evaluation_triggered);
   const scorePollingHaltedRef = useRef(false);
+  const surveyStateRef = useRef<SurveyState>({
+    runCount: 0,
+    lastShownAt: null,
+    dontShowAgain: false,
+  });
+  const lastSessionStatusRef = useRef<SessionStatus | null>(null);
   const hasStrategicScores = useMemo(() => {
     if (!strategicScores) {
       return false;
@@ -265,10 +316,67 @@ export default function TaskPrioritiesPage() {
     },
     []
   );
+
+  const getSurveyState = useCallback((): SurveyState => {
+    const fallback = surveyStateRef.current ?? {
+      runCount: 0,
+      lastShownAt: null,
+      dontShowAgain: false,
+    };
+
+    if (typeof window === 'undefined') {
+      return fallback;
+    }
+
+    try {
+      const raw = window.localStorage.getItem(REFLECTION_SURVEY_STORAGE_KEY);
+      if (!raw) {
+        return fallback;
+      }
+      const parsed = JSON.parse(raw) as Partial<SurveyState>;
+      return {
+        runCount: typeof parsed.runCount === 'number' && Number.isFinite(parsed.runCount)
+          ? Math.max(0, Math.floor(parsed.runCount))
+          : 0,
+        lastShownAt: typeof parsed.lastShownAt === 'string' ? parsed.lastShownAt : null,
+        dontShowAgain: Boolean(parsed.dontShowAgain),
+      };
+    } catch (error) {
+      console.warn('[Task Priorities] Failed to read reflection survey state', error);
+      return fallback;
+    }
+  }, []);
+
+  const persistSurveyState = useCallback((state: SurveyState) => {
+    surveyStateRef.current = state;
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(REFLECTION_SURVEY_STORAGE_KEY, JSON.stringify(state));
+    }
+  }, []);
+
+  useEffect(() => {
+    const stored = getSurveyState();
+    surveyStateRef.current = stored;
+  }, [getSurveyState]);
+
+  useEffect(() => {
+    if (sessionStatus === 'completed' && lastSessionStatusRef.current !== 'completed') {
+      const now = Date.now();
+      const { state, show } = nextSurveyStateAfterRun(getSurveyState(), now);
+      persistSurveyState(state);
+      if (show) {
+        setShowQualitySurvey(true);
+      }
+    }
+    lastSessionStatusRef.current = sessionStatus;
+  }, [getSurveyState, persistSurveyState, sessionStatus]);
   useEffect(() => {
     scorePollingHaltedRef.current = false;
-    if (!currentSessionId) {
-      setRetryStatuses({});
+    const shouldPoll =
+      currentSessionId &&
+      (sessionStatus === 'running' || isInstantAdjusting) &&
+      !isSessionStreamConnected;
+    if (!shouldPoll) {
       return;
     }
 
@@ -342,14 +450,41 @@ export default function TaskPrioritiesPage() {
         clearInterval(pollHandle);
       }
     };
-  }, [currentSessionId]);
+  }, [currentSessionId, sessionStatus, isInstantAdjusting, isSessionStreamConnected]);
+
+  useEffect(() => {
+    if (sessionStatus !== 'running') {
+      lastStreamSignatureRef.current = null;
+      return;
+    }
+
+    if (!streamedPlan) {
+      return;
+    }
+
+    const signature = streamedPlan.ordered_task_ids.slice(0, 20).join('|');
+    if (signature === lastStreamSignatureRef.current) {
+      return;
+    }
+
+    lastStreamSignatureRef.current = signature;
+    setPrioritizedPlan(streamedPlan);
+    setResultsError(null);
+    setPlanVersion(prev => prev + 1);
+    setPlanStatusMessage('Streaming prioritization results…');
+  }, [streamedPlan, sessionStatus]);
+  const [activeTaskIds, setActiveTaskIds] = useState<string[]>([]);
   const quadrantTasks = useMemo(() => {
     if (!strategicScores || !prioritizedPlan) {
       return [] as QuadrantVizTask[];
     }
     const ids = prioritizedPlan.ordered_task_ids ?? [];
+    const activeSet = activeTaskIds.length > 0 ? new Set(activeTaskIds) : null;
     const tasks = ids
       .map(taskId => {
+        if (activeSet && !activeSet.has(taskId)) {
+          return null;
+        }
         const score = strategicScores[taskId];
         if (!score) {
           return null;
@@ -364,7 +499,7 @@ export default function TaskPrioritiesPage() {
       })
       .filter((task): task is QuadrantVizTask => Boolean(task));
     return tasks;
-  }, [strategicScores, prioritizedPlan, taskMetadata]);
+  }, [strategicScores, prioritizedPlan, taskMetadata, activeTaskIds]);
   const handleQuadrantTaskClick = useCallback(
     (taskId: string) => {
       if (!taskId) {
@@ -381,20 +516,6 @@ export default function TaskPrioritiesPage() {
     },
     [scrollToTaskFromViz]
   );
-  const [hasFetchedInitialPlan, setHasFetchedInitialPlan] = useState(false);
-  const [reflections, setReflections] = useState<ReflectionWithWeight[]>([]);
-  const [reflectionsLoading, setReflectionsLoading] = useState(true);
-  const [reflectionsError, setReflectionsError] = useState<string | null>(null);
-  const [reflectionPanelOpen, setReflectionPanelOpen] = useState(false);
-  const [activeReflectionIds, setActiveReflectionIds] = useState<string[]>([]);
-  const [latestAdjustment, setLatestAdjustment] = useState<AdjustedPlan | null>(null);
-  const [isInstantAdjusting, setIsInstantAdjusting] = useState(false);
-  const [adjustmentPerformance, setAdjustmentPerformance] = useState<{ total_ms: number; ranking_ms: number } | null>(null);
-  const [adjustmentError, setAdjustmentError] = useState<string | null>(null);
-  const [adjustmentWarnings, setAdjustmentWarnings] = useState<string[]>([]);
-  const [baselineCreatedAt, setBaselineCreatedAt] = useState<string | null>(null);
-  const [baselineReflectionIds, setBaselineReflectionIds] = useState<string[]>([]);
-
   const [isGapModalOpen, setIsGapModalOpen] = useState(false);
   const [gapAnalysisStatus, setGapAnalysisStatus] = useState<'idle' | 'detecting' | 'success' | 'error'>('idle');
   const [gapAnalysisResult, setGapAnalysisResult] = useState<GapDetectionResponse | null>(null);
@@ -535,6 +656,7 @@ export default function TaskPrioritiesPage() {
         setHasTriggered(true);
         setIsRecalculating(false);
         setIsLoadingResults(false);
+        setPrioritizationError(null);
       }
     }
 
@@ -565,6 +687,11 @@ export default function TaskPrioritiesPage() {
     if (adjustmentResult.success) {
       setLatestAdjustment(adjustmentResult.data);
     }
+
+    const evaluationResult = hybridLoopMetadataSchema.safeParse(
+      (session as { evaluation_metadata?: unknown }).evaluation_metadata
+    );
+    setEvaluationMetadata(evaluationResult.success ? evaluationResult.data : null);
   }, []);
 
   const fetchReflections = useCallback(async () => {
@@ -578,6 +705,11 @@ export default function TaskPrioritiesPage() {
       const response = await fetch('/api/reflections?limit=5&within_days=30');
 
       if (!response.ok) {
+        const text = await response.text().catch(() => 'Unknown error');
+        console.error('[Task Priorities] Reflections request failed', {
+          status: response.status,
+          body: text,
+        });
         throw new Error('Failed to load reflections');
       }
 
@@ -650,6 +782,77 @@ export default function TaskPrioritiesPage() {
     return map;
   }, [reflections]);
 
+  useEffect(() => {
+    if (!currentSessionId) {
+      return;
+    }
+    const source = new EventSource(`/api/agent/sessions/${currentSessionId}/stream`);
+
+    const handleSession = (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data) as { session?: unknown };
+        if (payload.session) {
+          applySessionResults(payload.session);
+          const status = (payload.session as { status?: string }).status;
+          const id = (payload.session as { id?: string }).id;
+          if (status) {
+            setSessionStatus(status as SessionStatus);
+          }
+          if (id) {
+            setCurrentSessionId(id);
+          }
+        }
+      } catch (error) {
+        console.error('[Task Priorities] Failed to parse session stream payload', error);
+      }
+    };
+
+    const handleScores = (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(event.data) as { scores?: unknown; retry_status?: unknown };
+        const scoresResult = StrategicScoresMapSchema.safeParse(payload.scores ?? {});
+        if (scoresResult.success) {
+          setStrategicScores(prev => ({
+            ...(prev ?? {}),
+            ...scoresResult.data,
+          }));
+        }
+        if (payload.retry_status && typeof payload.retry_status === 'object') {
+          setRetryStatuses(payload.retry_status as Record<string, RetryStatusEntry>);
+        }
+      } catch (error) {
+        console.error('[Task Priorities] Failed to parse score stream payload', error);
+      }
+    };
+
+    const handleOpen = () => {
+      sessionStreamFailuresRef.current = 0;
+      setSessionStreamConnected(true);
+    };
+
+    const handleError = () => {
+      sessionStreamFailuresRef.current += 1;
+      setSessionStreamConnected(false);
+      if (sessionStreamFailuresRef.current >= 2) {
+        source.close();
+      }
+    };
+
+    source.addEventListener('open', handleOpen);
+    source.addEventListener('session', handleSession as EventListener);
+    source.addEventListener('scores', handleScores as EventListener);
+    source.addEventListener('error', handleError);
+
+    return () => {
+      source.removeEventListener('open', handleOpen);
+      source.removeEventListener('session', handleSession as EventListener);
+      source.removeEventListener('scores', handleScores as EventListener);
+      source.removeEventListener('error', handleError);
+      source.close();
+      setSessionStreamConnected(false);
+    };
+  }, [currentSessionId, applySessionResults]);
+
   const baselineAgeInfo = useMemo(() => {
     if (!baselineCreatedAt) {
       return null;
@@ -686,7 +889,7 @@ export default function TaskPrioritiesPage() {
   }, []);
 
   useEffect(() => {
-    if (!prioritizedPlan || !currentSessionId || sessionStatus !== 'completed') {
+    if (!prioritizedPlan || !currentSessionId || sessionStatus === 'running') {
       return;
     }
 
@@ -924,6 +1127,13 @@ export default function TaskPrioritiesPage() {
         if (session.status !== 'running') {
           stopPolling();
         }
+
+        if (session.status === 'failed') {
+          setPrioritizationError('Prioritization failed. Please retry.');
+        } else if (session.status === 'completed') {
+          setPrioritizationError(null);
+          setPrioritizationRetryCount(0);
+        }
       } catch (error) {
         console.error('[Task Priorities] Polling error:', error);
         setTriggerError('Lost connection while checking progress. Retrying…');
@@ -941,6 +1151,8 @@ export default function TaskPrioritiesPage() {
     }
 
     const hasExistingPlan = prioritizedPlan !== null;
+    setPrioritizationError(null);
+    setPrioritizationRetryCount(prev => (hasExistingPlan ? prev + 1 : 0));
 
     adjustmentControllerRef.current?.abort();
     lastActiveReflectionIdsRef.current = [];
@@ -1020,12 +1232,80 @@ export default function TaskPrioritiesPage() {
     }
   };
 
+  const handleSurveySubmit = useCallback(
+    async (rating: SurveyRating) => {
+      setIsSurveySubmitting(true);
+      const now = Date.now();
+      try {
+        const response = await fetch('/api/feedback/reflection-quality', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            rating,
+            session_id: currentSessionId ?? undefined,
+          }),
+        });
+
+        if (!response.ok) {
+          console.error('[Task Priorities] Feedback submission failed', {
+            status: response.status,
+          });
+          toast.error('Could not submit feedback. Please try again.');
+          return;
+        }
+
+        const updatedState: SurveyState = {
+          ...getSurveyState(),
+          runCount: 0,
+          lastShownAt: new Date(now).toISOString(),
+        };
+        persistSurveyState(updatedState);
+        setShowQualitySurvey(false);
+        toast.success('Thanks for your feedback.');
+      } catch (error) {
+        console.error('[Task Priorities] Failed to send reflection feedback', error);
+        toast.error('Could not submit feedback. Please try again.');
+      } finally {
+        setIsSurveySubmitting(false);
+      }
+    },
+    [currentSessionId, getSurveyState, persistSurveyState]
+  );
+
+  const handleSurveyDontShowAgain = useCallback(() => {
+    const now = Date.now();
+    const state = getSurveyState();
+    persistSurveyState({
+      ...state,
+      dontShowAgain: true,
+      runCount: 0,
+      lastShownAt: new Date(now).toISOString(),
+    });
+    setShowQualitySurvey(false);
+  }, [getSurveyState, persistSurveyState]);
+
   const isButtonDisabled =
     !activeOutcome || outcomeLoading || isTriggering || sessionStatus === 'running' || isInstantAdjusting;
+
+  const streamingProgressLabel = useMemo(() => {
+    if (streamStage === 'refining') {
+      return 'Refining prioritization order…';
+    }
+    if (streamStage === 'draft') {
+      return 'Scoring and drafting tasks…';
+    }
+    if (streamStage === 'completed') {
+      return 'Finalizing prioritization…';
+    }
+    return 'Scoring tasks…';
+  }, [streamStage]);
+
+  const streamingProgressValue = Math.round(Math.min(1, Math.max(0, prioritizationProgress)) * 100);
 
   const showProgress = sessionStatus === 'running';
   const showCollapsedPrimaryCard = hasTriggered && !outcomeLoading;
   const hasPlan = prioritizedPlan !== null;
+  const showPerformanceSummary = sessionStatus === 'completed' && completionDurationMs !== null;
   const analyzeButtonLabel = () => {
     if (isTriggering) {
       return 'Initializing…';
@@ -1992,6 +2272,13 @@ export default function TaskPrioritiesPage() {
   return (
     <div className="min-h-screen bg-muted/30">
       <MainNav />
+      <QualitySurvey
+        open={showQualitySurvey}
+        onClose={() => setShowQualitySurvey(false)}
+        onSubmit={handleSurveySubmit}
+        onDontShowAgain={handleSurveyDontShowAgain}
+        isSubmitting={isSurveySubmitting}
+      />
 
       <main className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 py-12">
         <div className="flex flex-col gap-3 text-left">
@@ -2000,6 +2287,23 @@ export default function TaskPrioritiesPage() {
             Trigger the autonomous agent to analyze your tasks, then work from a focused, dependency-aware list.
           </p>
         </div>
+
+        {showPerformanceSummary && (
+          <PrioritizationSummary
+            durationMs={completionDurationMs}
+            evaluationTriggered={evaluationWasTriggered}
+          />
+        )}
+
+        {prioritizationError && (
+          <ErrorBanner
+            message={prioritizationError}
+            onRetry={handleAnalyzeTasks}
+            retryLabel="Retry"
+            retryCount={prioritizationRetryCount}
+            maxRetries={1}
+          />
+        )}
 
         <ContextCard
           reflections={reflections}
@@ -2053,57 +2357,73 @@ export default function TaskPrioritiesPage() {
 
         <Card className={showCollapsedPrimaryCard ? 'border-border/70 shadow-1layer-sm' : undefined}>
           {showCollapsedPrimaryCard ? (
-            <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="space-y-1">
-                <CardTitle className="text-lg font-semibold">
-                  {hasPlan ? 'Recalculate priorities' : 'Prioritize Tasks'}
-                </CardTitle>
-                <CardDescription className="flex flex-col gap-1 text-sm">
-                  <span>
-                    {sessionStatus === 'running'
-                      ? hasPlan
-                        ? 'Recalculating based on your latest changes…'
-                        : 'Analyzing your task set…'
-                      : sessionStatus === 'failed'
-                        ? 'Last run failed. Try again when ready.'
-                        : hasPlan
-                          ? 'Last plan is ready. Recalculate whenever your task stack changes.'
-                          : 'Run the agent to build your first prioritized list.'}
-                  </span>
-                  {activeOutcome && (
-                    <span className="truncate text-muted-foreground">
-                      Outcome: {activeOutcome.assembled_text}
+            <>
+              <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="space-y-1">
+                  <CardTitle className="text-lg font-semibold">
+                    {hasPlan ? 'Recalculate priorities' : 'Prioritize Tasks'}
+                  </CardTitle>
+                  <CardDescription className="flex flex-col gap-1 text-sm">
+                    <span>
+                      {sessionStatus === 'running'
+                        ? hasPlan
+                          ? 'Recalculating based on your latest changes…'
+                          : 'Analyzing your task set…'
+                        : sessionStatus === 'failed'
+                          ? 'Last run failed. Try again when ready.'
+                          : hasPlan
+                            ? 'Last plan is ready. Recalculate whenever your task stack changes.'
+                            : 'Run the agent to build your first prioritized list.'}
                     </span>
+                    {activeOutcome && (
+                      <span className="truncate text-muted-foreground">
+                        Outcome: {activeOutcome.assembled_text}
+                      </span>
+                    )}
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-3">
+                  {sessionStatus === 'running' && (
+                    <Badge variant="secondary" className="gap-2">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                      In progress
+                    </Badge>
                   )}
-                </CardDescription>
-              </div>
-              <div className="flex items-center gap-3">
-                {sessionStatus === 'running' && (
-                  <Badge variant="secondary" className="gap-2">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                    In progress
-                  </Badge>
+                  <Button onClick={handleAnalyzeTasks} disabled={isButtonDisabled}>
+                    {sessionStatus === 'running' ? (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                        {analyzeButtonLabel()}
+                      </>
+                    ) : isTriggering ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        {analyzeButtonLabel()}
+                      </>
+                    ) : (
+                      analyzeButtonLabel()
+                    )}
+                  </Button>
+                </div>
+                {triggerError && (
+                  <p className="text-sm text-destructive">{triggerError}</p>
                 )}
-                <Button onClick={handleAnalyzeTasks} disabled={isButtonDisabled}>
-                  {sessionStatus === 'running' ? (
-                    <>
-                      <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                      {analyzeButtonLabel()}
-                    </>
-                  ) : isTriggering ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      {analyzeButtonLabel()}
-                    </>
-                  ) : (
-                    analyzeButtonLabel()
-                  )}
-                </Button>
-              </div>
-              {triggerError && (
-                <p className="text-sm text-destructive">{triggerError}</p>
+              </CardHeader>
+              {sessionStatus === 'running' && (
+                <CardContent className="pt-0">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm text-muted-foreground">
+                      <span>{streamingProgressLabel}</span>
+                      <span className="tabular-nums">{streamingProgressValue}%</span>
+                    </div>
+                    <Progress value={streamingProgressValue} className="h-2" />
+                    <p className="text-xs text-muted-foreground">
+                      Live updates: {streamConnectionState === 'open' ? 'connected' : 'stabilizing…'}
+                    </p>
+                  </div>
+                </CardContent>
               )}
-            </CardHeader>
+            </>
           ) : (
             <>
               <CardHeader>
@@ -2284,6 +2604,13 @@ export default function TaskPrioritiesPage() {
                 </span>
               )}
             </div>
+            {evaluationMetadata && (
+              <ReasoningChain
+                chain={evaluationMetadata.chain_of_thought}
+                iterations={evaluationMetadata.iterations}
+                evaluationTriggered={evaluationMetadata.evaluation_triggered}
+              />
+            )}
             <TaskList
               plan={prioritizedPlan}
               executionMetadata={executionMetadata ?? undefined}
@@ -2299,7 +2626,11 @@ export default function TaskPrioritiesPage() {
               retryStatuses={retryStatuses}
               sortingStrategy={sortingStrategy}
               onTaskMetadataUpdate={handleTaskMetadataUpdate}
+              onActiveIdsChange={setActiveTaskIds}
             />
+            {prioritizedPlan.excluded_tasks && prioritizedPlan.excluded_tasks.length > 0 && (
+              <ExcludedTasksSection excludedTasks={prioritizedPlan.excluded_tasks} />
+            )}
             {quadrantTasks.length > 0 && (
               <section className="mt-8 rounded-xl border border-border/70 bg-bg-layer-3/40 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">

@@ -22,7 +22,11 @@ export function ErrorBanner({
   const isRetryDisabled = !onRetry || retryCount >= maxRetries;
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg bg-destructive/5 px-4 py-3 text-sm text-destructive shadow-2layer-sm">
+    <div
+      role="alert"
+      aria-live="assertive"
+      className="flex flex-wrap items-center justify-between gap-4 rounded-lg bg-destructive/5 px-4 py-3 text-sm text-destructive shadow-2layer-sm"
+    >
       <div className="flex flex-1 items-center gap-3">
         <AlertTriangle className="h-5 w-5" aria-hidden="true" />
         <div className="space-y-1">

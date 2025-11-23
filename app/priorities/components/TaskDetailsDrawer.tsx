@@ -29,6 +29,7 @@ type TaskSummary = {
   lnoCategory?: 'leverage' | 'neutral' | 'overhead' | null;
   outcomeRationale?: string | null;
   sourceText?: string | null;
+  sourceDocumentTitle?: string | null;
 };
 
 type TaskDetailsDrawerProps = {
@@ -255,7 +256,7 @@ export function TaskDetailsDrawer({
               </section>
             )}
 
-            {(alignmentCopy || task?.sourceText) && (
+            {(alignmentCopy || task?.sourceText || task?.sourceDocumentTitle) && (
               <section className="space-y-2 text-sm">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Outcome alignment
@@ -263,6 +264,11 @@ export function TaskDetailsDrawer({
                 <div className="rounded-md border border-border/60 bg-primary/5 px-3 py-2 space-y-1">
                   {task.sourceText && (
                     <p className="text-sm font-medium text-foreground">“{task.sourceText}”</p>
+                  )}
+                  {task.sourceDocumentTitle && (
+                    <p className="text-xs text-muted-foreground">
+                      Source: <span className="font-medium text-foreground">{task.sourceDocumentTitle}</span>
+                    </p>
                   )}
                   {alignmentCopy && (
                     <p className="text-sm text-muted-foreground">{alignmentCopy}</p>

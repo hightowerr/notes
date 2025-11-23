@@ -1,12 +1,9 @@
 import type { z } from 'zod';
 
 import type { executionMetadataSchema } from '@/lib/schemas/executionMetadataSchema';
+import type { HybridLoopMetadata } from '@/lib/schemas/hybridLoopMetadataSchema';
 import type { reasoningStepSchema } from '@/lib/schemas/reasoningStepSchema';
-import type {
-  prioritizedPlanSchema,
-  taskAnnotationSchema,
-  taskRemovalSchema,
-} from '@/lib/schemas/prioritizedPlanSchema';
+import type { prioritizedPlanSchema } from '@/lib/schemas/prioritizedPlanSchema';
 
 export type AgentSessionStatus = 'running' | 'completed' | 'failed';
 
@@ -15,14 +12,15 @@ export type ExecutionMetadata = z.infer<typeof executionMetadataSchema>;
 export type ReasoningStep = z.infer<typeof reasoningStepSchema>;
 
 export type PrioritizedTaskPlan = z.infer<typeof prioritizedPlanSchema>;
-export type TaskAnnotation = z.infer<typeof taskAnnotationSchema>;
-export type TaskRemoval = z.infer<typeof taskRemovalSchema>;
-
-export type TaskDependency = PrioritizedTaskPlan['dependencies'][number];
-
-export type ExecutionWave = PrioritizedTaskPlan['execution_waves'][number];
-
-export type ConfidenceScores = PrioritizedTaskPlan['confidence_scores'];
+export type TaskAnnotation = any;
+export type TaskRemoval = any;
+export type TaskDependency = {
+  source_task_id: string;
+  target_task_id: string;
+  relationship_type: 'prerequisite' | 'blocks' | 'related';
+  confidence: number;
+  detection_method: 'ai_inference' | 'stored_relationship';
+};
 
 export interface ReasoningTraceRecord {
   session_id: string;
@@ -88,12 +86,7 @@ export interface AgentRuntimeContext {
     has_previous_plan: boolean;
   };
   history?: {
-    previous_plan?: {
-      ordered_task_ids: string[];
-      confidence_scores: Record<string, number>;
-      task_annotations: TaskAnnotation[];
-      removed_tasks: TaskRemoval[];
-    };
+    previous_plan?: PrioritizedTaskPlan;
   };
 }
 
@@ -102,6 +95,7 @@ export interface AgentRunSuccess {
   plan: PrioritizedTaskPlan;
   metadata: ExecutionMetadata;
   trace: ReasoningTraceRecord;
+  evaluationMetadata?: HybridLoopMetadata | null;
 }
 
 export interface AgentRunFailure {
@@ -109,6 +103,7 @@ export interface AgentRunFailure {
   error: string;
   metadata: ExecutionMetadata;
   trace?: ReasoningTraceRecord;
+  evaluationMetadata?: null;
 }
 
 export type AgentRunResult = AgentRunSuccess | AgentRunFailure;

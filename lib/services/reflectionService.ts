@@ -1,6 +1,8 @@
 import { formatDistanceToNow } from 'date-fns';
-import { supabase } from '@/lib/supabase';
+import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import type { Reflection, ReflectionWithWeight } from '@/lib/schemas/reflectionSchema';
+
+const supabase = getSupabaseAdminClient();
 
 /**
  * Step-function recency weighting used by context-aware prioritization.
