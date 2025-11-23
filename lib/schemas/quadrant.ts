@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { HIGH_IMPACT_THRESHOLD, LOW_EFFORT_THRESHOLD } from '@/lib/schemas/sortingStrategy';
+
 export const QuadrantSchema = z.enum([
   'high_impact_low_effort',
   'high_impact_high_effort',
@@ -44,8 +46,8 @@ export const QUADRANT_CONFIGS: Record<Quadrant, QuadrantConfig> = {
 };
 
 export function getQuadrant(impact: number, effort: number): Quadrant {
-  const highImpact = impact >= 5;
-  const lowEffort = effort <= 8;
+  const highImpact = impact >= HIGH_IMPACT_THRESHOLD;
+  const lowEffort = effort <= LOW_EFFORT_THRESHOLD;
 
   if (highImpact && lowEffort) {
     return 'high_impact_low_effort';

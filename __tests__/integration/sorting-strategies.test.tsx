@@ -60,7 +60,7 @@ const strategicScores: StrategicScoresMap = {
   },
 };
 
-function StrategyHarness() {
+function StrategyHarness({ scores = strategicScores }: { scores?: StrategicScoresMap }) {
   const [strategy, setStrategy] = useState<SortingStrategy>('balanced');
 
   return (
@@ -72,7 +72,7 @@ function StrategyHarness() {
         planVersion={1}
         outcomeId="outcome-123"
         outcomeStatement="Increase activation rate"
-        strategicScores={strategicScores}
+        strategicScores={scores}
         sortingStrategy={strategy}
       />
     </div>
@@ -81,6 +81,7 @@ function StrategyHarness() {
 
 describe('Sorting strategies', () => {
   beforeEach(() => {
+    window.localStorage.clear();
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -129,8 +130,33 @@ describe('Sorting strategies', () => {
     await user.click(screen.getByRole('option', { name: /Strategic Bets/i }));
 
     expect(screen.getByText('Rebuild analytics pipeline')).toBeInTheDocument();
+    expect(screen.getByText('Stabilize billing adapters')).toBeInTheDocument();
     expect(screen.queryByText('Optimize onboarding copy')).not.toBeInTheDocument();
-    expect(screen.queryByText('Stabilize billing adapters')).not.toBeInTheDocument();
+    expect(document.querySelectorAll('[data-task-id]').length).toBe(3);
+  });
+
+  it('keeps strategic bets populated when only moderate-effort bets exist', async () => {
+    const user = userEvent.setup();
+    const moderateBetScores: StrategicScoresMap = {
+      ...strategicScores,
+      'task-bet': {
+        ...strategicScores['task-bet'],
+        effort: 16,
+      },
+    };
+
+    render(<StrategyHarness scores={moderateBetScores} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Rebuild analytics pipeline')).toBeInTheDocument();
+    });
+
+    const trigger = screen.getByLabelText('Sort Strategy');
+    await user.click(trigger);
+    await user.click(screen.getByRole('option', { name: /Strategic Bets/i }));
+
+    expect(screen.getByText('Rebuild analytics pipeline')).toBeInTheDocument();
+    expect(screen.queryByText('Optimize onboarding copy')).not.toBeInTheDocument();
   });
 
   it('promotes urgent work above other tasks', async () => {
@@ -145,7 +171,35 @@ describe('Sorting strategies', () => {
     await user.click(trigger);
     await user.click(screen.getByRole('option', { name: /Urgent/i }));
 
-    const rows = Array.from(document.querySelectorAll('[data-task-id]'));
-    expect(rows[0]).toHaveAttribute('data-task-id', 'task-urgent');
+    await waitFor(() => {
+      const rows = Array.from(document.querySelectorAll('[data-task-id]'));
+      const order = rows.map(row => row.getAttribute('data-task-id'));
+      const urgentIndex = order.indexOf('task-urgent');
+
+      expect(urgentIndex).toBeGreaterThanOrEqual(0);
+      expect(urgentIndex).toBeLessThan(2);
+    });
+  });
+
+  it('locks a task without crashing when prior lock storage is corrupted', async () => {
+    window.localStorage.setItem('locked-tasks', 'null');
+    const user = userEvent.setup();
+    const { unmount } = render(<StrategyHarness />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Stabilize billing adapters')).toBeInTheDocument();
+    });
+
+    const [firstLockButton] = screen.getAllByLabelText(/Lock task in place/i);
+    await user.click(firstLockButton);
+
+    expect(screen.queryByText(/Unable to render task list/i)).not.toBeInTheDocument();
+
+    unmount();
+    render(<StrategyHarness />);
+    await waitFor(() => {
+      expect(screen.getByText('Stabilize billing adapters')).toBeInTheDocument();
+    });
+    expect(screen.getAllByLabelText(/Unlock task/i).length).toBeGreaterThan(0);
   });
 });

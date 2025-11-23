@@ -107,7 +107,7 @@ export const GapAnalysisSessionSchema = z.object({
   generated_tasks: z.array(BridgingTaskSchema),
   user_acceptances: z.array(
     z.object({
-      task_id: z.string().uuid(),
+      task_id: TaskIdentifierSchema,
       accepted: z.boolean(),
       edited: z.boolean(),
       final_text: z.string().min(10).max(200).optional(),
@@ -116,7 +116,7 @@ export const GapAnalysisSessionSchema = z.object({
   ),
   insertion_result: z.object({
     success: z.boolean(),
-    inserted_task_ids: z.array(z.string().uuid()),
+    inserted_task_ids: z.array(TaskIdentifierSchema),
     error: z.string().nullable(),
   }),
   performance_metrics: z.object({

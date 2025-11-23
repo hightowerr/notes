@@ -77,6 +77,14 @@ function createRelationshipInsertBuilder(error: Error | null = null, capturedRow
   };
 }
 
+function createEdgeDeleteBuilder(error: Error | null = null) {
+  const secondEq = vi.fn().mockResolvedValue({ error });
+  const firstEq = vi.fn().mockReturnValue({ eq: secondEq });
+  return {
+    delete: vi.fn().mockReturnValue({ eq: firstEq }),
+  };
+}
+
 function createDeleteBuilder() {
   return {
     delete: vi.fn().mockReturnValue({ in: vi.fn().mockResolvedValue({ error: null }) }),
@@ -204,22 +212,9 @@ describe('taskInsertionService.insertBridgingTasks', () => {
         ],
         error: null,
       }),
-      // 5. Delete builder for attempting to remove cycle edge
-      {
-        delete: vi.fn().mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            eq: vi.fn().mockResolvedValue({ error: null }),
-          }),
-        }),
-      },
-      // 6. Load relationships again after delete attempt - still has cycle
-      createSelectBuilder({
-        data: [
-          { source_task_id: 'task-suc', target_task_id: 'task-pre' },
-        ],
-        error: null,
-      }),
-      // 7. Load task texts for final cycle detection
+      // 5. Delete builder for attempting to remove cycle edge (fails)
+      createEdgeDeleteBuilder(new Error('Failed to remove direct edge')),
+      // 6. Load task texts for final cycle detection
       createSelectBuilder({
         data: [
           { task_id: 'task-pre', task_text: 'Predecessor task' },

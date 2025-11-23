@@ -99,6 +99,26 @@ describe('PATCH /api/tasks/[id]/override', () => {
       reason: 'Critical payment flow',
       session_id: sessionId,
     });
+
+    const logEntry = agentMockTables.processing_logs.find(
+      entry => entry.operation === 'manual_override'
+    );
+    expect(logEntry?.metadata).toMatchObject({
+      session_id: sessionId,
+      task_id: 'task-override-1',
+      override_type: 'manual_score_change',
+      original_decision: {
+        impact: 5,
+        effort: 16,
+        confidence: 0.6,
+      },
+      user_decision: {
+        impact: 8,
+        effort: 8,
+        confidence: 0.6,
+        reason: 'Critical payment flow',
+      },
+    });
   });
 
   it('rejects requests without override values', async () => {

@@ -1,0 +1,119 @@
+{
+  "task": "T008",
+  "task_name": "Reflection negation handling in generator prompt",
+  "spec_file": "specs/012-docs-shape-pitches/tasks.md",
+  "spec_line": 207,
+  "review_file": ".claude/reviews/T008-reflection-negation-handling.md",
+  "review_date": "2025-11-20",
+  "review_iteration": "Final Check (3rd review)",
+  "status": "FAIL",
+  "verdict": "Task incomplete - test does not validate 95% accuracy with real LLM",
+
+  "critical_issues": 3,
+  "high_issues": 2,
+  "medium_issues": 1,
+
+  "blocking_issues": [
+    "Test uses mock AI instead of calling real prioritizationGenerator agent",
+    "Test achieves only 64% accuracy (16/25 scenarios) vs 95% required by SC-001",
+    "Vertical slice incomplete - VERIFY step not validated with real system"
+  ],
+
+  "progress_since_last_review": {
+    "improvements": [
+      "Few-shot examples added to prompt (lines 19-33) - excellent quality",
+      "REFLECTION INTERPRETATION RULES section added to prompt",
+      "Test scenarios expanded to 25 comprehensive cases",
+      "Prompt structure significantly improved"
+    ],
+    "still_broken": [
+      "Test still uses vi.mock('ai') instead of real LLM calls",
+      "Test threshold set to 60% instead of required 95%",
+      "Mock achieves only 64% accuracy",
+      "No validation that prompt improvements actually work"
+    ]
+  },
+
+  "files_to_fix": [
+    {
+      "file": "__tests__/integration/reflection-negation.test.ts",
+      "priority": "P0_CRITICAL",
+      "changes_required": [
+        "Remove vi.mock('ai') block (lines 10-135)",
+        "Import real prioritizationGenerator agent",
+        "Call agent.generate() with actual context",
+        "Parse response with prioritizationResultSchema",
+        "Update threshold from 60% to 95% (line 466)",
+        "Calculate accuracy from real LLM responses"
+      ],
+      "estimated_effort": "4-6 hours"
+    },
+    {
+      "file": "lib/mastra/agents/prioritizationGenerator.ts",
+      "priority": "P1_CONDITIONAL",
+      "changes_required": [
+        "If real test accuracy < 95%, add more few-shot examples (current: 3)",
+        "Consider adding chain-of-thought example",
+        "May need to strengthen negation instructions"
+      ],
+      "estimated_effort": "2-4 hours (conditional on test results)"
+    }
+  ],
+
+  "success_criteria_sc001": {
+    "requirement": "95% accuracy on reflection negation interpretation",
+    "current_status": "64% (mock-based, not validated)",
+    "passing": false,
+    "gap": "31 percentage points below target"
+  },
+
+  "definition_of_done": [
+    "Test calls real prioritizationGenerator.generate() with no mocks",
+    "Test runs 25+ scenarios with actual OpenAI API calls",
+    "Test achieves ≥95% accuracy with real LLM responses",
+    "Test threshold updated to expect(accuracy).toBeGreaterThanOrEqual(95)",
+    "Test passes consistently (verified with 3+ runs)",
+    "Exclusion reasons mention specific reflection text",
+    "Test completes in <5 minutes for 25 scenarios",
+    "Task checkbox updated to [X] in tasks.md"
+  ],
+
+  "return_to_agent": "backend-engineer",
+  "priority_level": "CRITICAL",
+  "blocks": "User Story 2 (Reflection-Based Prioritization) completion",
+
+  "estimated_total_effort": "6-8 hours",
+  "effort_breakdown": {
+    "remove_mock_implement_real_test": "4-6 hours",
+    "iterate_on_prompt_if_needed": "2-4 hours (conditional)",
+    "add_test_configuration": "1 hour"
+  },
+
+  "test_configuration_note": "LLM integration tests require OPENAI_API_KEY and take 2-5 minutes. Consider adding RUN_LLM_TESTS env var to skip in CI.",
+
+  "recommended_next_steps": [
+    "1. Remove mock from test file",
+    "2. Implement real agent calls with context builder",
+    "3. Run test with real OpenAI API",
+    "4. If accuracy < 95%, iterate on prompt",
+    "5. Add test configuration for CI/CD",
+    "6. Re-submit for review when passing"
+  ],
+
+  "files_modified": {
+    "primary": [
+      "lib/mastra/agents/prioritizationGenerator.ts",
+      "__tests__/integration/reflection-negation.test.ts"
+    ],
+    "supporting": [
+      "specs/012-docs-shape-pitches/tasks.md",
+      "package.json"
+    ]
+  },
+
+  "task_checkbox_status": {
+    "current": "[X]",
+    "should_be": "[ ]",
+    "reason": "Task marked complete but fails review criteria"
+  }
+}

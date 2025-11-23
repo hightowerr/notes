@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Loader2, Lock, Pencil, Unlock, X } from 'lucide-react';
+import { Check, Lightbulb, Loader2, Lock, Pencil, Unlock, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -66,6 +66,7 @@ type TaskRowProps = {
   manualOverride?: ManualOverrideState | null;
   baselineScore?: StrategicScore | null;
   onManualOverrideChange?: (override: ManualOverrideState | null) => void;
+  inclusionReason?: string | null;
 };
 
 function MobileFieldLabel({ children }: { children: string }) {
@@ -107,6 +108,7 @@ export function TaskRow({
   manualOverride = null,
   baselineScore = null,
   onManualOverrideChange,
+  inclusionReason,
 }: TaskRowProps) {
   const categoryLabel = category
     ? category === 'leverage'
@@ -704,6 +706,36 @@ export function TaskRow({
                       Edit scores
                     </button>
                   </div>
+                  {strategicDetails?.reflection_influence && (
+                    <div 
+                      className="mt-1 flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400"
+                      role="status"
+                      aria-label={`Reflection influence: ${strategicDetails.reflection_influence}`}
+                    >
+                      <Lightbulb className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+                      <span className="font-medium">
+                        Reflection: {strategicDetails.reflection_influence}
+                      </span>
+                    </div>
+                  )}
+                  {inclusionReason && (
+                    <div className="mt-1">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Badge 
+                            variant="outline" 
+                            className="inline-flex items-center gap-1 border-emerald-500/30 bg-emerald-500/5 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400 cursor-help"
+                          >
+                            <Check className="h-3 w-3" />
+                            <span className="max-w-[200px] truncate">{inclusionReason}</span>
+                          </Badge>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>{inclusionReason}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

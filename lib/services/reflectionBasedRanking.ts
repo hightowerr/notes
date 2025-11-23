@@ -1,5 +1,9 @@
 import { performance } from 'node:perf_hooks';
 
+// Migration note: This file remains for legacy reflection re-ranking only.
+// New runs should rely on the unified prioritization loop in
+// lib/services/prioritizationLoop.ts guarded by USE_UNIFIED_PRIORITIZATION.
+
 import { supabase } from '@/lib/supabase';
 import { calculateCosineSimilarity } from '@/lib/services/aiSummarizer';
 import { calculateRecencyWeight } from '@/lib/services/reflectionService';
@@ -158,6 +162,11 @@ function buildAdjustedPlan(
   };
 }
 
+/**
+ * @deprecated Use the unified prioritization flow (prioritizationLoop + hybrid evaluator)
+ * for reflection handling. This legacy character-frequency re-ranking is retained only
+ * for rollback paths and the manual adjustment endpoint while the rollout completes.
+ */
 export async function buildAdjustedPlanFromReflections(options: {
   userId: string;
   baselinePlan: PrioritizedTaskPlan;

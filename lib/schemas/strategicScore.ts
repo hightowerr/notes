@@ -60,9 +60,10 @@ export const StrategicScoreSchema = z.object({
   effort: z.number().min(0.5).max(160),
   confidence: z.number().min(0).max(1),
   priority: z.number().min(0).max(100),
-  reasoning: StrategicScoreReasoningSchema,
+  reasoning: z.union([z.string(), StrategicScoreReasoningSchema]),
   scored_at: z.string().datetime(),
   confidence_breakdown: ConfidenceBreakdownSchema.optional(),
+  reflection_influence: z.string().optional(),
 });
 
 export type StrategicScore = z.infer<typeof StrategicScoreSchema>;
@@ -82,11 +83,12 @@ export type TaskWithScores = {
   priority: number;
   hasManualOverride: boolean;
   quadrant: Quadrant;
-  reasoning?: {
+  reasoning?: string | {
     impact_keywords: string[];
     effort_source: EffortSource;
     effort_hint?: string;
     complexity_modifiers?: string[];
   };
   confidenceBreakdown?: ConfidenceBreakdown | null;
+  reflection_influence?: string;
 };

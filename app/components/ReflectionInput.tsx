@@ -95,6 +95,10 @@ export function ReflectionInput({
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        // Surface specific outcome requirement error to user
+        if (errorData?.error === 'OUTCOME_REQUIRED') {
+          throw new Error(errorData.message || 'Create an outcome before adding reflections.');
+        }
         throw new Error(errorData.message || 'Server error occurred');
       }
 

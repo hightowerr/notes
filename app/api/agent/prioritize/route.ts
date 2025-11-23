@@ -10,6 +10,13 @@ import { getQuadrant } from '@/lib/schemas/quadrant';
 import type { StrategicScoresMap } from '@/lib/schemas/strategicScore';
 import type { TaskDependency, TaskSummary } from '@/lib/types/agent';
 import { resetRetryQueue } from '@/lib/services/retryQueue';
+import {
+  emitPrioritizationHeartbeat,
+  subscribeToPrioritizationProgress,
+  type PrioritizationStreamEvent,
+} from '@/lib/services/prioritizationStream';
+
+export const dynamic = 'force-dynamic';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
@@ -22,7 +29,7 @@ type TaskEmbeddingRow = {
   task_text: string | null;
   document_id: string | null;
   status?: string | null;
-  manual_override?: boolean | null;
+  manual_overrides?: boolean | null;
 };
 
 type PreparedStrategicData = {
@@ -50,6 +57,24 @@ const defaultExecutionMetadata = {
   status_note: null,
 };
 
+const dependencyOverrideSchema = z.object({
+  source_task_id: z.string().min(1),
+  target_task_id: z.string().min(1),
+  relationship_type: z.enum(['prerequisite', 'blocks', 'related']),
+});
+
+const requestSchema = z.object({
+  outcome_id: z.string().uuid(),
+  user_id: z.string().min(1),
+  active_reflection_ids: z.array(z.string().uuid()).max(50).optional(),
+  dependency_overrides: z.array(dependencyOverrideSchema).optional(),
+});
+
+const progressQuerySchema = z.object({
+  session_id: z.string().uuid(),
+  heartbeat_ms: z.coerce.number().int().min(1000).max(15000).optional(),
+});
+
 async function prepareStrategicData(
   sessionId: string,
   outcomeText: string | null
@@ -57,7 +82,7 @@ async function prepareStrategicData(
   try {
     const { data: taskRows, error } = await supabase
       .from('task_embeddings')
-      .select('task_id, task_text, document_id, status, manual_override')
+      .select('task_id, task_text, document_id, status, manual_overrides')
       .eq('status', 'completed')
       .limit(200);
 
@@ -72,7 +97,7 @@ async function prepareStrategicData(
         task_id: row.task_id,
         task_text: row.task_text ?? 'Task description unavailable',
         document_id: row.document_id ?? null,
-        manual_override: Boolean(row.manual_override),
+        manual_override: Boolean(row.manual_overrides),
       }));
 
     if (tasks.length === 0) {
@@ -113,19 +138,6 @@ async function prepareStrategicData(
 export async function POST(request: Request) {
   try {
     const payload = await request.json();
-
-const dependencyOverrideSchema = z.object({
-  source_task_id: z.string().min(1),
-  target_task_id: z.string().min(1),
-  relationship_type: z.enum(['prerequisite', 'blocks', 'related']),
-});
-
-const requestSchema = z.object({
-  outcome_id: z.string().uuid(),
-  user_id: z.string().min(1),
-  active_reflection_ids: z.array(z.string().uuid()).max(50).optional(),
-  dependency_overrides: z.array(dependencyOverrideSchema).optional(),
-});
 
     const parsed = requestSchema.safeParse(payload);
     if (!parsed.success) {
@@ -265,7 +277,9 @@ const requestSchema = z.object({
         session_id: session.id,
         status: session.status,
         prioritized_plan: session.prioritized_plan,
+        excluded_tasks: session.excluded_tasks,
         execution_metadata: session.execution_metadata ?? defaultExecutionMetadata,
+        evaluation_metadata: session.evaluation_metadata ?? null,
         strategic_scores: strategicScores,
         prioritized_tasks: prioritizedTasks,
       },
@@ -278,4 +292,74 @@ const requestSchema = z.object({
       { status: 500 }
     );
   }
+}
+
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const parsed = progressQuerySchema.safeParse({
+    session_id: url.searchParams.get('session_id'),
+    heartbeat_ms: url.searchParams.get('heartbeat_ms') ?? undefined,
+  });
+
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: 'INVALID_REQUEST', details: parsed.error.flatten() },
+      { status: 400 }
+    );
+  }
+
+  const { session_id: sessionId, heartbeat_ms: heartbeatMs = 5000 } = parsed.data;
+  const encoder = new TextEncoder();
+  const abortSignal = (request as { signal?: AbortSignal }).signal;
+
+  let cleanup: (() => void) | null = null;
+  const stream = new ReadableStream({
+    start(controller) {
+      const send = (event: PrioritizationStreamEvent) => {
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        } catch (error) {
+          console.warn('[Agent Prioritize API] Failed to send progress event', error);
+        }
+      };
+
+      const heartbeat = setInterval(() => emitPrioritizationHeartbeat(sessionId), heartbeatMs);
+      const unsubscribe = subscribeToPrioritizationProgress(sessionId, send);
+
+      send({
+        type: 'heartbeat',
+        session_id: sessionId,
+        timestamp: new Date().toISOString(),
+      });
+
+      cleanup = () => {
+        clearInterval(heartbeat);
+        unsubscribe();
+      };
+
+      const close = () => {
+        cleanup?.();
+        try {
+          controller.close();
+        } catch (error) {
+          console.warn('[Agent Prioritize API] Failed to close stream', error);
+        }
+      };
+
+      if (abortSignal) {
+        abortSignal.addEventListener('abort', close);
+      }
+    },
+    cancel() {
+      cleanup?.();
+    },
+  });
+
+  return new NextResponse(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      Connection: 'keep-alive',
+      'Cache-Control': 'no-cache, no-transform',
+    },
+  });
 }

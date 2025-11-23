@@ -114,6 +114,11 @@ describe('strategic score schemas', () => {
     const quickWinsFilter = STRATEGY_CONFIGS.quick_wins.filter!;
     expect(quickWinsFilter(baseTask)).toBe(true);
     expect(quickWinsFilter({ ...baseTask, effort: 12 })).toBe(false);
+    expect(quickWinsFilter({ ...baseTask, impact: 3 })).toBe(false);
+
+    const strategicBetFilter = STRATEGY_CONFIGS.strategic_bets.filter!;
+    expect(strategicBetFilter({ ...baseTask, impact: 8.5, effort: 18 })).toBe(true);
+    expect(strategicBetFilter({ ...baseTask, impact: 4.5, effort: 18 })).toBe(false);
 
     const urgentTask = baseTask;
     const normalTask = { ...baseTask, content: 'Review retention analysis', priority: 90 };

@@ -1,25 +1,29 @@
-import { performance } from 'node:perf_hooks';
+
 import { z } from 'zod';
 
 import { supabase } from '@/lib/supabase';
 import { enrichReflection, fetchRecentReflections } from '@/lib/services/reflectionService';
 import { generateTaskId } from '@/lib/services/embeddingService';
 import { EmbeddingQueue } from '@/lib/services/embeddingQueue';
-import { taskOrchestratorAgent } from '@/lib/mastra/agents/taskOrchestrator';
+import { Agent } from '@mastra/core/agent';
+import { initializeMastra } from '@/lib/mastra/init';
+import { prioritizationGenerator, GENERATOR_PROMPT, createPrioritizationAgent, generatePrioritizationInstructions } from '@/lib/mastra/agents/prioritizationGenerator';
+import {
+  prioritizationResultSchema,
+  type PrioritizationResult,
+} from '@/lib/schemas/prioritizationResultSchema';
 import { prioritizedPlanSchema } from '@/lib/schemas/prioritizedPlanSchema';
+import { prioritizeWithHybridLoop, type PrioritizationProgressUpdate } from '@/lib/services/prioritizationLoop';
+import { USE_UNIFIED_PRIORITIZATION } from '@/lib/config/featureFlags';
 import {
   buildExecutionMetadata,
-  buildPlanSummary,
-  ensurePlanConsistency,
-  generateFallbackPlan,
-  generateFallbackTrace,
   MASRA_TOOL_NAMES,
   extractFailedTools,
   normalizeReasoningSteps,
-  parsePlanFromAgentResponse,
   summariseToolUsage,
 } from '@/lib/mastra/services/resultParser';
 import { resolveOutcomeAlignedTasks } from '@/lib/services/lnoTaskService';
+import { emitPrioritizationProgress } from '@/lib/services/prioritizationStream';
 import type {
   AgentRuntimeContext,
   AgentRunResult,
@@ -65,6 +69,13 @@ type ProcessedDocumentRow = {
   structured_output: {
     actions?: Array<{ text: string }>;
   } | null;
+};
+
+type AgentRunEnvelope = {
+  primary: AgentRunResult;
+  shadow?: AgentRunResult | null;
+  primaryEngine: 'unified' | 'legacy';
+  shadowEngine?: 'unified' | 'legacy';
 };
 
 function toTaskSummary(row: TaskEmbeddingRow): TaskSummary {
@@ -222,18 +233,49 @@ async function fetchRuntimeContext(
   let previousAnnotations: TaskAnnotation[] = [];
   let previousRemovals: TaskRemoval[] = [];
 
+  const legacyPlanSchema = z.object({
+    ordered_task_ids: z.array(z.string()),
+    confidence_scores: z.record(z.number()),
+    task_annotations: z.array(z.any()).optional(),
+    removed_tasks: z.array(z.any()).optional(),
+  });
+
   if (previousSession && previousSession.prioritized_plan) {
     try {
       const rawPlan = previousSession.prioritized_plan as unknown;
-      if (typeof rawPlan === 'string') {
-        const parsed = parsePlanFromAgentResponse(rawPlan);
-        if (parsed.success) {
-          previousPlan = ensurePlanConsistency(parsed.plan);
-        }
+      
+      // 1. Try new schema (PrioritizedTaskPlan) first
+      const planParsed = prioritizedPlanSchema.safeParse(rawPlan);
+      if (planParsed.success) {
+        previousPlan = planParsed.data;
       } else {
-        const parsed = prioritizedPlanSchema.safeParse(rawPlan);
-        if (parsed.success) {
-          previousPlan = ensurePlanConsistency(parsed.data);
+        // 2. Try intermediate schema (PrioritizationResult) and map it
+        const resultParsed = prioritizationResultSchema.safeParse(rawPlan);
+        if (resultParsed.success) {
+          previousPlan = mapAgentResultToPlan(resultParsed.data);
+        } else {
+          // 3. Fallback to legacy schema
+          const legacyParsed = legacyPlanSchema.safeParse(rawPlan);
+          if (legacyParsed.success) {
+            // Map legacy to new structure (partial) for internal use
+            previousAnnotations = legacyParsed.data.task_annotations || [];
+            previousRemovals = legacyParsed.data.removed_tasks || [];
+            
+            // Create a pseudo-plan for the context
+            // We cast to any because we're constructing a partial plan that satisfies the shape
+            // needed for context, even if it doesn't strictly match the full schema validation
+            previousPlan = {
+              ordered_task_ids: legacyParsed.data.ordered_task_ids,
+              execution_waves: [],
+              dependencies: [],
+              confidence_scores: legacyParsed.data.confidence_scores,
+              synthesis_summary: '',
+              task_annotations: [],
+              removed_tasks: [],
+              excluded_tasks: [],
+              created_at: new Date().toISOString(),
+            } as unknown as PrioritizedTaskPlan; 
+          }
         }
       }
     } catch (error) {
@@ -242,16 +284,13 @@ async function fetchRuntimeContext(
   }
 
   if (previousPlan) {
-    previousAnnotations = Array.isArray(previousPlan.task_annotations)
-      ? previousPlan.task_annotations.filter(
-          annotation => annotation && typeof annotation.task_id === 'string'
-        )
-      : [];
-    previousRemovals = Array.isArray(previousPlan.removed_tasks)
-      ? previousPlan.removed_tasks.filter(
-          removal => removal && typeof removal.task_id === 'string'
-        )
-      : [];
+    // If it's a new plan, extract annotations/removals from it
+    if (previousPlan.task_annotations) {
+         previousAnnotations = previousPlan.task_annotations;
+    }
+    if (previousPlan.removed_tasks) {
+         previousRemovals = previousPlan.removed_tasks;
+    }
   }
 
   const annotationByTask = new Map<string, TaskAnnotation>();
@@ -274,7 +313,7 @@ async function fetchRuntimeContext(
       (fallbackRank >= 0 ? fallbackRank + 1 : null);
     const previousConfidence =
       annotation?.confidence ??
-      previousPlan?.confidence_scores?.[task.task_id] ??
+      (previousPlan?.confidence_scores as Record<string, number>)?.[task.task_id] ??
       null;
     return {
       ...task,
@@ -282,7 +321,7 @@ async function fetchRuntimeContext(
       previous_confidence:
         typeof previousConfidence === 'number' ? previousConfidence : null,
       previous_state: annotation?.state,
-      removal_reason: annotation?.removal_reason ?? removalByTask.get(task.task_id)?.removal_reason ?? null,
+      removal_reason: (annotation as any)?.removal_reason ?? removalByTask.get(task.task_id)?.removal_reason ?? null,
       manual_override: annotation?.manual_override ?? false,
     };
   };
@@ -358,12 +397,7 @@ async function fetchRuntimeContext(
     },
     history: previousPlan
       ? {
-          previous_plan: {
-            ordered_task_ids: previousPlan.ordered_task_ids,
-            confidence_scores: previousPlan.confidence_scores,
-            task_annotations: previousAnnotations,
-            removed_tasks: previousRemovals,
-          },
+          previous_plan: previousPlan,
         }
       : undefined,
   };
@@ -521,118 +555,198 @@ type PartialResultOptions = {
 };
 
 function buildPartialResult(options: PartialResultOptions): AgentRunResult {
-  const { context, startedAt, normalizedSteps } = options;
+  const { startedAt, normalizedSteps } = options;
   const narrative = condenseStatusText(options.narrative);
   const errorMessage = toErrorMessage(options.error);
 
-  if (context.tasks.length === 0) {
-    const failedSteps: ReasoningStep[] = normalizeReasoningSteps([
-      {
-        step_number: 1,
-        timestamp: new Date().toISOString(),
-        thought: 'No available tasks to prioritize. Agent cannot produce a plan.',
-        tool_name: null,
-        tool_input: null,
-        tool_output: null,
-        duration_ms: 10,
-        status: 'failed' as const,
-      },
-    ]);
-
-    const completedAt = performance.now();
-    const metadata = buildExecutionMetadata({
-      steps: failedSteps,
-      startedAt,
-      completedAt,
-      errors: 1,
-      statusNote: buildPartialStatusNote([], narrative, errorMessage),
-      failedTools: [],
-    });
-
-    return {
-      status: 'failed',
-      error: 'No tasks available to prioritize.',
-      metadata,
-      trace: {
-        session_id: '',
-        steps: failedSteps,
-        total_duration_ms: metadata.total_time_ms,
-        total_steps: metadata.steps_taken,
-        tools_used_count: metadata.tool_call_count,
-      },
-    };
-  }
-
-  const planSummary = buildPlanSummary(context);
-  const planWithoutOverrides = generateFallbackPlan(context.tasks, planSummary);
-  const plan = {
-    ...planWithoutOverrides,
-    dependencies: mergePlanDependencies(
-      planWithoutOverrides.dependencies ?? [],
-      options.dependencyOverrides ?? []
-    ),
-  };
-  const fallbackSteps = generateFallbackTrace(context.tasks, plan, { narrative: null });
-
-  const provisionalFailedTools = inferFailureTools(normalizedSteps, narrative, errorMessage);
-  const combinedRawSteps: Array<Record<string, unknown>> = [...normalizedSteps];
-  const hasFailureStep = normalizedSteps.some(step => step.status === 'failed');
-
-  if (!hasFailureStep) {
-    combinedRawSteps.push({
-      step_number: combinedRawSteps.length + 1,
-      timestamp: new Date().toISOString(),
-      thought: buildFailureThought(provisionalFailedTools, errorMessage, narrative),
-      tool_name: provisionalFailedTools[0] ?? null,
-      tool_input: null,
-      tool_output: errorMessage ? { error: errorMessage } : null,
-      duration_ms: 10,
-      status: 'failed',
-    });
-  }
-
-  combinedRawSteps.push(...fallbackSteps);
-
-  const combinedSteps = normalizeReasoningSteps(combinedRawSteps);
-  const failedTools = inferFailureTools(combinedSteps, narrative, errorMessage);
-  const statusNote = buildPartialStatusNote(failedTools, narrative, errorMessage);
-
   const completedAt = performance.now();
   const metadata = buildExecutionMetadata({
-    steps: combinedSteps,
+    steps: normalizedSteps,
     startedAt,
     completedAt,
-    statusNote,
-    failedTools,
+    errors: 1,
+    statusNote: buildPartialStatusNote([], narrative, errorMessage),
+    failedTools: [],
   });
 
   return {
-    status: 'completed',
-    plan,
+    status: 'failed',
+    error: errorMessage ?? 'Unknown error during prioritization',
     metadata,
     trace: {
       session_id: '',
-      steps: combinedSteps,
+      steps: normalizedSteps,
       total_duration_ms: metadata.total_time_ms,
       total_steps: metadata.steps_taken,
-      tools_used_count: metadata.tool_call_count,
+      tools_used_count: metadata.tool_call_count as Record<string, number>,
     },
+    evaluationMetadata: null,
   };
+}
+
+function mapAgentResultToPlan(result: PrioritizationResult): PrioritizedTaskPlan {
+  // Extract confidence scores from per_task_scores
+  const confidence_scores: Record<string, number> = {};
+  Object.values(result.per_task_scores).forEach((score: any) => {
+    confidence_scores[score.task_id] = score.confidence;
+  });
+
+  // Map included tasks to task annotations
+  const task_annotations = result.included_tasks.map((task: any) => ({
+    task_id: task.task_id,
+    reasoning: task.inclusion_reason,
+    confidence: result.per_task_scores[task.task_id]?.confidence,
+  }));
+
+  // Map excluded tasks to removed tasks
+  const removed_tasks = result.excluded_tasks.map((task: any) => ({
+    task_id: task.task_id,
+    removal_reason: task.exclusion_reason,
+  }));
+
+  // Create a single execution wave for now
+  const execution_waves = [
+    {
+      wave_number: 1,
+      task_ids: result.ordered_task_ids,
+      parallel_execution: false,
+    },
+  ];
+
+  // Map dependencies from per_task_scores if available
+  const dependencies: TaskDependency[] = [];
+  Object.values(result.per_task_scores).forEach((score: any) => {
+    if (score.dependencies && Array.isArray(score.dependencies)) {
+      score.dependencies.forEach((depId: string) => {
+        dependencies.push({
+          source_task_id: depId,
+          target_task_id: score.task_id,
+          relationship_type: 'prerequisite',
+          confidence: 1,
+          detection_method: 'ai_inference',
+        });
+      });
+    }
+  });
+
+  return {
+    ordered_task_ids: result.ordered_task_ids,
+    execution_waves,
+    dependencies,
+    confidence_scores,
+    synthesis_summary: result.thoughts.prioritization_strategy,
+    task_annotations,
+    removed_tasks,
+    excluded_tasks: result.excluded_tasks, // Keep excluded_tasks for frontend compatibility
+    created_at: new Date().toISOString(),
+  };
+}
+
+function withStatusNote(metadata: ExecutionMetadata, note: string): ExecutionMetadata {
+  return {
+    ...metadata,
+    status_note: metadata.status_note ? `${metadata.status_note} ${note}` : note,
+  };
+}
+
+function backfillMissingPerTaskScores(payload: any): any {
+  if (!payload || !Array.isArray(payload.included_tasks)) {
+    return payload;
+  }
+
+  const scores = typeof payload.per_task_scores === 'object' && payload.per_task_scores !== null
+    ? payload.per_task_scores
+    : {};
+
+  const confidenceFallback =
+    typeof payload.confidence === 'number' && Number.isFinite(payload.confidence)
+      ? Math.min(1, Math.max(0, payload.confidence))
+      : 0.5;
+
+  payload.included_tasks.forEach((task: any) => {
+    if (!task || typeof task.task_id !== 'string') {
+      return;
+    }
+    const taskId = task.task_id;
+    if (scores[taskId]) {
+      return;
+    }
+    const alignmentScore =
+      typeof task.alignment_score === 'number' && Number.isFinite(task.alignment_score)
+        ? task.alignment_score
+        : 5;
+    scores[taskId] = {
+      task_id: taskId,
+      impact: alignmentScore,
+      effort: 8,
+      confidence: confidenceFallback,
+      reasoning: 'Backfilled score for missing per_task_scores entry',
+      dependencies: [],
+    };
+  });
+
+  payload.per_task_scores = scores;
+  return payload;
 }
 
 async function runAgent(
   context: AgentRuntimeContext,
-  options: { dependencyOverrides?: TaskDependency[] } = {}
+  options: { dependencyOverrides?: TaskDependency[]; sessionId: string }
+): Promise<AgentRunEnvelope> {
+  if (!USE_UNIFIED_PRIORITIZATION) {
+    return {
+      primary: await runLegacyAgent(context, options),
+      shadow: null,
+      primaryEngine: 'legacy',
+    };
+  }
+
+  const [hybridResult, legacyResult] = await Promise.all([
+    runHybridAgent(context, options),
+    runLegacyAgent(context, options),
+  ]);
+
+  if (hybridResult.status === 'completed') {
+    return {
+      primary: hybridResult,
+      shadow: legacyResult,
+      primaryEngine: 'unified',
+      shadowEngine: 'legacy',
+    };
+  }
+
+  if (legacyResult.status === 'completed') {
+    return {
+      primary: {
+        ...legacyResult,
+        metadata: withStatusNote(
+          legacyResult.metadata,
+          'Legacy plan returned after unified loop fallback.'
+        ),
+      },
+      shadow: hybridResult,
+      primaryEngine: 'legacy',
+      shadowEngine: 'unified',
+    };
+  }
+
+  return {
+    primary: hybridResult,
+    shadow: legacyResult,
+    primaryEngine: 'unified',
+    shadowEngine: 'legacy',
+  };
+}
+
+async function runHybridAgent(
+  context: AgentRuntimeContext,
+  options: { dependencyOverrides?: TaskDependency[]; sessionId: string }
 ): Promise<AgentRunResult> {
   const startedAt = performance.now();
-  let normalizedSteps: ReasoningStep[] = [];
-  let lastNarrative: string | null = null;
-  const previousPlan = context.history?.previous_plan;
+  const normalizedSteps: ReasoningStep[] = [];
   const dependencyOverrides = options.dependencyOverrides ?? [];
-  const taskTitleLookup = new Map<string, string>();
-  context.tasks.forEach(task => {
-    taskTitleLookup.set(task.task_id, task.task_text);
-  });
+  const previousPlan = context.history?.previous_plan;
+  const sessionId = options.sessionId;
 
   const hasEmbeddingBackedTasks =
     context.tasks.length === 0 || context.tasks.some(task => task.source === 'embedding');
@@ -651,143 +765,151 @@ async function runAgent(
   }
 
   try {
-    const messages: Array<{ role: 'user'; content: string }> = [
+    const reflections = context.reflections.map(reflection => reflection.text).filter(Boolean);
+
+    const publishProgress = (update: PrioritizationProgressUpdate) => {
+      emitPrioritizationProgress(sessionId, {
+        type: 'progress',
+        progress_pct: update.progressPct,
+        iteration: update.iteration,
+        total_iterations: update.totalIterations,
+        scored_tasks: update.scoredTasks,
+        total_tasks: update.totalTasks,
+        ordered_count: update.orderedCount,
+        status: update.stage,
+        plan: update.plan,
+        note: update.stage === 'completed' ? 'Prioritization finished' : 'Streaming progress',
+      });
+    };
+
+    const { plan, metadata: loopMetadata } = await prioritizeWithHybridLoop(
       {
-        role: 'user',
-        content: [
-          `Goal: Prioritize tasks for the following outcome -> ${context.outcome.assembled_text}`,
-          `User state preference: ${context.outcome.state_preference ?? 'not specified'}`,
-          `Daily capacity: ${context.outcome.daily_capacity_hours ?? 'unknown'} hours`,
-          `Tasks available: ${context.metadata.task_count}`,
-          `Reflections available: ${context.metadata.reflection_count}`,
-          `Previous plan available: ${context.metadata.has_previous_plan ? 'yes' : 'no'}`,
-          'Return ONLY the JSON structure described in your instructions.',
-        ].join('\n'),
+        tasks: context.tasks,
+        outcome: context.outcome.assembled_text,
+        reflections,
+        previousPlan,
+        dependencyOverrides,
+        onProgress: publishProgress,
       },
-    ];
-
-    if (previousPlan) {
-      const annotationByTask = new Map<string, TaskAnnotation>();
-      previousPlan.task_annotations?.forEach(annotation => {
-        if (annotation && typeof annotation.task_id === 'string') {
-          annotationByTask.set(annotation.task_id, annotation);
-        }
-      });
-
-      const topTasks = previousPlan.ordered_task_ids.slice(0, 10).map((taskId, index) => {
-        const parts: string[] = [`${index + 1}. ${taskId}`];
-        const annotation = annotationByTask.get(taskId);
-        const confidence =
-          (annotation?.confidence ?? previousPlan.confidence_scores?.[taskId]) ?? null;
-        if (typeof confidence === 'number') {
-          parts.push(`confidence=${confidence.toFixed(2)}`);
-        }
-        if (annotation?.confidence_delta && Math.abs(annotation.confidence_delta) >= 0.05) {
-          const delta = annotation.confidence_delta > 0 ? '+' : '';
-          parts.push(`Δ=${delta}${annotation.confidence_delta.toFixed(2)}`);
-        }
-        if (annotation?.state && annotation.state !== 'active') {
-          parts.push(`state=${annotation.state}`);
-        }
-        if (annotation?.manual_override) {
-          parts.push('manual_override=true');
-        }
-        if (annotation?.removal_reason) {
-          parts.push(`note=${annotation.removal_reason}`);
-        }
-        return `- ${parts.join(' • ')}`;
-      });
-
-      const removals = (previousPlan.removed_tasks ?? [])
-        .slice(0, 10)
-        .map(removal => {
-          const parts: string[] = [removal.task_id];
-          if (typeof removal.previous_rank === 'number') {
-            parts.push(`rank=${removal.previous_rank}`);
-          }
-          if (typeof removal.previous_confidence === 'number') {
-            parts.push(`confidence=${removal.previous_confidence.toFixed(2)}`);
-          }
-          if (removal.removal_reason) {
-            parts.push(`reason=${removal.removal_reason}`);
-          }
-          return `- ${parts.join(' • ')}`;
-        });
-
-      const manualOverrides = Array.from(annotationByTask.values()).filter(
-        annotation => annotation?.manual_override
-      );
-
-      const summaryLines = [
-        'Previous prioritization snapshot:',
-        topTasks.length > 0 ? 'Top ranked tasks last run:' : 'No prior ranked tasks captured.',
-        ...topTasks,
-      ];
-
-      if (manualOverrides.length > 0) {
-        summaryLines.push(
-          'Manual overrides preserved:',
-          ...manualOverrides.map(annotation => `- ${annotation.task_id}`)
-        );
-      }
-
-      if (removals.length > 0) {
-        summaryLines.push('Tasks previously removed (with reasons):', ...removals);
-      }
-
-      messages.push({
-        role: 'user',
-        content: summaryLines.join('\n'),
-      });
-    }
-
-    if (context.reflections.length > 0) {
-      messages.push({
-        role: 'user',
-        content: [
-          'Recent reflections:',
-          ...context.reflections.map(
-            reflection => `- (${reflection.relative_time ?? 'recent'}) ${reflection.text}`
-          ),
-        ].join('\n'),
-      });
-    }
-
-    if (context.tasks.length > 0) {
-      messages.push({
-        role: 'user',
-        content: [
-          'Sample tasks:',
-          ...context.tasks
-            .slice(0, 15)
-            .map(task => `- [${task.task_id}] ${task.task_text}`),
-        ].join('\n'),
-      });
-    }
-
-    if (dependencyOverrides.length > 0) {
-      messages.push({
-        role: 'user',
-        content: [
-          'Handle these user-locked dependencies exactly as specified:',
-          ...dependencyOverrides.map(dep => {
-            const source =
-              taskTitleLookup.get(dep.source_task_id) ?? dep.source_task_id;
-            const target =
-              taskTitleLookup.get(dep.target_task_id) ?? dep.target_task_id;
-            return `- ${source} (${dep.source_task_id}) ➝ ${target} (${dep.relationship_type})`;
-          }),
-        ].join('\n'),
-      });
-    }
-
-    const response = await taskOrchestratorAgent.generate(
-      messages,
-      {
-        maxSteps: 10,
-        toolChoice: 'auto',
-      } as any
+      {}
     );
+
+    const mergedPlan: PrioritizedTaskPlan = {
+      ...plan,
+      dependencies: mergePlanDependencies(plan.dependencies, dependencyOverrides),
+    };
+
+    const completedAt = performance.now();
+    const metadata = buildExecutionMetadata({
+      steps: [],
+      startedAt,
+      completedAt,
+      statusNote: loopMetadata.evaluation_triggered
+        ? `Hybrid loop completed in ${loopMetadata.iterations} iteration(s).`
+        : 'Hybrid loop fast path completed.',
+      failedTools: [],
+    });
+
+    const trace: ReasoningTraceRecord = {
+      session_id: '',
+      steps: [],
+      total_duration_ms: metadata.total_time_ms,
+      total_steps: 1,
+      tools_used_count: {},
+    };
+
+    return {
+      status: 'completed',
+      plan: mergedPlan,
+      metadata,
+      trace,
+      evaluationMetadata: loopMetadata,
+    };
+  } catch (error) {
+    console.error('[AgentOrchestration] Hybrid loop execution failed', error);
+    emitPrioritizationProgress(sessionId, {
+      type: 'progress',
+      progress_pct: 0,
+      iteration: 0,
+      total_iterations: 0,
+      scored_tasks: 0,
+      total_tasks: context.tasks.length,
+      ordered_count: 0,
+      status: 'failed',
+      note: 'Hybrid loop execution failed.',
+    });
+    return buildPartialResult({
+      context,
+      startedAt,
+      normalizedSteps,
+      narrative: 'Hybrid loop execution failed.',
+      error,
+      dependencyOverrides,
+    });
+  }
+}
+
+async function runLegacyAgent(
+  context: AgentRuntimeContext,
+  options: { dependencyOverrides?: TaskDependency[]; sessionId: string }
+): Promise<AgentRunResult> {
+  const startedAt = performance.now();
+  let normalizedSteps: ReasoningStep[] = [];
+  const previousPlan = context.history?.previous_plan;
+  const dependencyOverrides = options.dependencyOverrides ?? [];
+
+  const hasEmbeddingBackedTasks =
+    context.tasks.length === 0 || context.tasks.some(task => task.source === 'embedding');
+
+  if (context.tasks.length > 0 && !hasEmbeddingBackedTasks) {
+    return buildPartialResult({
+      context,
+      startedAt,
+      normalizedSteps,
+      narrative: 'Task embeddings are still being generated.',
+      error: new Error(
+        'Task embeddings are still processing. Please retry once document ingestion completes.'
+      ),
+      dependencyOverrides,
+    });
+  }
+
+  try {
+    const outcomeText = context.outcome.assembled_text;
+    const reflectionsText = context.reflections.length > 0
+      ? context.reflections.map(r => `- ${r.text}`).join('\n')
+      : 'No active reflections.';
+    
+    const tasksText = context.tasks.map(t => 
+      JSON.stringify({ id: t.task_id, text: t.task_text, source: t.source })
+    ).join('\n');
+
+    const previousPlanText = previousPlan
+      ? JSON.stringify(previousPlan, null, 2)
+      : 'No previous plan available.';
+
+    const dependencyConstraintsText = dependencyOverrides.length > 0
+      ? dependencyOverrides.map(d => 
+          `- ${d.source_task_id} ${d.relationship_type} ${d.target_task_id} (Confidence: ${d.confidence})`
+        ).join('\n')
+      : 'No manual dependency overrides.';
+
+    const filledInstructions = generatePrioritizationInstructions({
+      outcome: outcomeText,
+      reflections: reflectionsText,
+      taskCount: context.tasks.length,
+      tasks: tasksText,
+      previousPlan: previousPlanText,
+      dependencyConstraints: dependencyConstraintsText,
+    });
+
+    const agent = createPrioritizationAgent(filledInstructions, initializeMastra());
+
+    const response = await agent.generate([], {
+      maxSteps: 1,
+      toolChoice: 'none',
+      response_format: { type: 'json_object' },
+    });
 
     const rawOutput =
       (response as any)?.text ??
@@ -796,60 +918,66 @@ async function runAgent(
       (response as any);
 
     console.log('[AgentOrchestration] Raw agent output:', rawOutput);
-    if (typeof rawOutput === 'string') {
-      const text = rawOutput;
-      console.log('[AgentOrchestration] Raw agent output TEXT:', text);
-      console.log('[AgentOrchestration] Output length:', text.length);
-      console.log('[AgentOrchestration] BeginsWith "{"?:', text.trim().startsWith('{'));
-    } else {
-      console.log('[AgentOrchestration] Raw agent output is not a string:', typeof rawOutput);
-    }
 
-    const parsedPlan = parsePlanFromAgentResponse(rawOutput);
-
-    const rawSteps =
-      (response as any)?.steps ??
-      (response as any)?.trace?.steps ??
-      (response as any)?.execution?.steps ??
-      [];
-
-    normalizedSteps = normalizeReasoningSteps(Array.isArray(rawSteps) ? rawSteps : []);
-    console.log(
-      '[AgentOrchestration] Tool execution summary:',
-      summariseToolUsage(normalizedSteps)
-    );
-
-    if (!parsedPlan.success) {
+    let parsedResult;
+    try {
+      let json;
+      if (typeof rawOutput === 'string') {
+        let cleaned = rawOutput.trim();
+        if (cleaned.startsWith('```')) {
+          cleaned = cleaned.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
+        }
+        json = JSON.parse(cleaned);
+      } else {
+        json = rawOutput;
+      }
+      parsedResult = prioritizationResultSchema.safeParse(
+        backfillMissingPerTaskScores(json)
+      );
+    } catch (e) {
+      console.error('[AgentOrchestration] Failed to parse JSON', e);
       return buildPartialResult({
         context,
         startedAt,
         normalizedSteps,
-        narrative: parsedPlan.narrative ?? null,
-        error: parsedPlan.error,
+        narrative: 'Agent returned invalid JSON.',
+        error: e,
         dependencyOverrides,
       });
     }
 
-    lastNarrative = condenseStatusText(parsedPlan.narrative ?? null);
+    if (!parsedResult.success) {
+      console.error('[AgentOrchestration] Schema validation failed', parsedResult.error);
+      return buildPartialResult({
+        context,
+        startedAt,
+        normalizedSteps,
+        narrative: 'Agent output did not match schema.',
+        error: parsedResult.error,
+        dependencyOverrides,
+      });
+    }
+
+
+
+    const plan = mapAgentResultToPlan(parsedResult.data);
     const completedAt = performance.now();
 
+    // Create metadata from the single step
     const metadata = buildExecutionMetadata({
-      steps: normalizedSteps,
+      steps: [], // No reasoning steps in this single-shot agent
       startedAt,
       completedAt,
-      statusNote: lastNarrative,
-      failedTools: extractFailedTools(normalizedSteps, lastNarrative),
+      statusNote: 'Prioritization complete.',
+      failedTools: [],
     });
-
-    const plan = ensurePlanConsistency(parsedPlan.plan);
-    plan.dependencies = mergePlanDependencies(plan.dependencies ?? [], dependencyOverrides);
 
     const trace: ReasoningTraceRecord = {
       session_id: '',
-      steps: normalizedSteps,
+      steps: [],
       total_duration_ms: metadata.total_time_ms,
-      total_steps: metadata.steps_taken,
-      tools_used_count: metadata.tool_call_count,
+      total_steps: 1,
+      tools_used_count: {},
     };
 
     return {
@@ -857,18 +985,15 @@ async function runAgent(
       plan,
       metadata,
       trace,
+      evaluationMetadata: null,
     };
   } catch (error) {
-    console.log('[AgentOrchestration] Agent decided to fallback narrative path.');
-    console.warn('[AgentOrchestration] Agent execution failed, falling back', error);
-    const fallbackNarrative =
-      (error as { statusNote?: string | undefined })?.statusNote ?? lastNarrative ?? null;
-
+    console.error('[AgentOrchestration] Agent execution failed', error);
     return buildPartialResult({
       context,
       startedAt,
       normalizedSteps,
-      narrative: fallbackNarrative,
+      narrative: 'Agent execution failed.',
       error,
       dependencyOverrides,
     });
@@ -934,22 +1059,83 @@ function applyOverridesToContext(
   context: AgentRuntimeContext,
   overrides: TaskDependency[]
 ): AgentRuntimeContext {
-  if (!overrides.length || !context.history?.previous_plan) {
-    return context;
+  // New plan structure doesn't support dependencies in the same way.
+  // We will pass overrides to the agent via prompt instead.
+  return context;
+}
+
+function summarizePlan(plan: PrioritizedTaskPlan | null | undefined) {
+  if (!plan) {
+    return {
+      ordered_task_count: 0,
+      excluded_task_count: 0,
+      dependency_count: 0,
+    };
   }
 
-  const mergedPlan = {
-    ...context.history.previous_plan,
-    dependencies: mergePlanDependencies(context.history.previous_plan.dependencies ?? [], overrides),
-  };
-
   return {
-    ...context,
-    history: {
-      ...context.history,
-      previous_plan: mergedPlan,
-    },
+    ordered_task_count: Array.isArray(plan.ordered_task_ids) ? plan.ordered_task_ids.length : 0,
+    excluded_task_count: Array.isArray(plan.excluded_tasks) ? plan.excluded_tasks.length : 0,
+    dependency_count: Array.isArray(plan.dependencies) ? plan.dependencies.length : 0,
   };
+}
+
+async function logPrioritizationPerformance(params: {
+  sessionId: string;
+  status: AgentSessionStatus;
+  durationMs?: number | null;
+  evaluationTriggered?: boolean | null;
+}) {
+  const { sessionId, status, durationMs, evaluationTriggered } = params;
+  if (durationMs === undefined || durationMs === null || Number.isNaN(durationMs)) {
+    return;
+  }
+  try {
+    await supabase.from('processing_logs').insert({
+      operation: 'prioritization_run',
+      status,
+      timestamp: new Date().toISOString(),
+      metadata: {
+        session_id: sessionId,
+        duration_ms: Math.round(Math.max(0, durationMs)),
+        evaluation_triggered: Boolean(evaluationTriggered),
+      },
+    });
+  } catch (error) {
+    console.error('[AgentOrchestration] Failed to log prioritization performance', error);
+  }
+}
+
+async function logShadowPrioritizationRun(params: {
+  sessionId: string;
+  engine: 'legacy' | 'unified';
+  result: AgentRunResult | null | undefined;
+}) {
+  if (!params.result || params.result.status !== 'completed') {
+    return;
+  }
+
+  try {
+    const { ordered_task_count, excluded_task_count, dependency_count } = summarizePlan(
+      params.result.plan
+    );
+
+    await supabase.from('processing_logs').insert({
+      operation: 'prioritization_shadow_run',
+      status: 'completed',
+      timestamp: new Date().toISOString(),
+      metadata: {
+        session_id: params.sessionId,
+        engine: params.engine,
+        ordered_task_count,
+        excluded_task_count,
+        dependency_count,
+        status_note: params.result.metadata.status_note ?? null,
+      },
+    });
+  } catch (error) {
+    console.error('[AgentOrchestration] Failed to log shadow prioritization run', error);
+  }
 }
 
 async function persistTrace(trace: ReasoningTraceRecord): Promise<void> {
@@ -967,9 +1153,9 @@ async function persistTrace(trace: ReasoningTraceRecord): Promise<void> {
       .array(z.object({
         step_number: z.number(),
       }))
-      .min(1),
+      .min(0),
     total_duration_ms: z.number().int().min(0),
-    total_steps: z.number().int().min(1),
+    total_steps: z.number().int().min(0),
     tools_used_count: z.record(z.number()),
   }).safeParse(payload);
 
@@ -990,6 +1176,8 @@ async function persistTrace(trace: ReasoningTraceRecord): Promise<void> {
     console.error('[AgentOrchestration] Failed to persist reasoning trace', error);
   }
 }
+
+
 
 export async function orchestrateTaskPriorities(options: OrchestrateTaskOptions): Promise<void> {
   const { sessionId, userId, outcomeId, activeReflectionIds, dependencyOverrides: overrideInput } =
@@ -1023,40 +1211,41 @@ export async function orchestrateTaskPriorities(options: OrchestrateTaskOptions)
     return;
   }
 
-  const result = await runAgent(context, { dependencyOverrides });
-  const traceWithSession: ReasoningTraceRecord = result.trace
+  const agentRun = await runAgent(context, { dependencyOverrides, sessionId });
+  const traceWithSession: ReasoningTraceRecord = agentRun.primary.trace
     ? {
-        ...result.trace,
+        ...agentRun.primary.trace,
         session_id: sessionId,
       }
     : {
         session_id: sessionId,
         steps: [],
-        total_duration_ms: result.metadata.total_time_ms,
-        total_steps: result.metadata.steps_taken,
-        tools_used_count: result.metadata.tool_call_count,
+        total_duration_ms: agentRun.primary.metadata.total_time_ms,
+        total_steps: agentRun.primary.metadata.steps_taken,
+        tools_used_count: agentRun.primary.metadata.tool_call_count as Record<string, number>,
       };
 
   const updatedAt = new Date().toISOString();
+  
+  const prioritizedPlan =
+    agentRun.primary.status === 'completed' ? agentRun.primary.plan : null;
+
   const baselinePlan =
-    result.status === 'completed'
+    agentRun.primary.status === 'completed' && prioritizedPlan
       ? {
-          ...result.plan,
+          ...prioritizedPlan,
           created_at: updatedAt,
         }
       : null;
 
-  const updatePayload: {
-    status: AgentSessionStatus;
-    prioritized_plan: PrioritizedTaskPlan | null;
-    baseline_plan: (PrioritizedTaskPlan & { created_at?: string }) | null;
-    execution_metadata: ExecutionMetadata;
-    updated_at: string;
-  } = {
-    status: result.status,
-    prioritized_plan: result.status === 'completed' ? result.plan : null,
+  const updatePayload = {
+    status: agentRun.primary.status,
+    prioritized_plan: prioritizedPlan,
+    excluded_tasks:
+      agentRun.primary.status === 'completed' ? agentRun.primary.plan?.excluded_tasks : null,
     baseline_plan: baselinePlan,
-    execution_metadata: result.metadata,
+    execution_metadata: agentRun.primary.metadata,
+    evaluation_metadata: agentRun.primary.evaluationMetadata ?? null,
     updated_at: updatedAt,
   };
 
@@ -1070,7 +1259,25 @@ export async function orchestrateTaskPriorities(options: OrchestrateTaskOptions)
     return;
   }
 
-  if (result.status === 'completed' || traceWithSession.steps.length > 0) {
+  if (agentRun.primary.status === 'completed') {
+    await logPrioritizationPerformance({
+      sessionId,
+      status: agentRun.primary.status,
+      durationMs:
+        agentRun.primary.evaluationMetadata?.duration_ms ?? agentRun.primary.metadata.total_time_ms,
+      evaluationTriggered: agentRun.primary.evaluationMetadata?.evaluation_triggered ?? null,
+    });
+  }
+
+  if (agentRun.shadow && agentRun.shadowEngine) {
+    await logShadowPrioritizationRun({
+      sessionId,
+      engine: agentRun.shadowEngine,
+      result: agentRun.shadow,
+    });
+  }
+
+  if (agentRun.primary.status === 'completed' || traceWithSession.steps.length > 0) {
     await persistTrace(traceWithSession);
   }
 }

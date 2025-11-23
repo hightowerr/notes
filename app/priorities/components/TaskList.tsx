@@ -33,7 +33,7 @@ import {
 import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
 import { getQuadrant, type Quadrant } from '@/lib/schemas/quadrant';
 import type { StrategicScore, StrategicScoresMap, TaskWithScores } from '@/lib/schemas/strategicScore';
-import type { SortingStrategy } from '@/lib/schemas/sortingStrategy';
+import { classifyStrategyScores, type SortingStrategy } from '@/lib/schemas/sortingStrategy';
 import type { RetryStatusEntry } from '@/lib/schemas/retryStatus';
 import { formatTaskId } from '@/app/priorities/utils/formatTaskId';
 import type { ManualOverrideState } from '@/lib/schemas/manualOverride';
@@ -105,6 +105,7 @@ type ActiveTaskEntry = {
   manualOverride?: ManualOverrideState | null;
   hasManualOverride?: boolean;
   baselineScore?: StrategicScore | null;
+  inclusionReason?: string | null;
 };
 
 type LockedTaskState = {
@@ -168,10 +169,19 @@ type TaskListProps = {
   retryStatuses?: Record<string, RetryStatusEntry> | null;
   sortingStrategy?: SortingStrategy;
   onTaskMetadataUpdate?: (metadata: Record<string, { title: string }>) => void;
+  onActiveIdsChange?: (ids: string[]) => void;
 };
 
 const DEFAULT_REMOVAL_REASON =
   'Removed in the latest agent recalculation. Review and reinstate if still relevant.';
+const EMPTY_DEPENDENCIES: TaskDependency[] = [];
+
+function ensureRecord<T>(value: unknown): Record<string, T> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  return value as Record<string, T>;
+}
 
 function arraysEqual(a: string[], b: string[]) {
   if (a.length !== b.length) {
@@ -186,8 +196,11 @@ function arraysEqual(a: string[], b: string[]) {
 }
 
 function sanitizePlanOrder(plan: PrioritizedTaskPlan): string[] {
-  const uniqueIds = Array.from(new Set(plan.ordered_task_ids));
-  if (plan.dependencies.length === 0) {
+  const orderedTaskIds = Array.isArray(plan.ordered_task_ids) ? plan.ordered_task_ids : [];
+  const dependencies = Array.isArray(plan.dependencies) ? plan.dependencies : [];
+
+  const uniqueIds = Array.from(new Set(orderedTaskIds));
+  if (dependencies.length === 0) {
     return uniqueIds;
   }
 
@@ -198,7 +211,7 @@ function sanitizePlanOrder(plan: PrioritizedTaskPlan): string[] {
   const indegree = new Map<string, number>();
   uniqueIds.forEach(id => indegree.set(id, 0));
 
-  for (const dependency of plan.dependencies) {
+  for (const dependency of dependencies) {
     const source = dependency.source_task_id;
     const target = dependency.target_task_id;
     if (!indexMap.has(source) || !indexMap.has(target) || source === target) {
@@ -256,15 +269,6 @@ function buildDependencyLinks(
   ranks: Record<string, number>,
   getTitle: (taskId: string) => string
 ) {
-  console.log('[TaskList] Building dependency links:', {
-    count: dependencies.length,
-    dependencies: dependencies.map(d => ({
-      source_task_id: d.source_task_id,
-      target_task_id: d.target_task_id,
-      relationship_type: d.relationship_type
-    }))
-  });
-  
   return dependencies.map(dependency => ({
     taskId: dependency.source_task_id,
     rank: ranks[dependency.source_task_id] ?? null,
@@ -277,15 +281,6 @@ function buildDependentLinks(
   ranks: Record<string, number>,
   getTitle: (taskId: string) => string
 ) {
-  console.log('[TaskList] Building dependent links:', {
-    count: dependents.length,
-    dependents: dependents.map(d => ({
-      source_task_id: d.source_task_id,
-      target_task_id: d.target_task_id,
-      relationship_type: d.relationship_type
-    }))
-  });
-  
   return dependents.map(dependency => ({
     taskId: dependency.target_task_id,
     rank: ranks[dependency.target_task_id] ?? null,
@@ -316,6 +311,7 @@ function TaskListContent({
   retryStatuses = null,
   sortingStrategy = 'balanced',
   onTaskMetadataUpdate,
+  onActiveIdsChange,
 }: TaskListProps) {
   const renderStartRef = useRef<number>(getNowMs());
   const lastRenderLogRef = useRef<number>(0);
@@ -323,6 +319,10 @@ function TaskListContent({
   const sanitizedTaskIds = useMemo(() => sanitizePlanOrder(plan), [plan]);
   const taskAnnotations = useMemo<TaskAnnotation[]>(() => plan.task_annotations ?? [], [plan.task_annotations]);
   const removedTasksFromPlan = useMemo<TaskRemoval[]>(() => plan.removed_tasks ?? [], [plan.removed_tasks]);
+  const safeDependencies = useMemo<TaskDependency[]>(
+    () => (Array.isArray(plan.dependencies) ? plan.dependencies : EMPTY_DEPENDENCIES),
+    [plan.dependencies]
+  );
 
   // Extract movement reasons from adjusted_plan.diff (T008 requirement)
   const adjustmentReasons = useMemo(() => {
@@ -410,6 +410,10 @@ function TaskListContent({
   const [showDiscardReview, setShowDiscardReview] = useState(false);
   const [lockStore, setLockStore] = useLocalStorage<Record<string, Record<string, LockedTaskState>>>('locked-tasks', {});
   const [dependencyStore, setDependencyStore] = useLocalStorage<DependencyOverrideStore>(DEPENDENCY_OVERRIDE_STORAGE_KEY, {});
+  const [dismissedDiscardStore, setDismissedDiscardStore] = useLocalStorage<Record<string, string[]>>(
+    'dismissed-discard-ids',
+    {}
+  );
   useEffect(() => {
     if (!onTaskMetadataUpdate) {
       return;
@@ -421,18 +425,40 @@ function TaskListContent({
     onTaskMetadataUpdate(summary);
   }, [taskLookup, onTaskMetadataUpdate]);
   const outcomeKey = outcomeId ?? 'global';
-  const lockedTasks = lockStore[outcomeKey] ?? {};
-  const dependencyOverrides = dependencyStore[outcomeKey] ?? {};
+  const safeLockStore = useMemo(
+    () => ensureRecord<Record<string, LockedTaskState>>(lockStore),
+    [lockStore]
+  );
+  const lockedTasks = useMemo(
+    () => ensureRecord<LockedTaskState>(safeLockStore[outcomeKey]),
+    [safeLockStore, outcomeKey]
+  );
+  const safeDependencyStore = useMemo(
+    () => ensureRecord<DependencyOverrideEntry>(dependencyStore),
+    [dependencyStore]
+  );
+  const dependencyOverrides = useMemo(
+    () => ensureRecord<DependencyOverrideEntry>(safeDependencyStore[outcomeKey]),
+    [safeDependencyStore, outcomeKey]
+  );
   const rejectedDiscardIdsRef = useRef<Set<string>>(new Set());
+  const dismissedIds = useMemo(
+    () => new Set(dismissedDiscardStore[outcomeKey] ?? []),
+    [dismissedDiscardStore, outcomeKey]
+  );
+  useEffect(() => {
+    rejectedDiscardIdsRef.current = new Set(dismissedIds);
+  }, [dismissedIds]);
   const previousPlanVersionRef = useRef(planVersion);
 
   const updateLockedTasks = useCallback(
     (updater: (current: Record<string, LockedTaskState>) => Record<string, LockedTaskState>) => {
       setLockStore(prev => {
-        const current = prev[outcomeKey] ?? {};
+        const safePrev = ensureRecord<Record<string, LockedTaskState>>(prev);
+        const current = ensureRecord<LockedTaskState>(safePrev[outcomeKey]);
         const nextOutcomeEntry = updater(current);
         return {
-          ...prev,
+          ...safePrev,
           [outcomeKey]: nextOutcomeEntry,
         };
       });
@@ -445,15 +471,26 @@ function TaskListContent({
       updater: (current: Record<string, DependencyOverrideEntry>) => Record<string, DependencyOverrideEntry>
     ) => {
       setDependencyStore(prev => {
-        const current = prev[outcomeKey] ?? {};
+        const safePrev = ensureRecord<DependencyOverrideEntry>(prev);
+        const current = ensureRecord<DependencyOverrideEntry>(safePrev[outcomeKey]);
         const nextOutcomeEntry = updater(current);
         return {
-          ...prev,
+          ...safePrev,
           [outcomeKey]: nextOutcomeEntry,
         };
       });
     },
     [outcomeKey, setDependencyStore]
+  );
+
+  const persistDismissedDiscards = useCallback(
+    (ids: Set<string>) => {
+      setDismissedDiscardStore(prev => ({
+        ...prev,
+        [outcomeKey]: Array.from(ids),
+      }));
+    },
+    [outcomeKey, setDismissedDiscardStore]
   );
 
   const applyManualOverride = useCallback(
@@ -907,6 +944,7 @@ function TaskListContent({
           if (next.reasons[candidate.taskId]) {
             delete next.reasons[candidate.taskId];
           }
+          rejectedDiscardIdsRef.current.add(candidate.taskId);
         });
 
         return next;
@@ -915,6 +953,7 @@ function TaskListContent({
       const rejectionSet = rejectedDiscardIdsRef.current;
       approved.forEach(candidate => rejectionSet.delete(candidate.taskId));
       rejected.forEach(candidate => rejectionSet.add(candidate.taskId));
+      persistDismissedDiscards(rejectionSet);
 
       flagRecentlyDiscarded(approved.map(candidate => candidate.taskId));
       toast.success(
@@ -933,11 +972,12 @@ function TaskListContent({
         toast.info('Discard cancelled. All tasks kept active.');
         const rejectionSet = rejectedDiscardIdsRef.current;
         prev.forEach(candidate => rejectionSet.add(candidate.taskId));
+        persistDismissedDiscards(rejectionSet);
       }
       return [];
     });
     setShowDiscardReview(false);
-  }, []);
+  }, [persistDismissedDiscards]);
 
   const handleDiscardModalOpenChange = useCallback(
     (nextOpen: boolean) => {
@@ -969,7 +1009,8 @@ function TaskListContent({
     }
 
     if (previousPlanVersionRef.current !== planVersion) {
-      rejectedDiscardIdsRef.current.clear();
+      // Re-seed rejected discards from persisted store when plan version changes
+      rejectedDiscardIdsRef.current = new Set(dismissedIds);
       previousPlanVersionRef.current = planVersion;
     }
 
@@ -1208,37 +1249,23 @@ function TaskListContent({
       }
     });
     discardCandidates.forEach(candidate => ids.add(candidate.taskId));
-    return Array.from(ids);
+    return Array.from(ids).sort();
   }, [sanitizedTaskIds, priorityState.statuses, removedTasksFromPlan, discardCandidates]);
 
-  useEffect(() => {
-    // 🔍 DIAGNOSTIC: Log useEffect trigger
-    console.log('[TaskList] Metadata useEffect triggered:', {
-      trackedTaskIdsCount: trackedTaskIds.length,
-      outcomeStatement: outcomeStatement?.slice(0, 50) + '...',
-      sampleTaskIds: trackedTaskIds.slice(0, 2).map(id => id.slice(0, 16) + '...')
-    });
+  const metadataRequestKey = useMemo(
+    () => `${trackedTaskIds.join('|')}::${outcomeStatement ?? ''}`,
+    [trackedTaskIds, outcomeStatement]
+  );
 
+  useEffect(() => {
     if (trackedTaskIds.length === 0) {
-      console.log('[TaskList] ⚠️ No tracked task IDs - skipping metadata fetch');
       setTaskLookup({});
       lastMetadataRequestKeyRef.current = null;
       setIsLoadingTasks(false);
       return;
     }
 
-    const requestKey = `${trackedTaskIds.join('|')}::${outcomeStatement ?? ''}`;
-
-    // 🔍 DIAGNOSTIC: Log cache check
-    console.log('[TaskList] Cache check:', {
-      requestKeySample: requestKey.slice(0, 100) + '...',
-      cachedKeySample: (lastMetadataRequestKeyRef.current || 'null').slice(0, 100) + '...',
-      isMatch: lastMetadataRequestKeyRef.current === requestKey,
-      willSkip: lastMetadataRequestKeyRef.current === requestKey
-    });
-
-    if (lastMetadataRequestKeyRef.current === requestKey) {
-      console.log('[TaskList] ⚠️ SKIPPING metadata API call - request key matches cache');
+    if (lastMetadataRequestKeyRef.current === metadataRequestKey) {
       return;
     }
 
@@ -1275,12 +1302,6 @@ function TaskListContent({
           }>;
         };
 
-        console.log('[TaskList] 🔍 API response parsed:', {
-          taskCount: payload.tasks?.length ?? 0,
-          didUnmount: didUnmountRef.current,
-          sampleTitles: (payload.tasks || []).slice(0, 2).map(t => t.title?.slice(0, 40))
-        });
-
         const returnedIds = new Set((payload.tasks ?? []).map(task => task.task_id));
         const missingMetadataIds = trackedTaskIds.filter(id => !returnedIds.has(id));
         if (missingMetadataIds.length > 0) {
@@ -1291,31 +1312,18 @@ function TaskListContent({
         }
 
         if (didUnmountRef.current) {
-          console.log('[TaskList] ⚠️ Component unmounted, skipping state update');
           return;
         }
 
         // ✅ FIX: Only set cache key AFTER successful data load
-        lastMetadataRequestKeyRef.current = requestKey;
+        lastMetadataRequestKeyRef.current = metadataRequestKey;
 
-        console.log('[TaskList] 📝 About to call setTaskLookup...');
         setTaskLookup(prev => {
           const next = { ...prev };
+          let changed = false;
           for (const task of payload.tasks ?? []) {
-            // 🔍 DIAGNOSTIC: Log task info to understand missing titles
-            if (!task.title || task.title === formatTaskId(task.task_id)) {
-              console.log('[TaskList] 🔍 Task missing proper title:', {
-                taskId: task.task_id,
-                originalTitle: task.title,
-                fallbackTitle: formatTaskId(task.task_id),
-                isManual: task.is_manual,
-                category: task.category,
-                documentId: task.document_id,
-              });
-            }
-            
             const manualOverride = task.manual_override ?? null;
-            next[task.task_id] = {
+            const nextEntry = {
               title: task.title ?? formatTaskId(task.task_id),
               documentId: task.document_id ?? null,
               category: task.category ?? null,
@@ -1324,18 +1332,26 @@ function TaskListContent({
               isManual: Boolean(task.is_manual),
               manualOverride,
             };
+
+            const currentEntry = prev[task.task_id];
+            if (
+              !currentEntry ||
+              currentEntry.title !== nextEntry.title ||
+              currentEntry.documentId !== nextEntry.documentId ||
+              currentEntry.category !== nextEntry.category ||
+              currentEntry.rationale !== nextEntry.rationale ||
+              currentEntry.sourceText !== nextEntry.sourceText ||
+              currentEntry.isManual !== nextEntry.isManual ||
+              currentEntry.manualOverride !== nextEntry.manualOverride
+            ) {
+              next[task.task_id] = nextEntry;
+              changed = true;
+            }
           }
 
-          // 🔍 DIAGNOSTIC: Log taskLookup state
-          console.log('[TaskList] TaskLookup updated:', {
-            totalTasks: Object.keys(next).length,
-            newTasks: payload.tasks?.length ?? 0,
-            sampleTasks: Object.entries(next).slice(0, 2).map(([id, data]) => ({
-              id: id.slice(0, 16) + '...',
-              title: data.title?.slice(0, 30) + '...',
-              hasCategory: !!data.category
-            }))
-          });
+          if (!changed && Object.keys(next).length === Object.keys(prev).length) {
+            return prev;
+          }
 
           return next;
         });
@@ -1380,17 +1396,27 @@ function TaskListContent({
 
     void loadTasks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trackedTaskIds, outcomeStatement]);
+  }, [metadataRequestKey]);
+
+  const missingLookupRef = useRef<Set<string>>(new Set());
 
   const getTaskTitle = useCallback(
     (taskId: string) => {
       const task = taskLookup[taskId];
       if (!task) {
-        console.log('[TaskList] 🔍 No task found in lookup for ID:', taskId);
+        const seen = missingLookupRef.current;
+        if (!seen.has(taskId)) {
+          console.log('[TaskList] 🔍 No task found in lookup for ID:', taskId);
+          seen.add(taskId);
+        }
         return formatTaskId(taskId);
       }
       if (!task.title) {
-        console.log('[TaskList] 🔍 Task found but title is missing for ID:', taskId);
+        const seen = missingLookupRef.current;
+        if (!seen.has(taskId)) {
+          console.log('[TaskList] 🔍 Task found but title is missing for ID:', taskId);
+          seen.add(taskId);
+        }
         return formatTaskId(taskId);
       }
       return task.title;
@@ -1400,21 +1426,21 @@ function TaskListContent({
 
   const dependenciesByTarget = useMemo(() => {
     const map: Record<string, TaskDependency[]> = {};
-    for (const dependency of plan.dependencies) {
+    for (const dependency of safeDependencies) {
       map[dependency.target_task_id] ??= [];
       map[dependency.target_task_id].push(dependency);
     }
     return map;
-  }, [plan.dependencies]);
+  }, [safeDependencies]);
 
   const dependentsBySource = useMemo(() => {
     const map: Record<string, TaskDependency[]> = {};
-    for (const dependency of plan.dependencies) {
+    for (const dependency of safeDependencies) {
       map[dependency.source_task_id] ??= [];
       map[dependency.source_task_id].push(dependency);
     }
     return map;
-  }, [plan.dependencies]);
+  }, [safeDependencies]);
 
   const handleRemoveDependency = useCallback(
     (targetId: string, sourceId: string) => {
@@ -1766,12 +1792,14 @@ function TaskListContent({
                 quadrant,
                 reasoning: score.reasoning,
                 confidenceBreakdown: score.confidence_breakdown ?? null,
+                sourceDocumentTitle: node.sourceText ?? taskLookup[taskId]?.sourceText ?? null ?? taskLookup[taskId]?.sourceText ?? null,
               }
             : null,
         retryStatus: retryState,
         manualOverride,
         hasManualOverride: Boolean(manualOverride),
         baselineScore: score ?? null,
+        inclusionReason: typeof node.reasoning === 'string' ? node.reasoning : null,
       };
     })
     .filter(Boolean) as ActiveTaskEntry[];
@@ -1779,15 +1807,7 @@ function TaskListContent({
   const strategyScoreCache = useMemo(() => buildStrategyScoreCache(activeTasks), [activeTasks]);
 
   const displayedActiveTasks = useMemo(() => {
-    const start = getNowMs();
     if (activeTasks.length === 0) {
-      const durationMs = Number((getNowMs() - start).toFixed(2));
-      logTaskListPerf('build_displayed_tasks', {
-        durationMs,
-        totalActiveTasks: 0,
-        filteredCount: 0,
-        sortingStrategy,
-      });
       return [];
     }
     const filtered = activeTasks.filter(task =>
@@ -1796,19 +1816,30 @@ function TaskListContent({
     const sorted = [...filtered].sort((a, b) =>
       compareTasksByStrategy(a, b, sortingStrategy, strategyScoreCache)
     );
-    const mapped = sorted.map((task, index) => ({
+    return sorted.map((task, index) => ({
       ...task,
       displayOrder: index + 1,
     }));
-    const durationMs = Number((getNowMs() - start).toFixed(2));
-    logTaskListPerf('build_displayed_tasks', {
-      durationMs,
-      totalActiveTasks: activeTasks.length,
-      filteredCount: filtered.length,
-      sortingStrategy,
-    });
-    return mapped;
   }, [activeTasks, sortingStrategy, strategyScoreCache]);
+
+  const displayedActiveTaskIds = useMemo(
+    () => displayedActiveTasks.map(task => task.id),
+    [displayedActiveTasks]
+  );
+
+  const lastEmittedActiveIdsRef = useRef<string[] | null>(null);
+
+  useEffect(() => {
+    if (!onActiveIdsChange) {
+      return;
+    }
+    const previous = lastEmittedActiveIdsRef.current;
+    if (previous && arraysEqual(previous, displayedActiveTaskIds)) {
+      return;
+    }
+    lastEmittedActiveIdsRef.current = displayedActiveTaskIds;
+    onActiveIdsChange(displayedActiveTaskIds);
+  }, [onActiveIdsChange, displayedActiveTaskIds]);
 
   const [virtualRowHeight, setVirtualRowHeight] = useState(VIRTUALIZATION_ROW_HEIGHT);
   const virtualRowHeightRef = useRef(VIRTUALIZATION_ROW_HEIGHT);
@@ -2017,6 +2048,7 @@ function TaskListContent({
       manualOverride={task.manualOverride ?? null}
       baselineScore={task.baselineScore ?? null}
       onManualOverrideChange={override => applyManualOverride(task.id, override)}
+      inclusionReason={task.inclusionReason}
     />
   );
 
@@ -2156,9 +2188,24 @@ function TaskListContent({
         }
         return next;
       });
+      setDiscardCandidates(current => current.filter(candidate => candidate.taskId !== taskId));
+      setShowDiscardReview(false);
+      flagRecentlyDiscarded([]);
+      rejectedDiscardIdsRef.current.delete(taskId);
+      persistDismissedDiscards(rejectedDiscardIdsRef.current);
+      scrollToTask(taskId);
       flashTask(taskId);
     },
-    [updatePriorityState, sanitizedTaskIds.length, flashTask]
+    [
+      updatePriorityState,
+      sanitizedTaskIds.length,
+      setDiscardCandidates,
+      setShowDiscardReview,
+      flagRecentlyDiscarded,
+      scrollToTask,
+      flashTask,
+      persistDismissedDiscards,
+    ]
   );
 
   const handleToggleLock = useCallback(
@@ -2510,18 +2557,19 @@ function hasUrgentKeyword(title: string) {
 function buildStrategyScoreCache(tasks: ActiveTaskEntry[]): StrategyScoreCache {
   const cache: StrategyScoreCache = {};
   tasks.forEach(task => {
+    const impact = task.strategicScore?.impact ?? null;
+    const effort = task.strategicScore?.effort ?? null;
+    const confidence = task.strategicScore?.confidence ?? null;
     const priorityScore =
       typeof task.strategicScore?.priority === 'number' ? task.strategicScore.priority : Number.NEGATIVE_INFINITY;
-    const quickWinEligible = Boolean(
-      task.strategicScore && task.strategicScore.effort <= 8 && task.strategicScore.impact > 0
-    );
-    const quickWinScore = quickWinEligible
-      ? task.strategicScore!.impact * task.strategicScore!.confidence
-      : Number.NEGATIVE_INFINITY;
-    const strategicBetEligible = Boolean(
-      task.strategicScore && task.strategicScore.impact >= 7 && task.strategicScore.effort > 40
-    );
-    const strategicBetScore = strategicBetEligible ? task.strategicScore!.impact : Number.NEGATIVE_INFINITY;
+    const { matchesQuickWin, matchesStrategicBet } = classifyStrategyScores(impact, effort);
+
+    const quickWinScore =
+      matchesQuickWin && typeof impact === 'number' && typeof confidence === 'number'
+        ? impact * confidence
+        : Number.NEGATIVE_INFINITY;
+    const strategicBetScore =
+      matchesStrategicBet && typeof impact === 'number' ? impact : Number.NEGATIVE_INFINITY;
     const urgencyMultiplier = hasUrgentKeyword(task.title) ? 2 : 1;
     const urgentScore =
       typeof task.strategicScore?.priority === 'number'
@@ -2533,8 +2581,8 @@ function buildStrategyScoreCache(tasks: ActiveTaskEntry[]): StrategyScoreCache {
       quickWinScore,
       strategicBetScore,
       urgentScore,
-      matchesQuickWin: quickWinEligible,
-      matchesStrategicBet: strategicBetEligible,
+      matchesQuickWin,
+      matchesStrategicBet,
     };
   });
   return cache;
