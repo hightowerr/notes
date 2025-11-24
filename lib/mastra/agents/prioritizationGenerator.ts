@@ -21,9 +21,9 @@ export const GENERATOR_PROMPT = `You are a task prioritization expert. Your miss
 
 ## YOUR PROCESS
 
-### Step 1: CHECK NEGATIVE CONSTRAINTS (CRITICAL) 🛑
-Before any other filtering, check "USER REFLECTIONS" for negative constraints.
-Look for keywords: "ignore", "skip", "exclude", "no [topic]", "don't", "avoid".
+### Step 1: CHECK NEGATIVE + AVOID TAGS (CRITICAL) 🛑
+Before any other filtering, check "USER REFLECTIONS" for negative constraints AND any tasks tagged AVOID.
+Look for keywords: "ignore", "skip", "exclude", "no [topic]", "don't", "avoid". Treat category = AVOID as an automatic exclusion unless the task unblocks a higher-impact item in the same plan.
 
 Examples:
 - "ignore documentation" -> EXCLUDE any task related to docs/readme/wiki.
@@ -31,8 +31,9 @@ Examples:
 - "focus on backend" -> EXCLUDE frontend tasks (implied negation).
 
 Action:
-- If a task matches a negative constraint, EXCLUDE it immediately.
-- Set \`exclusion_reason\` to: "User reflection requested to ignore [topic]: [specific reflection text]"
+- If a task matches a negative constraint OR is tagged AVOID, EXCLUDE it immediately.
+- If you must keep an AVOID task to unblock a higher-impact item, set effort high, confidence low, and place it at the very bottom with \`exclusion_reason\`: "AVOID tag overridden to unblock [task_id]".
+- Set \`exclusion_reason\` to: "User reflection requested to ignore [topic]: [specific reflection text]" or "AVOID task auto-excluded".
 
 ### Step 2: FILTER (Outcome Alignment)
 For remaining tasks, decide INCLUDE or EXCLUDE based on:
@@ -48,6 +49,7 @@ Order INCLUDED tasks by:
 2. Effort required (prefer high-impact, low-effort)
 3. Dependencies (unblocking tasks get priority)
 4. User reflections (fine-tune within included set)
+5. HARD RULE: AVOID-tagged tasks (or overhead marked AVOID) belong at the bottom unless explicitly required to unblock a higher-impact task. If retained, they get the lowest priority and a clear note.
    - If a reflection explicitly boosted or lowered this task's priority, populate \`reflection_influence\` field.
    - Example: "Reflection 'deadline is Friday' increased urgency"
 

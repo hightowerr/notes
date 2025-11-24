@@ -3,6 +3,8 @@ import { deleteReflection } from '@/lib/services/reflectionService';
 import { getAuthenticatedUserId } from '@/app/api/reflections/utils';
 import { debounceRecompute } from '@/lib/services/recomputeDebounce';
 import { triggerRecomputeJob } from '@/lib/services/recomputeService';
+import { z } from 'zod';
+import { processReflectionToggle } from '@/app/api/reflections/toggleShared';
 
 /**
  * DELETE /api/reflections/[id]
@@ -84,6 +86,68 @@ export async function DELETE(
         error: 'Server Error',
         message: 'Failed to delete reflection'
       },
+      { status: 500 }
+    );
+  }
+}
+
+const toggleBodySchema = z.object({
+  is_active: z.boolean(),
+});
+
+/**
+ * PATCH /api/reflections/[id]
+ * Toggle reflection active state using cached intent (fast path)
+ */
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const userId = await getAuthenticatedUserId();
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'Unauthorized', message: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+
+    const reflectionId = params.id;
+    const body = await request.json();
+    const parsed = toggleBodySchema.safeParse(body);
+
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      return NextResponse.json(
+        {
+          error: 'Validation Error',
+          message: issue?.message ?? 'Invalid request payload',
+          field: issue?.path?.join('.') ?? undefined,
+        },
+        { status: 400 }
+      );
+    }
+
+    const { is_active: isActive } = parsed.data;
+    const result = await processReflectionToggle(userId, reflectionId, isActive);
+
+    if (!result.ok) {
+      return result.response;
+    }
+
+    return NextResponse.json(result.payload);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: 'reflection_toggle_patch_unexpected_error',
+        timestamp: new Date().toISOString(),
+        error: error instanceof Error ? error.message : 'Unknown error',
+      })
+    );
+
+    return NextResponse.json(
+      { error: 'Server Error', message: 'Failed to update reflection' },
       { status: 500 }
     );
   }

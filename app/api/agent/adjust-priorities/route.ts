@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 
-import { buildAdjustedPlanFromReflections } from '@/lib/services/reflectionBasedRanking';
+import { buildAdjustedPlanFromReflections } from '@/lib/services/reflectionAdjustment';
 import { prioritizedPlanSchema } from '@/lib/schemas/prioritizedPlanSchema';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;

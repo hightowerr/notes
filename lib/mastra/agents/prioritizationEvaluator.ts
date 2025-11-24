@@ -19,6 +19,7 @@ export const EVALUATOR_PROMPT = `You are a prioritization quality evaluator. You
    - Ordering makes logical sense and respects dependencies?
    - Critical path is credible?
    - No obvious sequencing gaps?
+   - AVOID-tagged tasks are excluded or bottom-ranked unless strictly unblocking higher-impact work.
 
 3. **Reflection Integration** (Important)
    - User reflections applied correctly?

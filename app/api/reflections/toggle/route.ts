@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { supabase } from '@/lib/supabase';
-import { reflectionWithWeightSchema } from '@/lib/schemas/reflectionSchema';
-import { enrichReflection } from '@/lib/services/reflectionService';
 import { getAuthenticatedUserId } from '@/app/api/reflections/utils';
+import { processReflectionToggle } from '@/app/api/reflections/toggleShared';
 
 const toggleSchema = z.object({
   reflection_id: z.string().uuid(),
@@ -39,67 +37,12 @@ export async function POST(request: NextRequest) {
 
     const { reflection_id: reflectionId, is_active: isActive } = parsed.data;
 
-    const { data, error } = await supabase
-      .from('reflections')
-      .update({ is_active_for_prioritization: isActive })
-      .eq('id', reflectionId)
-      .eq('user_id', userId)
-      .select()
-      .single();
-
-    if (error || !data) {
-      const notFound = error?.code === 'PGRST116' || (!error && !data);
-
-      if (notFound) {
-        return NextResponse.json(
-          { error: 'Not Found', message: 'Reflection not found' },
-          { status: 404 },
-        );
-      }
-
-      console.error(
-        JSON.stringify({
-          event: 'reflection_toggle_error',
-          user_id: userId,
-          reflection_id: reflectionId,
-          timestamp: new Date().toISOString(),
-          error: error?.message ?? 'Unknown error',
-        }),
-      );
-
-      return NextResponse.json(
-        { error: 'Server Error', message: 'Failed to update reflection' },
-        { status: 500 },
-      );
+    const result = await processReflectionToggle(userId, reflectionId, isActive);
+    if (!result.ok) {
+      return result.response;
     }
 
-    const reflectionWithMetadata = enrichReflection(data);
-    const validation = reflectionWithWeightSchema.safeParse(reflectionWithMetadata);
-
-    if (!validation.success) {
-      console.error(
-        JSON.stringify({
-          event: 'reflection_toggle_validation_error',
-          user_id: userId,
-          reflection_id: reflectionId,
-          timestamp: new Date().toISOString(),
-          issues: validation.error.flatten(),
-        }),
-      );
-
-      return NextResponse.json(
-        {
-          error: 'Server Error',
-          message: 'Reflection update produced invalid data',
-        },
-        { status: 500 },
-      );
-    }
-
-    return NextResponse.json({
-      success: true,
-      reflection: validation.data,
-    });
+    return NextResponse.json(result.payload);
   } catch (error) {
     console.error(
       JSON.stringify({

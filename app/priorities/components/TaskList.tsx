@@ -25,6 +25,7 @@ import { useScrollToTask } from '@/app/priorities/components/useScrollToTask';
 import type { MovementInfo } from '@/app/priorities/components/MovementBadge';
 import { ManualTaskModal } from '@/app/components/ManualTaskModal';
 import { DiscardReviewModal, type DiscardCandidate } from '@/app/components/DiscardReviewModal';
+import { BlockedTasksSection, type BlockedTask } from '@/app/priorities/components/BlockedTasksSection';
 import {
   DEPENDENCY_OVERRIDE_STORAGE_KEY,
   type DependencyOverrideEntry,
@@ -33,8 +34,14 @@ import {
 import { useLocalStorage } from '@/lib/hooks/useLocalStorage';
 import { getQuadrant, type Quadrant } from '@/lib/schemas/quadrant';
 import type { StrategicScore, StrategicScoresMap, TaskWithScores } from '@/lib/schemas/strategicScore';
-import { classifyStrategyScores, type SortingStrategy } from '@/lib/schemas/sortingStrategy';
+import {
+  classifyStrategyScores,
+  HIGH_IMPACT_THRESHOLD,
+  LOW_EFFORT_THRESHOLD,
+  type SortingStrategy,
+} from '@/lib/schemas/sortingStrategy';
 import type { RetryStatusEntry } from '@/lib/schemas/retryStatus';
+import type { ReflectionEffect } from '@/lib/services/reflectionAdjuster';
 import { formatTaskId } from '@/app/priorities/utils/formatTaskId';
 import type { ManualOverrideState } from '@/lib/schemas/manualOverride';
 import { calculatePriority } from '@/lib/utils/strategicPriority';
@@ -52,20 +59,25 @@ type TaskLookup = Record<
   {
     title: string;
     documentId?: string | null;
+    documentName?: string | null;
     category?: 'leverage' | 'neutral' | 'overhead' | null;
     rationale?: string | null;
     sourceText?: string | null;
     isManual?: boolean;
     manualOverride?: ManualOverrideState | null;
+    reflectionEffects?: ReflectionEffect[];
   }
 >;
 
 type TaskRenderNode = {
   id: string;
   title: string;
+  documentId?: string | null;
+  documentName?: string | null;
   category?: 'leverage' | 'neutral' | 'overhead' | null;
   rationale?: string | null;
   sourceText?: string | null;
+  sourceDocumentTitle?: string | null;
   confidence: number | null;
   confidenceDelta?: number | null;
   dependencies: TaskDependency[];
@@ -106,6 +118,7 @@ type ActiveTaskEntry = {
   hasManualOverride?: boolean;
   baselineScore?: StrategicScore | null;
   inclusionReason?: string | null;
+  reflectionEffects?: ReflectionEffect[];
 };
 
 type LockedTaskState = {
@@ -160,6 +173,8 @@ type TaskListProps = {
   planVersion: number;
   outcomeId: string | null;
   outcomeStatement?: string | null;
+  metadataRefreshKey?: string | number | null;
+  activeReflectionIds?: string[];
   adjustedPlan?: AdjustedPlan | null;
   onDiffSummary?: (summary: { hasChanges: boolean; isInitial: boolean }) => void;
   sessionStatus?: SessionStatus;
@@ -175,6 +190,12 @@ type TaskListProps = {
 const DEFAULT_REMOVAL_REASON =
   'Removed in the latest agent recalculation. Review and reinstate if still relevant.';
 const EMPTY_DEPENDENCIES: TaskDependency[] = [];
+const VALID_REFLECTION_EFFECTS: ReflectionEffect['effect'][] = [
+  'blocked',
+  'demoted',
+  'boosted',
+  'unchanged',
+];
 
 function ensureRecord<T>(value: unknown): Record<string, T> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -189,6 +210,80 @@ function arraysEqual(a: string[], b: string[]) {
   }
   for (let i = 0; i < a.length; i += 1) {
     if (a[i] !== b[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function normalizeReflectionEffects(value: unknown): ReflectionEffect[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const normalized: ReflectionEffect[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const reflectionId = typeof (entry as { reflection_id?: unknown }).reflection_id === 'string'
+      ? (entry as { reflection_id: string }).reflection_id
+      : null;
+    const taskId = typeof (entry as { task_id?: unknown }).task_id === 'string'
+      ? (entry as { task_id: string }).task_id
+      : null;
+    const effect = (entry as { effect?: unknown }).effect;
+    const reason = typeof (entry as { reason?: unknown }).reason === 'string'
+      ? (entry as { reason: string }).reason
+      : '';
+    const magnitudeRaw = (entry as { magnitude?: unknown }).magnitude;
+    const magnitude =
+      typeof magnitudeRaw === 'number' && Number.isFinite(magnitudeRaw)
+        ? magnitudeRaw
+        : null;
+
+    if (!reflectionId || !taskId || typeof effect !== 'string' || !VALID_REFLECTION_EFFECTS.includes(effect as ReflectionEffect['effect'])) {
+      continue;
+    }
+
+    normalized.push({
+      reflection_id: reflectionId,
+      task_id: taskId,
+      effect: effect as ReflectionEffect['effect'],
+      magnitude:
+        magnitude ??
+        (effect === 'blocked' ? -10 : effect === 'demoted' ? -2 : 1),
+      reason,
+    });
+  }
+
+  return normalized.sort((a, b) => {
+    const byReflection = a.reflection_id.localeCompare(b.reflection_id);
+    if (byReflection !== 0) {
+      return byReflection;
+    }
+    const byEffect = a.effect.localeCompare(b.effect);
+    if (byEffect !== 0) {
+      return byEffect;
+    }
+    return a.task_id.localeCompare(b.task_id);
+  });
+}
+
+function reflectionEffectsEqual(a: ReflectionEffect[] = [], b: ReflectionEffect[] = []) {
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0; i < a.length; i += 1) {
+    const left = a[i];
+    const right = b[i];
+    if (
+      left.reflection_id !== right.reflection_id ||
+      left.task_id !== right.task_id ||
+      left.effect !== right.effect ||
+      left.magnitude !== right.magnitude ||
+      left.reason !== right.reason
+    ) {
       return false;
     }
   }
@@ -302,6 +397,8 @@ function TaskListContent({
   planVersion,
   outcomeId,
   outcomeStatement,
+  metadataRefreshKey,
+  activeReflectionIds = [],
   adjustedPlan,
   onDiffSummary,
   sessionStatus = 'idle',
@@ -516,10 +613,11 @@ function TaskListContent({
   const previousPlanRef = useRef<string[] | null>(null);
   const priorityStateRef = useRef<PriorityState>(priorityState);
   const metadataRef = useRef<Record<string, TaskRenderNode>>({});
-  const hasLoadedStoredState = useRef(false);
+  const [hasLoadedStoredState, setHasLoadedStoredState] = useState(false);
   const discardTimeoutRef = useRef<number | null>(null);
   const previousStorageKeyRef = useRef<string | null>(null);
   const didUnmountRef = useRef(false);
+  const hiddenDueToReflectionRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     priorityStateRef.current = priorityState;
@@ -557,6 +655,7 @@ function TaskListContent({
         const nextEntry = {
           title: taskText,
           documentId: existing?.documentId ?? null,
+          documentName: existing?.documentName ?? null,
           category: existing?.category ?? null,
           rationale: existing?.rationale ?? null,
           sourceText: existing?.sourceText ?? taskText,
@@ -580,6 +679,8 @@ function TaskListContent({
       metadataRef.current[taskId] = {
         id: taskId,
         title: taskText,
+        documentId: previousNode?.documentId ?? existing?.documentId ?? null,
+        documentName: previousNode?.documentName ?? existing?.documentName ?? null,
         category: previousNode?.category ?? null,
         rationale: previousNode?.rationale ?? null,
         sourceText: previousNode?.sourceText ?? taskText,
@@ -803,7 +904,7 @@ function TaskListContent({
   useEffect(() => {
     if (previousStorageKeyRef.current !== storageKey) {
       previousStorageKeyRef.current = storageKey;
-      hasLoadedStoredState.current = false;
+      setHasLoadedStoredState(false);
       setPriorityState({
         statuses: {},
         reasons: {},
@@ -824,7 +925,7 @@ function TaskListContent({
       return;
     }
 
-    if (hasLoadedStoredState.current) {
+    if (hasLoadedStoredState) {
       return;
     }
 
@@ -848,7 +949,7 @@ function TaskListContent({
       }
     }
 
-    hasLoadedStoredState.current = true;
+    setHasLoadedStoredState(true);
   }, [storageKey]);
 
   useEffect(() => {
@@ -1005,6 +1106,12 @@ function TaskListContent({
   useEffect(() => {
     if (!outcomeId) {
       previousPlanRef.current = sanitizedTaskIds;
+      return;
+    }
+
+    // Wait for stored state to be loaded before processing discards
+    // Otherwise, discarded tasks will appear as candidates again
+    if (!hasLoadedStoredState) {
       return;
     }
 
@@ -1237,6 +1344,7 @@ function TaskListContent({
     lockedTasks,
     manualTaskIds,
     taskLookup,
+    hasLoadedStoredState,
   ]);
 
   const trackedTaskIds = useMemo(() => {
@@ -1253,8 +1361,8 @@ function TaskListContent({
   }, [sanitizedTaskIds, priorityState.statuses, removedTasksFromPlan, discardCandidates]);
 
   const metadataRequestKey = useMemo(
-    () => `${trackedTaskIds.join('|')}::${outcomeStatement ?? ''}`,
-    [trackedTaskIds, outcomeStatement]
+    () => `${trackedTaskIds.join('|')}::${outcomeStatement ?? ''}::${metadataRefreshKey ?? 0}`,
+    [trackedTaskIds, outcomeStatement, metadataRefreshKey]
   );
 
   useEffect(() => {
@@ -1294,11 +1402,13 @@ function TaskListContent({
             task_id: string;
             title: string;
             document_id?: string | null;
+            document_name?: string | null;
             category?: 'leverage' | 'neutral' | 'overhead' | null;
             rationale?: string | null;
             original_text?: string | null;
             is_manual?: boolean;
             manual_override?: ManualOverrideState | null;
+            reflection_effects?: unknown;
           }>;
         };
 
@@ -1321,16 +1431,21 @@ function TaskListContent({
         setTaskLookup(prev => {
           const next = { ...prev };
           let changed = false;
+          let effectsWithData = 0;
+          const effectsSample: Array<{ id: string; effects: number }> = [];
           for (const task of payload.tasks ?? []) {
             const manualOverride = task.manual_override ?? null;
+            const reflectionEffects = normalizeReflectionEffects(task.reflection_effects);
             const nextEntry = {
               title: task.title ?? formatTaskId(task.task_id),
               documentId: task.document_id ?? null,
+              documentName: task.document_name ?? null,
               category: task.category ?? null,
               rationale: task.rationale ?? null,
               sourceText: task.original_text ?? null,
               isManual: Boolean(task.is_manual),
               manualOverride,
+              reflectionEffects,
             };
 
             const currentEntry = prev[task.task_id];
@@ -1338,15 +1453,31 @@ function TaskListContent({
               !currentEntry ||
               currentEntry.title !== nextEntry.title ||
               currentEntry.documentId !== nextEntry.documentId ||
+              currentEntry.documentName !== nextEntry.documentName ||
               currentEntry.category !== nextEntry.category ||
               currentEntry.rationale !== nextEntry.rationale ||
               currentEntry.sourceText !== nextEntry.sourceText ||
               currentEntry.isManual !== nextEntry.isManual ||
-              currentEntry.manualOverride !== nextEntry.manualOverride
+              currentEntry.manualOverride !== nextEntry.manualOverride ||
+              !reflectionEffectsEqual(currentEntry.reflectionEffects, reflectionEffects)
             ) {
               next[task.task_id] = nextEntry;
               changed = true;
             }
+
+            if (reflectionEffects.length > 0) {
+              effectsWithData += 1;
+              if (effectsSample.length < 5) {
+                effectsSample.push({ id: task.task_id, effects: reflectionEffects.length });
+              }
+            }
+          }
+
+          if (effectsWithData > 0) {
+            console.log('[TaskList] Reflection effects mapped', {
+              tasksWithEffects: effectsWithData,
+              sample: effectsSample,
+            });
           }
 
           if (!changed && Object.keys(next).length === Object.keys(prev).length) {
@@ -1514,6 +1645,9 @@ function TaskListContent({
       map[taskId] = {
         id: taskId,
         title: getTaskTitle(taskId),
+        documentId: lookup?.documentId ?? null,
+        documentName: lookup?.documentName ?? null,
+        sourceDocumentTitle: lookup?.documentName ?? null,
         category: lookup?.category ?? null,
         rationale: lookup?.rationale ?? null,
         sourceText: lookup?.sourceText ?? null,
@@ -1560,6 +1694,9 @@ function TaskListContent({
         snapshot[taskId] = {
           ...existing,
           title: getTaskTitle(taskId),
+          documentId: existing.documentId ?? lookup?.documentId ?? null,
+          documentName: existing.documentName ?? lookup?.documentName ?? null,
+          sourceDocumentTitle: existing.sourceDocumentTitle ?? lookup?.documentName ?? null,
           movement: movementMap[taskId] ?? existing.movement,
           removalReason:
             existing.removalReason ?? removalById.get(taskId)?.removal_reason ?? null,
@@ -1581,6 +1718,9 @@ function TaskListContent({
         snapshot[taskId] = {
           id: taskId,
           title: getTaskTitle(taskId),
+          documentId: lookup?.documentId ?? null,
+          documentName: lookup?.documentName ?? null,
+          sourceDocumentTitle: lookup?.documentName ?? null,
           category: lookup?.category ?? null,
           rationale: lookup?.rationale ?? null,
           sourceText: lookup?.sourceText ?? null,
@@ -1713,11 +1853,58 @@ function TaskListContent({
     }));
   }, [sanitizedTaskIds, manuallyRestoredIds, lockedTasks, getTaskTitle]);
 
+  // Collect blocked tasks for display in BlockedTasksSection
+  // Only show blocked tasks when there are active reflections
+  const blockedTasksForSection = useMemo(() => {
+    // If no reflections are active, no tasks should be blocked
+    if (activeReflectionIds.length === 0) {
+      return [];
+    }
+
+    const blocked: BlockedTask[] = [];
+    const activeReflectionsSet = new Set(activeReflectionIds);
+
+    for (const taskId of orderedActiveIds) {
+      const node = nodeMap[taskId];
+      if (!node) continue;
+
+      // Only consider effects from active reflections
+      const taskReflectionEffects = (taskLookup[taskId]?.reflectionEffects ?? []).filter(effect =>
+        activeReflectionsSet.has(effect.reflection_id)
+      );
+      const blockedEffect = taskReflectionEffects.find(effect => effect.effect === 'blocked');
+
+      if (blockedEffect) {
+        blocked.push({
+          task_id: taskId,
+          task_text: node.title,
+          blocking_effect: blockedEffect,
+        });
+      }
+    }
+
+    return blocked;
+  }, [orderedActiveIds, nodeMap, taskLookup, activeReflectionIds]);
+
   const activeTasks = orderedActiveIds
     .map((taskId, index) => {
       const node = nodeMap[taskId];
       if (!node) {
         return null;
+      }
+
+      // Only apply blocking effects when there are active reflections
+      if (activeReflectionIds.length > 0) {
+        const activeReflectionsSet = new Set(activeReflectionIds);
+        const taskReflectionEffects = (taskLookup[taskId]?.reflectionEffects ?? []).filter(effect =>
+          activeReflectionsSet.has(effect.reflection_id)
+        );
+        const blockedEffect = taskReflectionEffects.find(effect => effect.effect === 'blocked');
+        if (blockedEffect) {
+          // Task is blocked - will be shown in BlockedTasksSection instead
+          hiddenDueToReflectionRef.current.add(taskId);
+          return null;
+        }
       }
 
       // Merge adjustment reason into movement if available (T008 requirement)
@@ -1765,6 +1952,23 @@ function TaskListContent({
           ? getQuadrant(strategicSnapshot.impact, strategicSnapshot.effort)
           : 'high_impact_low_effort';
 
+      const activeReflectionsSet = activeReflectionIds.length > 0 ? new Set(activeReflectionIds) : null;
+      const taskReflectionEffects = (taskLookup[taskId]?.reflectionEffects ?? []).filter(effect =>
+        activeReflectionsSet ? activeReflectionsSet.has(effect.reflection_id) : true
+      );
+      const blockedEffect = taskReflectionEffects.find(effect => effect.effect === 'blocked');
+      if (blockedEffect) {
+        const alreadyLogged = hiddenDueToReflectionRef.current.has(taskId);
+        hiddenDueToReflectionRef.current.add(taskId);
+        if (!alreadyLogged) {
+          console.log('[TaskList] Hiding task due to reflection block', {
+            taskId,
+            reflectionId: blockedEffect.reflection_id,
+          });
+        }
+        return null;
+      }
+
       return {
         id: taskId,
         title: node.title,
@@ -1792,15 +1996,16 @@ function TaskListContent({
                 quadrant,
                 reasoning: score.reasoning,
                 confidenceBreakdown: score.confidence_breakdown ?? null,
-                sourceDocumentTitle: node.sourceText ?? taskLookup[taskId]?.sourceText ?? null ?? taskLookup[taskId]?.sourceText ?? null,
+                sourceDocumentTitle: node.sourceDocumentTitle ?? taskLookup[taskId]?.documentName ?? null,
               }
             : null,
         retryStatus: retryState,
         manualOverride,
         hasManualOverride: Boolean(manualOverride),
-        baselineScore: score ?? null,
-        inclusionReason: typeof node.reasoning === 'string' ? node.reasoning : null,
-      };
+          baselineScore: score ?? null,
+          inclusionReason: typeof node.reasoning === 'string' ? node.reasoning : null,
+          reflectionEffects: taskReflectionEffects,
+        };
     })
     .filter(Boolean) as ActiveTaskEntry[];
 
@@ -2047,9 +2252,10 @@ function TaskListContent({
       hasManualOverride={task.hasManualOverride ?? false}
       manualOverride={task.manualOverride ?? null}
       baselineScore={task.baselineScore ?? null}
-      onManualOverrideChange={override => applyManualOverride(task.id, override)}
-      inclusionReason={task.inclusionReason}
-    />
+  onManualOverrideChange={override => applyManualOverride(task.id, override)}
+  inclusionReason={task.inclusionReason}
+  reflectionEffects={task.reflectionEffects}
+/>
   );
 
   const renderTaskRows = (tasksToRender: ActiveTaskEntry[], options?: { virtualized?: boolean }) => (
@@ -2358,6 +2564,10 @@ function TaskListContent({
         </div>
       </section>
 
+      <BlockedTasksSection
+        blockedTasks={blockedTasksForSection}
+      />
+
       <CompletedTasks
         tasks={completedTasks}
         onMoveToActive={taskId => handleReturnToActive(taskId)}
@@ -2379,6 +2589,8 @@ function TaskListContent({
                 ...selectedNode,
                 id: selectedNode.id,
                 title: selectedNode.title,
+                documentId: selectedNode.documentId ?? null,
+                sourceDocumentTitle: selectedNode.sourceDocumentTitle ?? selectedNode.documentName ?? null,
                 rank: selectedNode.planRank ?? priorityState.ranks[selectedNode.id] ?? null,
                 confidence: selectedConfidence,
                 confidenceDelta: selectedNode.confidenceDelta ?? null,
@@ -2474,6 +2686,7 @@ type StrategyScoreEntry = {
   urgentScore: number;
   matchesQuickWin: boolean;
   matchesStrategicBet: boolean;
+  isAvoidQuadrant: boolean;
 };
 
 type StrategyScoreCache = Record<string, StrategyScoreEntry>;
@@ -2560,19 +2773,28 @@ function buildStrategyScoreCache(tasks: ActiveTaskEntry[]): StrategyScoreCache {
     const impact = task.strategicScore?.impact ?? null;
     const effort = task.strategicScore?.effort ?? null;
     const confidence = task.strategicScore?.confidence ?? null;
+    const isAvoidQuadrant =
+      typeof impact === 'number' &&
+      typeof effort === 'number' &&
+      impact < HIGH_IMPACT_THRESHOLD &&
+      effort > LOW_EFFORT_THRESHOLD;
     const priorityScore =
-      typeof task.strategicScore?.priority === 'number' ? task.strategicScore.priority : Number.NEGATIVE_INFINITY;
+      typeof task.strategicScore?.priority === 'number' && !isAvoidQuadrant
+        ? task.strategicScore.priority
+        : Number.NEGATIVE_INFINITY;
     const { matchesQuickWin, matchesStrategicBet } = classifyStrategyScores(impact, effort);
 
     const quickWinScore =
-      matchesQuickWin && typeof impact === 'number' && typeof confidence === 'number'
+      !isAvoidQuadrant && matchesQuickWin && typeof impact === 'number' && typeof confidence === 'number'
         ? impact * confidence
         : Number.NEGATIVE_INFINITY;
     const strategicBetScore =
-      matchesStrategicBet && typeof impact === 'number' ? impact : Number.NEGATIVE_INFINITY;
+      !isAvoidQuadrant && matchesStrategicBet && typeof impact === 'number'
+        ? impact
+        : Number.NEGATIVE_INFINITY;
     const urgencyMultiplier = hasUrgentKeyword(task.title) ? 2 : 1;
     const urgentScore =
-      typeof task.strategicScore?.priority === 'number'
+      typeof task.strategicScore?.priority === 'number' && !isAvoidQuadrant
         ? task.strategicScore.priority * urgencyMultiplier
         : Number.NEGATIVE_INFINITY;
 
@@ -2583,6 +2805,7 @@ function buildStrategyScoreCache(tasks: ActiveTaskEntry[]): StrategyScoreCache {
       urgentScore,
       matchesQuickWin,
       matchesStrategicBet,
+      isAvoidQuadrant,
     };
   });
   return cache;

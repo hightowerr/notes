@@ -6,15 +6,25 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { ReflectionInput } from './ReflectionInput';
 import { ReflectionList } from './ReflectionList';
 import type { ReflectionWithWeight } from '@/lib/schemas/reflectionSchema';
+import type { ReflectionIntent } from '@/lib/schemas/reflectionIntent';
+import type { ReflectionEffect } from '@/lib/services/reflectionAdjuster';
 import { toggleReflection } from '@/lib/api/toggleReflection';
 import { toast } from 'sonner';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+export type ReflectionAddedResult = {
+  reflection: ReflectionWithWeight;
+  intent?: ReflectionIntent | null;
+  effects?: ReflectionEffect[];
+  tasksAffected?: number;
+  message?: string;
+};
+
 interface ReflectionPanelProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  onReflectionAdded?: () => void;  // Callback to notify parent when a reflection is added
+  onReflectionAdded?: (result: ReflectionAddedResult) => void;  // Callback to notify parent when a reflection is added
   outcomeId?: string | null;
 }
 
@@ -27,7 +37,8 @@ type PanelContentProps = {
   onReflectionAdded: (
     reflection: ReflectionWithWeight,
     tempId?: string,
-    remove?: boolean
+    remove?: boolean,
+    meta?: Partial<Omit<ReflectionAddedResult, 'reflection'>>
   ) => void;
   onMobileClose: () => void;
   onMobileReopen: () => void;
@@ -243,7 +254,8 @@ export function ReflectionPanel({
   const handleReflectionAdded = (
     reflection: ReflectionWithWeight,
     tempId?: string,
-    remove?: boolean
+    remove?: boolean,
+    meta?: Partial<Omit<ReflectionAddedResult, 'reflection'>>
   ) => {
     if (remove && tempId) {
       // Rollback: remove temp reflection
@@ -257,7 +269,13 @@ export function ReflectionPanel({
       // Add new reflection (optimistic)
       setReflections((prev) => [reflection, ...prev].slice(0, 5)); // Keep max 5
       // Notify parent that a reflection was added to trigger priority recompute
-      onReflectionAdded?.();
+      onReflectionAdded?.({
+        reflection,
+        intent: meta?.intent ?? null,
+        effects: meta?.effects,
+        tasksAffected: meta?.tasksAffected,
+        message: meta?.message,
+      });
     }
   };
 

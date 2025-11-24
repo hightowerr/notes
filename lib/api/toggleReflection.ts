@@ -6,11 +6,10 @@ export async function toggleReflection(
   reflectionId: string,
   isActive: boolean
 ): Promise<ReflectionWithWeight> {
-  const response = await fetch('/api/reflections/toggle', {
-    method: 'POST',
+  const response = await fetch(`/api/reflections/${reflectionId}`, {
+    method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      reflection_id: reflectionId,
       is_active: isActive,
     }),
     cache: 'no-store',

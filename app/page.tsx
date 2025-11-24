@@ -11,7 +11,7 @@ import { MainNav } from '@/components/main-nav';
 import SummaryPanel from '@/app/components/SummaryPanel';
 import { OutcomeDisplay } from '@/app/components/OutcomeDisplay';
 import { OutcomeBuilder } from '@/app/components/OutcomeBuilder';
-import { ReflectionPanel } from '@/app/components/ReflectionPanel';
+import { ReflectionPanel, type ReflectionAddedResult } from '@/app/components/ReflectionPanel';
 import { useReflectionShortcut } from '@/lib/hooks/useReflectionShortcut';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -694,9 +694,19 @@ export default function Home() {
       <ReflectionPanel
         isOpen={reflectionPanelOpen}
         onOpenChange={setReflectionPanelOpen}
-        onReflectionAdded={() => {
-          // When a reflection is added, we could trigger some response if needed
-          // For now, just keep as is, but we have the hook available
+        onReflectionAdded={(result: ReflectionAddedResult) => {
+          const reflectionId = result?.reflection?.id;
+          toast.success('Saved! View effect in Priorities →', {
+            action: {
+              label: 'Open Priorities',
+              onClick: () => {
+                const url = reflectionId
+                  ? `/priorities?highlight_reflection=${encodeURIComponent(reflectionId)}`
+                  : '/priorities';
+                window.location.href = url;
+              },
+            },
+          });
         }}
       />
       </div>

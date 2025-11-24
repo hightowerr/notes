@@ -265,13 +265,8 @@ export function ContextCard({
             <div className="space-y-1">
               <h3 className="text-base font-semibold text-foreground">No context added yet</h3>
               <p className="text-sm text-muted-foreground">
-                Add quick notes about your current stage, constraints, or blockers to get relevant
-                priorities.
+                Share what&apos;s blocking you or where to focus, and watch your priorities adjust.
               </p>
-              <Button onClick={onAddContext} className="gap-2 sm:w-fit">
-                <MessageSquare className="h-4 w-4" />
-                Add Current Context
-              </Button>
             </div>
           </div>
         ) : (
@@ -300,6 +295,42 @@ export function ContextCard({
               const canToggle = UUID_PATTERN.test(reflection.id);
               const isExpanded = expandedReflectionSet.has(reflection.id);
               const shouldClamp = !isExpanded && reflection.text.length > SHOULD_CLAMP_CHARACTER_COUNT;
+              const effectSummary = reflection.effects_summary;
+              const primaryEffect = effectSummary
+                ? effectSummary.blocked > 0
+                  ? 'blocked'
+                  : effectSummary.demoted > 0
+                    ? 'demoted'
+                    : effectSummary.boosted > 0
+                      ? 'boosted'
+                      : null
+                : null;
+              const effectCount =
+                primaryEffect === 'blocked'
+                  ? effectSummary?.blocked ?? 0
+                  : primaryEffect === 'demoted'
+                    ? effectSummary?.demoted ?? 0
+                    : primaryEffect === 'boosted'
+                      ? effectSummary?.boosted ?? 0
+                      : effectSummary?.total ?? 0;
+              const effectBadgeClass =
+                primaryEffect === 'blocked'
+                  ? 'border-destructive/50 bg-destructive/10 text-destructive'
+                  : primaryEffect === 'demoted'
+                    ? 'border-amber-500/50 bg-amber-500/10 text-amber-700'
+                    : primaryEffect === 'boosted'
+                      ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-700'
+                      : 'border-muted-foreground/30 text-muted-foreground';
+              const effectIcon =
+                primaryEffect === 'blocked' ? '🚫' : primaryEffect === 'demoted' ? '⬇️' : primaryEffect === 'boosted' ? '⬆️' : '•';
+              const effectLabel =
+                primaryEffect === 'blocked'
+                  ? 'blocked'
+                  : primaryEffect === 'demoted'
+                    ? 'demoted'
+                    : primaryEffect === 'boosted'
+                      ? 'boosted'
+                      : 'affected';
 
               return (
                 <div
@@ -355,6 +386,14 @@ export function ContextCard({
 
                     <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <span>{reflection.relative_time}</span>
+                      {effectSummary && (
+                        <Badge variant="outline" className={cn('gap-1', effectBadgeClass)}>
+                          <span aria-hidden="true">{effectIcon}</span>
+                          <span className="font-medium">
+                            {effectCount} {effectCount === 1 ? 'task' : 'tasks'} {effectLabel}
+                          </span>
+                        </Badge>
+                      )}
                       {typeof reflection.recency_weight === 'number' && (
                         <Badge variant="outline" className="border-primary/30 text-primary">
                           Recency&nbsp;{reflection.recency_weight.toFixed(2)}

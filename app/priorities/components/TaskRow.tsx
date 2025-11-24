@@ -14,6 +14,8 @@ import { ManualOverrideControls } from '@/app/priorities/components/ManualOverri
 import type { ManualOverrideState } from '@/lib/schemas/manualOverride';
 import type { StrategicScore, TaskWithScores } from '@/lib/schemas/strategicScore';
 import type { RetryStatusEntry } from '@/lib/schemas/retryStatus';
+import type { ReflectionEffect } from '@/lib/services/reflectionAdjuster';
+import { ReflectionAttributionBadge } from '@/app/priorities/components/ReflectionAttributionBadge';
 
 type EditMode = 'idle' | 'editing' | 'saving' | 'error';
 
@@ -67,6 +69,7 @@ type TaskRowProps = {
   baselineScore?: StrategicScore | null;
   onManualOverrideChange?: (override: ManualOverrideState | null) => void;
   inclusionReason?: string | null;
+  reflectionEffects?: ReflectionEffect[];
 };
 
 function MobileFieldLabel({ children }: { children: string }) {
@@ -109,6 +112,7 @@ export function TaskRow({
   baselineScore = null,
   onManualOverrideChange,
   inclusionReason,
+  reflectionEffects = [],
 }: TaskRowProps) {
   const categoryLabel = category
     ? category === 'leverage'
@@ -716,6 +720,20 @@ export function TaskRow({
                       <span className="font-medium">
                         Reflection: {strategicDetails.reflection_influence}
                       </span>
+                    </div>
+                  )}
+                  {reflectionEffects.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2" aria-label="Reflection effects">
+                      {reflectionEffects
+                        .filter(effect => effect.effect !== 'unchanged')
+                        .map(effect => (
+                          <ReflectionAttributionBadge
+                            key={`${taskId}-${effect.reflection_id}-${effect.effect}`}
+                            effect={effect.effect === 'blocked' ? 'blocked' : effect.effect === 'demoted' ? 'demoted' : 'boosted'}
+                            reason={effect.reason}
+                            reflectionId={effect.reflection_id}
+                          />
+                        ))}
                     </div>
                   )}
                   {inclusionReason && (
