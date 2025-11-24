@@ -566,6 +566,80 @@ Each phase is:
 
 ---
 
-**Last Updated:** 2025-11-10
-**Status:** Updated with Phase 10-13 (Agentic Enhancement Suite)
+### Phase 14: Outcome-Driven Prioritization
+**Appetite:** 4 weeks
+
+**Problem:** Prioritization happens without considering user's stated outcome
+
+**Solution:** Deep integration of user outcomes into strategic scoring
+
+[Read Full Pitch →](./phase-14-outcome-driven-prioritization.md)
+
+---
+
+### Phase 15: Reflection Intelligence
+**Appetite:** 4 weeks
+
+**Problem:** Reflections are captured but have no immediate effect on priorities
+
+**Solution:** Reflection interpreter + instant adjustment engine + attribution badges
+
+**Key unlock:** Reflections immediately affect task rankings with visible explanations
+
+[Read Full Pitch →](./phase-15-reflection-intelligence.md)
+
+---
+
+### Phase 16: Document-Aware Prioritization
+**Appetite:** 2 weeks
+
+**Problem:** Users can't see which documents are in prioritization or control what gets included
+
+**Solution:** Document visibility + pending count badge + outcome prominence + include/exclude toggles
+
+**Components:**
+- Document status API showing included/excluded/pending counts
+- "(3 new)" badge on recalculate button
+- Enhanced outcome display (prominent styling)
+- Source documents list with checkbox toggles
+- localStorage-based document exclusions
+
+**Key unlock:** Users know exactly what will change before clicking recalculate
+
+**Features:**
+- ✅ Pending document count on CTA
+- ✅ Visually prominent outcome display
+- ✅ Source document list with task counts
+- ✅ Quick toggles to exclude documents
+- ❌ No per-task exclusion (document-level only)
+- ❌ No persistent exclusions (localStorage only for v1)
+
+**Time Investment:** 2 weeks (visibility + control)
+
+[Read Full Pitch →](./phase-16-document-aware-prioritization.md)
+
+---
+
+## Total Timeline: 39-40 Weeks (Phases 1-16)
+
+Each phase is:
+- **Independently shippable** (can ship Phase 10 without Phase 11)
+- **Fixed scope** (rabbit holes explicitly cut)
+- **Time-boxed** (appetite fixed, no extensions)
+
+**Phases 1-9:** Foundation + Core Features (21-22 weeks)
+**Phases 10-13:** Agentic Intelligence (24 weeks)
+**Phases 14-16:** Context Enhancement (10 weeks)
+
+**Overall Capability Progression:**
+1. **Phases 1-4:** Basic agent runtime + tools
+2. **Phases 5-9:** Cloud sync + context awareness + user control
+3. **Phases 10-11:** Task intelligence + strategic prioritization
+4. **Phases 12-13:** Multi-goal harmony + alternative path exploration
+5. **Phases 14-16:** Outcome integration + reflection intelligence + document awareness
+
+---
+
+**Last Updated:** 2025-11-24
+**Status:** Updated with Phase 14-16 (Context Enhancement Suite)
 **Framework:** Mastra AI (TypeScript-first, YC-backed)
