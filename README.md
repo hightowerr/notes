@@ -18,7 +18,7 @@ An autonomous document intelligence workspace that ingests meeting notes and res
 - Outcome-aware scoring blends AI summaries with the current strategic outcome and reflections.
 - Mastra-powered agent orchestrates prioritisation using semantic search, dependency detection, and clustering tools.
 - Realtime dashboard surfaces document status, queue load, and prioritised plans.
-- Built with Next.js 15, React 19, Tailwind, and Supabase for storage, vector search, and telemetry.
+- Built with Next.js 15, React 19, Tailwind, and Supabase for storage, vector search, and telemetry.
 
 ## System Overview
 ### Frontend
@@ -77,17 +77,17 @@ An autonomous document intelligence workspace that ingests meeting notes and res
 
 ## Getting Started
 ### Prerequisites
-- Node.js 18 or newer.
-- pnpm/nvm/yarn/npm (project uses npm scripts).
-- Supabase project with storage bucket `notes` and Postgres schema from `supabase/migrations/`.
-- OpenAI API key with access to the deployed model family.
+- Node.js 20+ (required for native File API) – use `nvm use` to switch
+- pnpm (package manager)
+- Supabase project with storage bucket `notes` and Postgres schema from `supabase/migrations/`
+- OpenAI API key with access to GPT-4o
 
 ### Installation
 1. Clone the repository and move into the workspace.
    ```bash
    git clone <repository-url>
    cd notes
-   npm install
+   pnpm install
    ```
 2. Copy environment defaults and supply credentials.
    ```bash
@@ -98,6 +98,7 @@ An autonomous document intelligence workspace that ingests meeting notes and res
    ```env
    NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_supabase_anon_key
+   SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
    OPENAI_API_KEY=your_openai_api_key
    ENCRYPTION_KEY=32_byte_random_secret
    ```
@@ -113,16 +114,16 @@ An autonomous document intelligence workspace that ingests meeting notes and res
 
 4. Start the development server.
    ```bash
-   npm run dev
+   pnpm dev
    ```
    Visit `http://localhost:3000` to upload documents and monitor prioritisation sessions.
 
 ## Development & Quality
-- `npm run lint` – ESLint + Prettier (TypeScript strict mode).
-- `npm run test` – Vitest in watch mode; for single pass use `npm run test:run`.
-- `npm run test:ui` – launches the Vitest UI dashboard.
-- Integration specs that stress Tinypool threads: `npm run test:run -- --pool=threads --poolOptions.threads.minThreads=1 --poolOptions.threads.maxThreads=1`.
-- Explorer scripts live in `scripts/` (e.g. `scripts/test-mastra.ts` for agent health).
+- `pnpm lint` – ESLint + Prettier (TypeScript strict mode)
+- `pnpm test` – Vitest in watch mode; for single pass use `pnpm test:run`
+- `pnpm test:ui` – launches the Vitest UI dashboard
+- Integration specs that stress Tinypool threads: `pnpm test:run -- --pool=threads --poolOptions.threads.minThreads=1 --poolOptions.threads.maxThreads=1`
+- Explorer scripts live in `scripts/` (e.g. `scripts/test-mastra.ts` for agent health)
 
 Testing guidelines:
 - Unit tests sit alongside services/components; contract and integration suites live in `__tests__/contract/` and `__tests__/integration/` respectively.
@@ -149,8 +150,8 @@ notes/
 ```
 
 ## Deployment
-1. Configure environment variables (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `OPENAI_API_KEY`) in your hosting provider.
-2. Build with `npm run build` and serve via `npm run start`.
+1. Configure environment variables (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`) in your hosting provider.
+2. Build with `pnpm build` and serve via `pnpm start`.
 3. Vercel is the quickest path (Next.js 15 native); Netlify, Railway, DO App Platform, and AWS Amplify are also supported.
 4. Ensure Supabase Row Level Security policies mirror the migrations shipped in `supabase/migrations/` to protect uploaded assets and agent traces.
 
@@ -163,4 +164,4 @@ notes/
 - Need to validate Mastra wiring? `npx tsx scripts/test-mastra.ts`
 
 ---
-Built with ❤️ using Next.js 15, React 19, TypeScript, Supabase, and Mastra.
+Built with ❤️ using Next.js 15, React 19, TypeScript, Supabase, and Mastra.

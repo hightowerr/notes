@@ -9,10 +9,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Quick Start
 
 **First steps:**
-1. **READ `.claude/SYSTEM_RULES.md` FIRST** - Mandatory vertical slice protocol (SEE → DO → VERIFY)
+1. **READ `.claude/SYSTEM_RULES.md` FIRST** - Mandatory vertical slice protocol
 2. Verify Node 20+: `nvm use`
 3. Run tests: `pnpm test:run`
 4. Check current work: `git status` and look at `specs/*/tasks.md` for active feature
+
+**The Three Laws (from SYSTEM_RULES.md):**
+Every code change MUST enable a user to:
+1. **SEE IT** → Visible UI change or feedback
+2. **DO IT** → Interactive capability they can trigger
+3. **VERIFY IT** → Observable outcome that confirms it worked
+
+*If ANY of these are missing → STOP. It's not a slice, it's just code.*
 
 **Common tasks:**
 - Add new feature → `/specify` → `/plan` → `/tasks` → `/implement`
@@ -69,10 +77,14 @@ Code review only?           → code-reviewer
 Type system design?         → typescript-architect
 ```
 
-**Rules:**
-- ALWAYS use `slice-orchestrator` for feature work
-- TDD: Write failing test FIRST, then implement
-- NEVER mark complete without user journey test
+**TDD is mandatory:**
+1. Write failing test FIRST (RED)
+2. Implement minimal code to pass (GREEN)
+3. Refactor if needed
+4. NEVER mark complete without user journey test
+
+**Auto-Quality Pipeline:**
+After ANY implementation: `code-reviewer` → `test-runner` → (if fail) `debugger` → loop
 
 ## Git Workflow
 
@@ -93,20 +105,22 @@ Type system design?         → typescript-architect
 ## Architecture
 
 ```
-Upload → Convert → AI Extract → Embed → Display
-  ↓        ↓           ↓          ↓        ↓
-/api/   noteProcessor aiSummarizer pgvector SummaryPanel
+Upload → Convert → AI Extract → Embed → Display → Prioritize
+  ↓        ↓           ↓          ↓        ↓          ↓
+/api/   noteProcessor aiSummarizer pgvector Dashboard  Mastra Agent
 ```
 
-**Key Services** (`lib/services/`):
+**Document Pipeline** (`lib/services/`):
 - `noteProcessor.ts` - PDF/DOCX/TXT → Markdown (OCR fallback)
 - `aiSummarizer.ts` - GPT-4o extraction with Zod schemas
 - `processingQueue.ts` - Max 3 concurrent, FIFO queue
 - `embeddingService.ts` - OpenAI text-embedding-3-small (1536-dim)
 
-**Mastra Tools** (`lib/mastra/tools/`):
-- `semanticSearch.ts`, `detectDependencies.ts`, `clusterBySimilarity.ts`
-- `suggestBridgingTasks.ts` - Gap filling for task plans
+**Mastra Agent Layer** (`lib/mastra/`):
+- `agents/taskOrchestrator.ts` - Prioritization agent with strict instruction block
+- `services/agentOrchestration.ts` - Context assembly, agent launch, result persistence
+- `services/resultParser.ts` - Validates agent JSON, repairs partial traces
+- `tools/` - semanticSearch, detectDependencies, clusterBySimilarity, suggestBridgingTasks
 
 **Main Pages:**
 - `app/page.tsx` - Upload UI with drag-and-drop
@@ -207,10 +221,23 @@ setTimeout(() => { const values = form.getValues(); saveDraft(values); }, 0);
 - Concurrent uploads: Max 3, auto-queued
 - Data retention: 30 days
 
+## Mastra Agent Health Check
+
+```bash
+npx tsx scripts/test-mastra.ts    # Validate tool registry and telemetry
+```
+
+If agent prioritization fails:
+1. Check `agent_sessions` table for error traces
+2. Verify `OPENAI_API_KEY` is set
+3. Review `lib/mastra/config.ts` for telemetry settings
+
 ## Resources
 
 - `.claude/SYSTEM_RULES.md` - Vertical slice protocol (READ FIRST)
-- `.claude/standards.md` - TypeScript, TDD, design system
+- `.claude/standards.md` - TypeScript, TDD, design system, common patterns
 - `AGENTS.md` - Repository workflow, commit guidelines
 - `specs/*/spec.md` - Feature specifications
 - `IMPLEMENTATION_STATUS.md` - Completion status
+- `.claude/state/` - Task state tracking JSON files
+- `.claude/logs/` - Test results and debug reports
