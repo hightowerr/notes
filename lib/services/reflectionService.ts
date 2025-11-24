@@ -1,8 +1,30 @@
 import { formatDistanceToNow } from 'date-fns';
-import { getSupabaseAdminClient } from '@/lib/supabase/admin';
-import type { Reflection, ReflectionWithWeight } from '@/lib/schemas/reflectionSchema';
+import {
+  reflectionSchema,
+  reflectionWithWeightSchema,
+  type Reflection,
+  type ReflectionWithWeight,
+  type ReflectionEffectsSummary,
+} from '@/lib/schemas/reflectionSchema';
+import type { ReflectionEffect } from '@/lib/services/reflectionAdjuster';
 
-const supabase = getSupabaseAdminClient();
+// Lazily instantiate to avoid admin client creation on the browser bundle
+let supabase = null as ReturnType<typeof import('@/lib/supabase/admin').getSupabaseAdminClient> | null;
+
+function getAdminSupabase() {
+  if (supabase) {
+    return supabase;
+  }
+  const isBrowser = typeof window !== 'undefined' && typeof window.document !== 'undefined';
+  if (isBrowser && process.env.NODE_ENV !== 'test') {
+    throw new Error('Admin client cannot be instantiated in the browser');
+  }
+  // Lazy require to keep client bundle clean
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { getSupabaseAdminClient } = require('@/lib/supabase/admin');
+  supabase = getSupabaseAdminClient();
+  return supabase;
+}
 
 /**
  * Step-function recency weighting used by context-aware prioritization.
@@ -81,6 +103,8 @@ export async function fetchRecentReflections(
 ): Promise<ReflectionWithWeight[]> {
   const { limit = 5, withinDays = 30, activeOnly = false } = options;
 
+  const supabase = getAdminSupabase();
+
   let query = supabase
     .from('reflections')
     .select('*')
@@ -112,6 +136,76 @@ export async function fetchRecentReflections(
 }
 
 /**
+ * Fetch aggregate reflection effect counts for a set of reflection IDs.
+ *
+ * Uses task_embeddings.reflection_effects to compute how many tasks were
+ * blocked, demoted, or boosted by each reflection.
+ */
+export async function fetchReflectionEffectsSummary(
+  reflectionIds: string[]
+): Promise<Record<string, ReflectionEffectsSummary>> {
+  if (reflectionIds.length === 0) {
+    return {};
+  }
+
+  const idSet = new Set(reflectionIds);
+  const summary: Record<string, ReflectionEffectsSummary> = {};
+
+  reflectionIds.forEach(id => {
+    summary[id] = { total: 0, blocked: 0, demoted: 0, boosted: 0 };
+  });
+
+  const ensureSummary = (id: string): ReflectionEffectsSummary => {
+    if (!summary[id]) {
+      summary[id] = { total: 0, blocked: 0, demoted: 0, boosted: 0 };
+    }
+    return summary[id];
+  };
+
+  const supabase = getAdminSupabase();
+  const { data, error } = await supabase
+    .from('task_embeddings')
+    .select('reflection_effects')
+    .not('reflection_effects', 'is', null);
+
+  if (error) {
+    console.error('[ReflectionService] Failed to fetch reflection effects summary', error);
+    return summary;
+  }
+
+  (data ?? []).forEach((row) => {
+    if (!row || !Array.isArray(row.reflection_effects)) {
+      return;
+    }
+
+    (row.reflection_effects as ReflectionEffect[]).forEach((effect) => {
+      if (
+        !effect ||
+        typeof effect.reflection_id !== 'string' ||
+        !idSet.has(effect.reflection_id) ||
+        effect.effect === 'unchanged'
+      ) {
+        return;
+      }
+
+      const bucket = ensureSummary(effect.reflection_id);
+      if (effect.effect === 'blocked') {
+        bucket.blocked += 1;
+      } else if (effect.effect === 'demoted') {
+        bucket.demoted += 1;
+      } else if (effect.effect === 'boosted') {
+        bucket.boosted += 1;
+      } else {
+        return;
+      }
+      bucket.total = bucket.blocked + bucket.demoted + bucket.boosted;
+    });
+  });
+
+  return summary;
+}
+
+/**
  * Create a new reflection
  *
  * @param userId - User ID (UUID)
@@ -123,6 +217,7 @@ export async function createReflection(
   text: string
 ): Promise<ReflectionWithWeight> {
 
+  const supabase = getAdminSupabase();
   const { data, error } = await supabase
     .from('reflections')
     .insert({
@@ -145,6 +240,97 @@ export async function createReflection(
   return enrichReflection(data as Reflection);
 }
 
+const FALLBACK_USER_ID = 'default-user';
+
+const coerceNumber = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return null;
+};
+
+const buildFallbackId = (index: number): string =>
+  `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+
+/**
+ * Normalize an unknown reflection payload into a validated ReflectionWithWeight.
+ * Falls back to a generated ID and default user if necessary.
+ */
+export function normalizeReflectionFromUnknown(
+  raw: unknown,
+  options: { fallbackIndex?: number; fallbackUserId?: string } = {}
+): ReflectionWithWeight | null {
+  const { fallbackIndex = 0, fallbackUserId = FALLBACK_USER_ID } = options;
+
+  const parsedWithWeight = reflectionWithWeightSchema.safeParse(raw);
+  if (parsedWithWeight.success) {
+    return parsedWithWeight.data;
+  }
+
+  if (!raw || typeof raw !== 'object') {
+    console.warn('[ReflectionService] Skipping invalid reflection entry: not an object', raw);
+    return null;
+  }
+
+  const candidate = raw as Record<string, unknown>;
+  const id =
+    typeof candidate.id === 'string' && candidate.id.length > 0
+      ? candidate.id
+      : buildFallbackId(fallbackIndex);
+  const userId =
+    typeof candidate.user_id === 'string' && candidate.user_id.length > 0
+      ? candidate.user_id
+      : fallbackUserId;
+  const createdAt =
+    typeof candidate.created_at === 'string' && !Number.isNaN(Date.parse(candidate.created_at))
+      ? candidate.created_at
+      : new Date().toISOString();
+  const text =
+    typeof candidate.text === 'string' && candidate.text.trim().length > 0
+      ? candidate.text
+      : 'Reflection unavailable.';
+  const isActive =
+    typeof candidate.is_active_for_prioritization === 'boolean'
+      ? candidate.is_active_for_prioritization
+      : true;
+
+  const explicitWeight = coerceNumber(candidate.weight);
+  const explicitRecency = coerceNumber(candidate.recency_weight);
+  const recencyWeight = explicitRecency ?? explicitWeight ?? undefined;
+
+  const parsed = reflectionSchema.safeParse({
+    id,
+    user_id: userId,
+    text,
+    created_at: createdAt,
+    is_active_for_prioritization: isActive,
+    recency_weight: recencyWeight,
+  });
+
+  if (parsed.success) {
+    const enriched = enrichReflection(parsed.data);
+    return {
+      ...enriched,
+      recency_weight: enriched.recency_weight ?? calculateRecencyWeight(new Date(enriched.created_at)),
+      relative_time: enriched.relative_time ?? formatRelativeTime(new Date(enriched.created_at)),
+    };
+  }
+
+  console.warn('[ReflectionService] Dropping reflection that failed validation', {
+    issues: parsed.error.flatten(),
+    candidate,
+  });
+  return null;
+}
+
 /**
  * Delete a reflection and clean up any references to it
  *
@@ -160,6 +346,7 @@ export async function deleteReflection(
   // This prevents broken references in adjusted plans
   try {
     // Fetch current agent sessions to check for reflection references
+    const supabase = getAdminSupabase();
     const { data: sessions, error: fetchError } = await supabase
       .from('agent_sessions')
       .select('id, adjusted_plan, baseline_plan')
@@ -222,14 +409,19 @@ export async function deleteReflection(
   }
 
   // Now delete the reflection from the reflections table
-  const { error } = await supabase
+  const supabase = getAdminSupabase();
+  const { error, count } = await supabase
     .from('reflections')
-    .delete()
+    .delete({ count: 'exact' })
     .eq('id', reflectionId)
     .eq('user_id', userId); // Ensure user owns the reflection
 
   if (error) {
     console.error('Error deleting reflection:', error);
     throw new Error('Failed to delete reflection');
+  }
+
+  if (typeof count === 'number' && count === 0) {
+    throw new Error('Reflection not found or not owned by user');
   }
 }

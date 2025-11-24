@@ -106,19 +106,48 @@ export function QuadrantViz({ tasks, onTaskClick, showCountBadge = true }: Quadr
       margin={{ top: 20, right: 20, bottom: 20, left: 20 }}
     >
       <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-        <XAxis
-          type="number"
-          dataKey="effort"
-          name="Effort"
-          scale="log"
-          domain={xDomain}
-          tickFormatter={value => `${value}h`}
-        >
-          <Label value="Effort (hours, log scale)" offset={-10} position="insideBottom" />
-        </XAxis>
-        <YAxis type="number" dataKey="impact" name="Impact" domain={[0, 10]}>
-          <Label value="Impact (0-10)" angle={-90} position="insideLeft" offset={10} />
-        </YAxis>
+      <XAxis
+        type="number"
+        dataKey="effort"
+        name="Effort"
+        scale="log"
+        domain={xDomain}
+        tickFormatter={value => `${value}h`}
+        tick={({ x, y, payload }) => {
+          const safeVal = typeof payload?.value === 'number' ? payload.value : Number(payload?.value);
+          const label = Number.isFinite(safeVal) ? `${safeVal}h` : '';
+          const key = `x-tick-${safeVal}-${x}-${y}`;
+          return (
+            <g transform={`translate(${x},${y})`} key={key}>
+              <text dy={16} textAnchor="middle" fill="#64748b" fontSize={12}>
+                {label}
+              </text>
+            </g>
+          );
+        }}
+      >
+        <Label value="Effort (hours, log scale)" offset={-10} position="insideBottom" />
+      </XAxis>
+      <YAxis
+        type="number"
+        dataKey="impact"
+        name="Impact"
+        domain={[0, 10]}
+        tick={({ x, y, payload }) => {
+          const safeVal = typeof payload?.value === 'number' ? payload.value : Number(payload?.value);
+          const label = Number.isFinite(safeVal) ? safeVal : '';
+          const key = `y-tick-${safeVal}-${x}-${y}`;
+          return (
+            <g transform={`translate(${x},${y})`} key={key}>
+              <text dx={-6} dy={4} textAnchor="end" fill="#64748b" fontSize={12}>
+                {label}
+              </text>
+            </g>
+          );
+        }}
+      >
+        <Label value="Impact (0-10)" angle={-90} position="insideLeft" offset={10} />
+      </YAxis>
         <ZAxis
           type="number"
           dataKey="confidence"

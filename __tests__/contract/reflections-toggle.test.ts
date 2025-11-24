@@ -1,8 +1,6 @@
 /**
- * Contract Tests: POST /api/reflections/toggle
+ * Contract Tests: PATCH /api/reflections/[id]
  * Validates schema, persistence, and error handling for reflection toggles.
- *
- * NOTE: Endpoint not yet implemented. Tests are expected to fail.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -39,7 +37,7 @@ async function seedReflection(text: string) {
   return data;
 }
 
-describe('POST /api/reflections/toggle', () => {
+describe('PATCH /api/reflections/[id]', () => {
   beforeAll(async () => {
     await clearReflections();
   });
@@ -49,8 +47,8 @@ describe('POST /api/reflections/toggle', () => {
   });
 
   it('returns 400 when request body fails validation', async () => {
-    const response = await fetch(`${API_BASE}/api/reflections/toggle`, {
-      method: 'POST',
+    const response = await fetch(`${API_BASE}/api/reflections/${randomUUID()}`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     });
@@ -66,13 +64,10 @@ describe('POST /api/reflections/toggle', () => {
   it('toggles the reflection state and persists it', async () => {
     const reflection = await seedReflection('Ship better onboarding before launch week.');
 
-    const toggleResponse = await fetch(`${API_BASE}/api/reflections/toggle`, {
-      method: 'POST',
+    const toggleResponse = await fetch(`${API_BASE}/api/reflections/${reflection.id}`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        reflection_id: reflection.id,
-        is_active: false,
-      }),
+      body: JSON.stringify({ is_active: false }),
     });
 
     expect(toggleResponse.status).toBe(200);
@@ -101,13 +96,10 @@ describe('POST /api/reflections/toggle', () => {
   });
 
   it('returns 404 when the reflection does not exist', async () => {
-    const response = await fetch(`${API_BASE}/api/reflections/toggle`, {
-      method: 'POST',
+    const response = await fetch(`${API_BASE}/api/reflections/${randomUUID()}`, {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        reflection_id: randomUUID(),
-        is_active: true,
-      }),
+      body: JSON.stringify({ is_active: true }),
     });
 
     expect(response.status).toBe(404);

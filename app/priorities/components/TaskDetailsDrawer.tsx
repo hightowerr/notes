@@ -11,9 +11,55 @@ import { cn } from '@/lib/utils';
 
 type TaskStatus = 'active' | 'completed' | 'discarded';
 
+const ACRONYM_HINTS: Record<string, string> = {
+  PDP: 'Product Detail Page',
+};
+
+type ClaritySuggestion = {
+  rephrased: string;
+  reason: string;
+};
+
+function buildClaritySuggestion(taskText: string | null | undefined): ClaritySuggestion | null {
+  const base = (taskText ?? '').trim();
+  if (!base) {
+    return null;
+  }
+
+  const acronyms = Array.from(new Set(base.match(/\b[A-Z]{2,}\b/g) ?? []));
+  const expansions: string[] = [];
+  let rephrased = base;
+
+  acronyms.forEach(acronym => {
+    const expansion = ACRONYM_HINTS[acronym];
+    if (!expansion) {
+      return;
+    }
+    expansions.push(`${acronym} = ${expansion}`);
+    rephrased = rephrased.replace(new RegExp(`\\b${acronym}\\b`, 'g'), `${expansion} (${acronym})`);
+
+    if (acronym === 'PDP' && /availability/i.test(base)) {
+      rephrased = rephrased.replace(
+        /PDP[^ ]* parts?/i,
+        'Product Detail Page (PDP) availability signals like stock badges, variant selectors, and add-to-cart gating'
+      );
+    }
+  });
+
+  if (expansions.length === 0 || rephrased === base) {
+    return null;
+  }
+
+  return {
+    rephrased,
+    reason: `Expanded ${expansions.join(', ')} for clarity.`,
+  };
+}
+
 type TaskSummary = {
   id: string;
   title: string;
+  documentId?: string | null;
   rank: number | null;
   confidence: number | null;
   confidenceDelta?: number | null;
@@ -134,6 +180,11 @@ export function TaskDetailsDrawer({
     }
     return task.outcomeRationale ?? null;
   }, [task, outcomeStatement]);
+
+  const claritySuggestion = useMemo(
+    () => buildClaritySuggestion(task?.sourceText ?? task?.title ?? null),
+    [task?.sourceText, task?.title]
+  );
 
   const [isEditingDependencies, setIsEditingDependencies] = useState(false);
   const [newDependencyId, setNewDependencyId] = useState('');
@@ -265,9 +316,24 @@ export function TaskDetailsDrawer({
                   {task.sourceText && (
                     <p className="text-sm font-medium text-foreground">“{task.sourceText}”</p>
                   )}
-                  {task.sourceDocumentTitle && (
+                  {(task.sourceDocumentTitle || task.documentId) && (
                     <p className="text-xs text-muted-foreground">
-                      Source: <span className="font-medium text-foreground">{task.sourceDocumentTitle}</span>
+                      Source:{' '}
+                      <span className="font-medium text-foreground">
+                        {task.sourceDocumentTitle ?? 'Document'}
+                      </span>
+                      {task.documentId && (
+                        <>
+                          {' '}
+                          ·{' '}
+                          <a
+                            href={`/dashboard?documentId=${task.documentId}`}
+                            className="font-medium text-primary hover:underline"
+                          >
+                            View document
+                          </a>
+                        </>
+                      )}
                     </p>
                   )}
                   {alignmentCopy && (
@@ -276,6 +342,18 @@ export function TaskDetailsDrawer({
                   {outcomeStatement && (
                     <p className="text-xs text-muted-foreground">Goal: “{outcomeStatement}”</p>
                   )}
+                </div>
+              </section>
+            )}
+
+            {claritySuggestion && (
+              <section className="space-y-2 text-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Clarity check
+                </p>
+                <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 space-y-1">
+                  <p className="text-sm font-medium text-foreground">{claritySuggestion.rephrased}</p>
+                  <p className="text-xs text-amber-700">{claritySuggestion.reason}</p>
                 </div>
               </section>
             )}

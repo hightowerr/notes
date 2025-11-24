@@ -137,8 +137,33 @@ export async function POST(request: Request) {
     }
 
     const metadata = await resolveOutcomeAlignedTasks(taskIds, { outcome });
+
+    const supabase = getSupabaseAdminClient();
+    const { data: embeddingRows, error: embeddingsError } = await supabase
+      .from('task_embeddings')
+      .select('task_id, reflection_effects')
+      .in('task_id', taskIds);
+
+    if (embeddingsError) {
+      console.error('[TaskMetadata API] Failed to load reflection effects', embeddingsError);
+    }
+
+    const reflectionEffectsMap = new Map<string, unknown>();
+    (embeddingRows ?? []).forEach(row => {
+      if (row && typeof row.task_id === 'string') {
+        reflectionEffectsMap.set(row.task_id, row.reflection_effects);
+      }
+    });
+
     const tasks = taskIds
-      .map(taskId => metadata[taskId])
+      .map(taskId => {
+        const meta = metadata[taskId];
+        if (!meta) return null;
+        return {
+          ...meta,
+          reflection_effects: reflectionEffectsMap.get(taskId),
+        };
+      })
       .filter((task): task is NonNullable<typeof task> => Boolean(task));
 
     console.log('[TaskMetadata API] Request:', { taskIdsCount: taskIds.length, outcome });

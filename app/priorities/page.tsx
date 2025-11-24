@@ -22,7 +22,7 @@ import {
   type SurveyRating,
   type SurveyState,
 } from '@/app/priorities/components/QualitySurvey';
-import { ReflectionPanel } from '@/app/components/ReflectionPanel';
+import { ReflectionPanel, type ReflectionAddedResult } from '@/app/components/ReflectionPanel';
 import { prioritizedPlanSchema } from '@/lib/schemas/prioritizedPlanSchema';
 import { executionMetadataSchema } from '@/lib/schemas/executionMetadataSchema';
 import { gapDetectionResponseSchema, type GapDetectionResponse } from '@/lib/schemas/gapSchema';
@@ -30,7 +30,7 @@ import type { BridgingTask } from '@/lib/schemas/bridgingTaskSchema';
 import { reflectionWithWeightSchema } from '@/lib/schemas/reflectionSchema';
 import type { ExecutionMetadata, PrioritizedTaskPlan } from '@/lib/types/agent';
 import { adjustedPlanSchema, type AdjustedPlan } from '@/lib/types/adjustment';
-import type { ReflectionWithWeight } from '@/lib/schemas/reflectionSchema';
+import type { Reflection, ReflectionWithWeight } from '@/lib/schemas/reflectionSchema';
 import { StrategicScoresMapSchema, type StrategicScoresMap } from '@/lib/schemas/strategicScore';
 import type { SortingStrategy } from '@/lib/schemas/sortingStrategy';
 import type { RetryStatusEntry } from '@/lib/schemas/retryStatus';
@@ -52,6 +52,13 @@ import {
   type AcceptedSuggestionForPlan,
 } from '@/lib/services/planIntegration';
 import {
+  calculateRecencyWeight,
+  enrichReflection,
+  formatRelativeTime,
+  normalizeReflectionFromUnknown,
+} from '@/lib/services/reflectionService';
+import type { ReflectionEffect } from '@/lib/services/reflectionAdjuster';
+import {
   buildDependencyOverrideEdges,
   getOutcomeDependencyOverrides,
 } from '@/lib/utils/dependencyOverrides';
@@ -63,7 +70,6 @@ const POLL_INTERVAL_MS = 2000;
 // 2s strike a balance: quick enough for reactive UI, light enough for Supabase/API load
 const METADATA_POLL_INTERVAL_MS = 2000;
 const MAX_SESSION_DURATION_MS = 120_000;
-const DEFAULT_RELATIVE_TIME = 'just now';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MINUTE_IN_MS = 60 * 1000;
 const HOUR_IN_MS = 60 * 60 * 1000;
@@ -105,127 +111,6 @@ function describeBaselineAge(ageMs: number): string {
   const years = Math.floor(days / 365);
   return `${years} year${years === 1 ? '' : 's'}`;
 }
-
-const coerceNumber = (value: unknown): number | null => {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-
-  if (typeof value === 'string') {
-    const parsed = Number.parseFloat(value);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-
-  return null;
-};
-
-const calculateFallbackWeight = (createdAtIso: string): number => {
-  const createdAt = new Date(createdAtIso);
-  if (Number.isNaN(createdAt.getTime())) {
-    return 1;
-  }
-
-  const ageInDays = Math.floor((Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24));
-
-  if (ageInDays <= 7) {
-    return 1;
-  }
-
-  if (ageInDays <= 14) {
-    return 0.5;
-  }
-
-  return 0.25;
-};
-
-const formatFallbackRelativeTime = (createdAtIso: string): string => {
-  const createdAt = new Date(createdAtIso);
-  if (Number.isNaN(createdAt.getTime())) {
-    return DEFAULT_RELATIVE_TIME;
-  }
-
-  const diffMs = Date.now() - createdAt.getTime();
-  const diffMinutes = Math.floor(diffMs / (1000 * 60));
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffMinutes <= 1) {
-    return DEFAULT_RELATIVE_TIME;
-  }
-
-  if (diffHours < 1) {
-    return `${diffMinutes} minute${diffMinutes === 1 ? '' : 's'} ago`;
-  }
-
-  if (diffDays < 1) {
-    return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
-  }
-
-  if (diffDays <= 7) {
-    return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
-  }
-
-  return '7+ days ago';
-};
-
-const normalizeReflection = (raw: unknown, index: number): ReflectionWithWeight | null => {
-  if (!raw || typeof raw !== 'object') {
-    console.warn('[Task Priorities] Skipping invalid reflection entry: not an object', raw);
-    return null;
-  }
-
-  const candidate = raw as Record<string, unknown>;
-  const id =
-    typeof candidate.id === 'string' && candidate.id.length > 0
-      ? candidate.id
-      : `fallback-${index}`;
-  const userId =
-    typeof candidate.user_id === 'string' && candidate.user_id.length > 0
-      ? candidate.user_id
-      : 'unknown-user';
-  const createdAt = typeof candidate.created_at === 'string' ? candidate.created_at : new Date().toISOString();
-  const text =
-    typeof candidate.text === 'string' && candidate.text.trim().length > 0
-      ? candidate.text
-      : 'Reflection unavailable.';
-  const isActive =
-    typeof candidate.is_active_for_prioritization === 'boolean'
-      ? candidate.is_active_for_prioritization
-      : true;
-
-  const explicitWeight = coerceNumber(candidate.weight);
-  const explicitRecency = coerceNumber(candidate.recency_weight);
-  const weight = explicitWeight ?? explicitRecency ?? calculateFallbackWeight(createdAt);
-  const recencyWeight = explicitRecency ?? weight;
-
-  const relativeTime =
-    typeof candidate.relative_time === 'string' && candidate.relative_time.trim().length > 0
-      ? candidate.relative_time
-      : formatFallbackRelativeTime(createdAt);
-
-  const parsed = reflectionWithWeightSchema.safeParse({
-    id,
-    user_id: userId,
-    text,
-    created_at: createdAt,
-    is_active_for_prioritization: isActive,
-    recency_weight: recencyWeight,
-    weight,
-    relative_time: relativeTime
-  });
-
-  if (parsed.success) {
-    return parsed.data;
-  }
-
-  console.warn('[Task Priorities] Dropping reflection that failed validation', {
-    issues: parsed.error.flatten(),
-    candidate
-  });
-  return null;
-};
 
 type OutcomeResponse = {
   id: string;
@@ -716,7 +601,12 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
       const payload = await response.json();
       const rawReflections = Array.isArray(payload.reflections) ? payload.reflections : [];
       const normalized = rawReflections
-        .map((reflection, index) => normalizeReflection(reflection, index))
+        .map((reflection, index) =>
+          normalizeReflectionFromUnknown(reflection, {
+            fallbackIndex: index,
+            fallbackUserId: DEFAULT_USER_ID,
+          })
+        )
         .filter((reflection): reflection is ReflectionWithWeight => reflection !== null);
 
       if (rawReflections.length > 0 && normalized.length === 0) {
@@ -753,6 +643,87 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
     }
   }, [reflectionPanelOpen, fetchReflections]);
 
+  const applyImmediateEffectsToPlan = useCallback(
+    (effects: ReflectionEffect[]) => {
+      if (!effects || effects.length === 0) {
+        return;
+      }
+
+      setPrioritizedPlan(prev => {
+        if (!prev || !Array.isArray(prev.ordered_task_ids)) {
+          return prev;
+        }
+
+        const weightMap = new Map<string, number>();
+        effects.forEach(effect => {
+          if (!UUID_PATTERN.test(effect.task_id)) {
+            return;
+          }
+          const existing = weightMap.get(effect.task_id) ?? 0;
+          if (effect.effect === 'blocked') {
+            weightMap.set(effect.task_id, existing - 100);
+            return;
+          }
+          if (effect.effect === 'demoted') {
+            weightMap.set(effect.task_id, existing - Math.max(1, Math.abs(effect.magnitude ?? 1)) * 2);
+            return;
+          }
+          if (effect.effect === 'boosted') {
+            weightMap.set(effect.task_id, existing + Math.max(1, Math.abs(effect.magnitude ?? 1)) * 2);
+          }
+        });
+
+        if (weightMap.size === 0) {
+          return prev;
+        }
+
+        const ordered = [...prev.ordered_task_ids];
+        ordered.sort((a, b) => {
+          const bScore = weightMap.get(b) ?? 0;
+          const aScore = weightMap.get(a) ?? 0;
+          if (aScore === bScore) {
+            return 0;
+          }
+          return bScore - aScore;
+        });
+
+        return { ...prev, ordered_task_ids: ordered };
+      });
+      setPlanVersion(prev => prev + 1);
+    },
+    []
+  );
+
+  const handleReflectionAutoAdjust = useCallback(
+    (result: ReflectionAddedResult) => {
+      setPlanStatusMessage('Applying your context...');
+      setIsInstantAdjusting(true);
+      void fetchReflections();
+
+      const newReflectionId = result.reflection?.id;
+      if (newReflectionId && UUID_PATTERN.test(newReflectionId)) {
+        setActiveReflectionIds(prev =>
+          prev.includes(newReflectionId) ? prev : [...prev, newReflectionId]
+        );
+      }
+
+      if (Array.isArray(result.effects) && result.effects.length > 0) {
+        applyImmediateEffectsToPlan(result.effects);
+        toast.success('Applied your context to the current task list.');
+      } else if (result.message) {
+        toast.info(result.message);
+      } else {
+        toast.success('Reflection saved.');
+      }
+
+      window.setTimeout(() => {
+        setPlanStatusMessage(null);
+        setIsInstantAdjusting(false);
+      }, 500);
+    },
+    [applyImmediateEffectsToPlan, fetchReflections]
+  );
+
   useReflectionShortcut(() => setReflectionPanelOpen((open) => !open));
 
   useEffect(() => {
@@ -781,6 +752,15 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
     });
     return map;
   }, [reflections]);
+
+  const reflectionEffectsRefreshKey = useMemo(() => {
+    const activeKey = [...activeReflectionIds].sort().join('|');
+    const summaryKey = reflections
+      .map(reflection => `${reflection.id}:${reflection.effects_summary?.total ?? 0}:${reflection.is_active_for_prioritization ? '1' : '0'}`)
+      .sort()
+      .join('|');
+    return `${activeKey}::${summaryKey}`;
+  }, [activeReflectionIds, reflections]);
 
   useEffect(() => {
     if (!currentSessionId) {
@@ -2627,6 +2607,8 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
               sortingStrategy={sortingStrategy}
               onTaskMetadataUpdate={handleTaskMetadataUpdate}
               onActiveIdsChange={setActiveTaskIds}
+              metadataRefreshKey={reflectionEffectsRefreshKey}
+              activeReflectionIds={activeReflectionIds}
             />
             {prioritizedPlan.excluded_tasks && prioritizedPlan.excluded_tasks.length > 0 && (
               <ExcludedTasksSection excludedTasks={prioritizedPlan.excluded_tasks} />
@@ -2704,10 +2686,7 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
       <ReflectionPanel
         isOpen={reflectionPanelOpen}
         onOpenChange={setReflectionPanelOpen}
-        onReflectionAdded={() => {
-          // When a reflection is added, fetch latest reflections and trigger recompute
-          fetchReflections();
-        }}
+        onReflectionAdded={handleReflectionAutoAdjust}
         outcomeId={activeOutcome?.id ?? null}
       />
     </div>

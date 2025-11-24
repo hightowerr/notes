@@ -1,10 +1,18 @@
+import { performance } from 'node:perf_hooks';
+
 import { NextRequest, NextResponse } from 'next/server';
 import { reflectionInputSchema } from '@/lib/schemas/reflectionSchema';
-import { createReflection, fetchRecentReflections } from '@/lib/services/reflectionService';
+import {
+  createReflection,
+  fetchRecentReflections,
+  fetchReflectionEffectsSummary,
+} from '@/lib/services/reflectionService';
 import { debounceRecompute } from '@/lib/services/recomputeDebounce';
 import { triggerRecomputeJob } from '@/lib/services/recomputeService';
 import { getAuthenticatedUserId } from '@/app/api/reflections/utils';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
+import { interpretReflection } from '@/lib/services/reflectionInterpreter';
+import { applyReflectionEffects } from '@/lib/services/reflectionAdjuster';
 
 const supabaseAdmin = getSupabaseAdminClient();
 
@@ -77,7 +85,18 @@ export async function GET(request: NextRequest) {
       activeOnly,
     });
 
-    return NextResponse.json({ reflections }, { status: 200 });
+    let reflectionsWithEffects = reflections;
+    try {
+      const summaries = await fetchReflectionEffectsSummary(reflections.map(r => r.id));
+      reflectionsWithEffects = reflections.map(reflection => ({
+        ...reflection,
+        effects_summary: summaries[reflection.id],
+      }));
+    } catch (summaryError) {
+      console.error('[Reflections API] Failed to attach reflection effect summaries', summaryError);
+    }
+
+    return NextResponse.json({ reflections: reflectionsWithEffects }, { status: 200 });
   } catch (error) {
     console.error(
       JSON.stringify({
@@ -111,6 +130,7 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
+    const startedAt = performance.now();
     const userId = await getAuthenticatedUserId();
 
     if (!userId) {
@@ -122,7 +142,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
 
-    const outcomeExists = await hasActiveOutcome();
+    const outcomeExists = await hasActiveOutcome(userId);
     if (!outcomeExists) {
       return NextResponse.json(
         {
@@ -163,9 +183,35 @@ export async function POST(request: NextRequest) {
     // Create reflection in database
     const reflection = await createReflection(userId, text);
 
+    // Interpret reflection intent for immediate adjustment
+    const { intent, latencyMs: interpreterLatency } = await interpretReflection(text);
+
+    let persistedIntent = false;
+    const { error: intentError } = await supabaseAdmin
+      .from('reflection_intents')
+      .upsert({
+        reflection_id: reflection.id,
+        type: intent.type,
+        subtype: intent.subtype,
+        keywords: intent.keywords ?? [],
+        strength: intent.strength,
+        duration: intent.duration ?? null,
+        summary: intent.summary,
+      })
+      .select('id')
+      .maybeSingle();
+
+    if (intentError) {
+      console.error('[Reflections API] Failed to persist reflection intent', intentError);
+    } else {
+      persistedIntent = true;
+    }
+
+    const { effects, tasksAffected, message: adjustmentMessage } = await applyReflectionEffects([reflection.id]);
+
     let totalReflections: number | null = null;
     try {
-      const { count } = await supabase
+      const { count } = await supabaseAdmin
         .from('reflections')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', userId);
@@ -213,7 +259,21 @@ export async function POST(request: NextRequest) {
       }
     });
 
-    return NextResponse.json(reflection, { status: 201 });
+    const latencyMs = Math.max(0, Math.round(performance.now() - startedAt));
+
+    return NextResponse.json(
+      {
+        reflection,
+        intent,
+        persisted: persistedIntent,
+        effects,
+        tasks_affected: tasksAffected,
+        message: adjustmentMessage ?? undefined,
+        latency_ms: latencyMs,
+        interpreter_latency_ms: interpreterLatency,
+      },
+      { status: 201 }
+    );
   } catch (error) {
     console.error(
       JSON.stringify({

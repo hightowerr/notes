@@ -1,0 +1,158 @@
+openapi: 3.1.0
+info:
+  title: Reflection Interpret API
+  description: API for interpreting reflection intent using GPT-4o-mini
+  version: 1.0.0
+
+paths:
+  /api/reflections/interpret:
+    post:
+      operationId: interpretReflection
+      summary: Interpret reflection intent
+      description: |
+        Classifies a reflection into intent categories using GPT-4o-mini.
+        Returns the interpreted intent for preview before saving.
+        Target latency: <200ms.
+      tags:
+        - Reflections
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InterpretRequest'
+      responses:
+        '200':
+          description: Successfully interpreted reflection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterpretResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error (includes LLM timeout fallback)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InterpretResponse'
+
+components:
+  schemas:
+    InterpretRequest:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          minLength: 10
+          maxLength: 500
+          description: The reflection text to interpret
+          example: "Legal blocked all customer outreach until Dec 1"
+
+    InterpretResponse:
+      type: object
+      required:
+        - intent
+        - latency_ms
+      properties:
+        intent:
+          $ref: '#/components/schemas/ReflectionIntent'
+        latency_ms:
+          type: integer
+          minimum: 0
+          description: Time taken to interpret in milliseconds
+        fallback_used:
+          type: boolean
+          description: Whether fallback classification was used due to LLM failure
+
+    ReflectionIntent:
+      type: object
+      required:
+        - type
+        - subtype
+        - keywords
+        - strength
+        - summary
+      properties:
+        type:
+          type: string
+          enum:
+            - constraint
+            - opportunity
+            - capacity
+            - sequencing
+            - information
+          description: Primary intent category
+        subtype:
+          type: string
+          enum:
+            - blocker
+            - soft-block
+            - boost
+            - energy-level
+            - dependency
+            - context-only
+          description: Specific intent subtype
+        keywords:
+          type: array
+          items:
+            type: string
+            maxLength: 50
+          maxItems: 10
+          description: Keywords extracted for task matching
+        strength:
+          type: string
+          enum:
+            - hard
+            - soft
+          description: How strongly to enforce this intent
+        duration:
+          type: object
+          nullable: true
+          properties:
+            until:
+              type: string
+              format: date-time
+              description: End date for temporal constraints
+            from:
+              type: string
+              format: date-time
+              description: Start date for temporal constraints
+            days:
+              type: integer
+              minimum: 1
+              description: Duration in days
+        summary:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Plain language interpretation for user display
+          example: "Block tasks related to customer outreach until December 1st"
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          description: Error code
+        message:
+          type: string
+          description: Human-readable error message
+        field:
+          type: string
+          description: Field that caused validation error

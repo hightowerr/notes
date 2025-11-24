@@ -1,10 +1,18 @@
 import { z } from 'zod';
 
+const reflectionEffectsSummarySchema = z.object({
+  total: z.number().int().min(0),
+  blocked: z.number().int().min(0),
+  demoted: z.number().int().min(0),
+  boosted: z.number().int().min(0),
+});
+
 /**
  * Zod schema for reflection input validation.
  *
  * Enforces:
  * - Text length: 10-500 characters
+ * - Minimum word count: 3 words to ensure actionable context
  * - Automatic trimming of whitespace
  */
 export const reflectionInputSchema = z.object({
@@ -12,6 +20,10 @@ export const reflectionInputSchema = z.object({
     .min(10, 'Reflection must be at least 10 characters')
     .max(500, 'Reflection must be at most 500 characters')
     .trim()
+    .refine(
+      value => value.trim().split(/\s+/).filter(Boolean).length >= 3,
+      'Reflection must include at least 3 words so we can act on it'
+    )
 });
 
 /**
@@ -36,9 +48,11 @@ export const reflectionSchema = reflectionInputSchema.extend({
  */
 export const reflectionWithWeightSchema = reflectionSchema.extend({
   weight: z.number().min(0).max(1),
-  relative_time: z.string().min(1)
+  relative_time: z.string().min(1),
+  effects_summary: reflectionEffectsSummarySchema.optional(),
 });
 
 export type ReflectionInput = z.infer<typeof reflectionInputSchema>;
 export type Reflection = z.infer<typeof reflectionSchema>;
 export type ReflectionWithWeight = z.infer<typeof reflectionWithWeightSchema>;
+export type ReflectionEffectsSummary = z.infer<typeof reflectionEffectsSummarySchema>;

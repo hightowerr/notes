@@ -42,11 +42,15 @@ type ProcessedDocumentRow = {
       overhead?: Array<string | null> | null;
     } | null;
   } | null;
+  uploaded_files?: {
+    name?: string | null;
+  } | null;
 };
 
 export type OutcomeAlignedTask = {
   task_id: string;
   document_id: string | null;
+  document_name?: string | null;
   original_text: string;
   title: string;
   category: LnoCategory | null;
@@ -209,16 +213,24 @@ export async function resolveOutcomeAlignedTasks(
   });
 
   let lnoIndex = new Map<string, { category: LnoCategory; text: string }>();
+  const documentNameMap = new Map<string, string | null>();
+
   if (documentIdSet.size > 0) {
     const { data: docs, error: docError } = await supabase
       .from('processed_documents')
-      .select('id, structured_output')
+      .select('id, structured_output, uploaded_files(name)')
       .in('id', Array.from(documentIdSet))
       .returns<ProcessedDocumentRow[]>();
 
     if (docError) {
       throw new Error(`Failed to load processed documents: ${docError.message}`);
     }
+
+    (docs ?? []).forEach(doc => {
+      if (doc?.id) {
+        documentNameMap.set(doc.id, doc.uploaded_files?.name ?? null);
+      }
+    });
 
     lnoIndex = buildLnoIndex(docs ?? []);
 
@@ -280,6 +292,7 @@ export async function resolveOutcomeAlignedTasks(
         title,
         category: classification.category,
         rationale,
+        document_name: documentNameMap.get(row?.document_id ?? recovered?.document_id ?? '') ?? null,
         is_manual: Boolean(row?.is_manual),
         manual_override: manualOverride,
       };
@@ -302,6 +315,7 @@ export async function resolveOutcomeAlignedTasks(
         title,
         category: fallbackCategory,
         rationale,
+        document_name: documentNameMap.get(row?.document_id ?? recovered?.document_id ?? '') ?? null,
         is_manual: Boolean(row?.is_manual),
         manual_override: manualOverride,
       };

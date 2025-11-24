@@ -37,139 +37,162 @@ interface MockTaskEmbeddingRow {
   task_text: string;
 }
 
-const tableData: {
-  reflections: MockReflectionRow[];
-  task_embeddings: MockTaskEmbeddingRow[];
-} = {
-  reflections: [],
-  task_embeddings: [],
-};
+const { supabase, hoistedTables, supabaseAuthUserId, QueryBuilder } = vi.hoisted(() => {
+  const supabaseAuthUserId = 'integration-user';
 
-const supabaseAuthUserId = 'integration-user';
+  const tableData: {
+    reflections: MockReflectionRow[];
+    task_embeddings: MockTaskEmbeddingRow[];
+    user_outcomes: Array<{ id: string; user_id: string; is_active: boolean }>;
+  } = {
+    reflections: [],
+    task_embeddings: [],
+    user_outcomes: [
+      { id: 'outcome-1', user_id: supabaseAuthUserId, is_active: true },
+    ],
+  };
 
-class QueryBuilder<T extends Record<string, unknown>> {
-  private readonly tableName: keyof typeof tableData;
-  private filters: Array<(row: T) => boolean> = [];
-  private limitCount: number | null = null;
-  private orderConfig: { field: keyof T; ascending: boolean } | null = null;
+  class QueryBuilder<T extends Record<string, unknown>> {
+    private readonly tableName: keyof typeof tableData;
+    private filters: Array<(row: T) => boolean> = [];
+    private limitCount: number | null = null;
+    private orderConfig: { field: keyof T; ascending: boolean } | null = null;
 
-  constructor(tableName: keyof typeof tableData) {
-    this.tableName = tableName;
-  }
+    constructor(tableName: keyof typeof tableData) {
+      this.tableName = tableName;
+    }
 
-  select(): QueryBuilder<T> {
-    return this;
-  }
+    select(): QueryBuilder<T> {
+      return this;
+    }
 
-  eq(field: keyof T, value: unknown): QueryBuilder<T> {
-    this.filters.push((row) => row[field] === value);
-    return this;
-  }
+    eq(field: keyof T, value: unknown): QueryBuilder<T> {
+      this.filters.push((row) => row[field] === value);
+      return this;
+    }
 
-  gte(field: keyof T, value: string): QueryBuilder<T> {
-    const threshold = new Date(value).getTime();
-    this.filters.push((row) => {
-      const raw = row[field];
-      if (typeof raw !== 'string') {
-        return false;
+    gte(field: keyof T, value: string): QueryBuilder<T> {
+      const threshold = new Date(value).getTime();
+      this.filters.push((row) => {
+        const raw = row[field];
+        if (typeof raw !== 'string') {
+          return false;
+        }
+        const created = new Date(raw).getTime();
+        return Number.isFinite(created) && created >= threshold;
+      });
+      return this;
+    }
+
+    in(field: keyof T, values: unknown[]): QueryBuilder<T> {
+      const valueSet = new Set(values);
+      this.filters.push((row) => valueSet.has(row[field]));
+      return this;
+    }
+
+    order(field: keyof T, options?: { ascending?: boolean }): QueryBuilder<T> {
+      this.orderConfig = {
+        field,
+        ascending: options?.ascending !== false,
+      };
+      return this;
+    }
+
+    limit(count: number): QueryBuilder<T> {
+      this.limitCount = count;
+      return this;
+    }
+
+    async maybeSingle(): Promise<{ data: T | null; error: null }> {
+      const { data } = this.build();
+      return { data: data[0] ?? null, error: null };
+    }
+
+    private build(): { data: T[]; error: null } {
+      const rows = [...tableData[this.tableName] as T[]];
+
+      const filtered = this.filters.reduce<T[]>((accumulator, predicate) => {
+        return accumulator.filter(predicate);
+      }, rows);
+
+      const ordered = this.orderConfig
+        ? [...filtered].sort((left, right) => {
+            const leftValue = left[this.orderConfig!.field];
+            const rightValue = right[this.orderConfig!.field];
+
+            if (typeof leftValue === 'string' && typeof rightValue === 'string') {
+              const comparison =
+                leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
+              return this.orderConfig!.ascending ? comparison : -comparison;
+            }
+
+            return 0;
+          })
+        : filtered;
+
+      const limited =
+        typeof this.limitCount === 'number'
+          ? ordered.slice(0, this.limitCount)
+          : ordered;
+
+      const cloned = JSON.parse(JSON.stringify(limited)) as T[];
+      return { data: cloned, error: null };
+    }
+
+    then<TResult1 = { data: T[]; error: null }, TResult2 = never>(
+      onfulfilled?:
+        | ((value: { data: T[]; error: null }) => TResult1 | PromiseLike<TResult1>)
+        | undefined
+        | null,
+      onrejected?:
+        | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+        | undefined
+        | null,
+    ): Promise<TResult1 | TResult2> {
+      try {
+        const result = this.build();
+        return Promise.resolve(result).then(onfulfilled, onrejected);
+      } catch (error) {
+        return Promise.reject(error).then(onfulfilled, onrejected);
       }
-      const created = new Date(raw).getTime();
-      return Number.isFinite(created) && created >= threshold;
-    });
-    return this;
-  }
-
-  in(field: keyof T, values: unknown[]): QueryBuilder<T> {
-    const valueSet = new Set(values);
-    this.filters.push((row) => valueSet.has(row[field]));
-    return this;
-  }
-
-  order(field: keyof T, options?: { ascending?: boolean }): QueryBuilder<T> {
-    this.orderConfig = {
-      field,
-      ascending: options?.ascending !== false,
-    };
-    return this;
-  }
-
-  limit(count: number): QueryBuilder<T> {
-    this.limitCount = count;
-    return this;
-  }
-
-  private build(): { data: T[]; error: null } {
-    const rows = [...tableData[this.tableName] as T[]];
-
-    const filtered = this.filters.reduce<T[]>((accumulator, predicate) => {
-      return accumulator.filter(predicate);
-    }, rows);
-
-    const ordered = this.orderConfig
-      ? [...filtered].sort((left, right) => {
-          const leftValue = left[this.orderConfig!.field];
-          const rightValue = right[this.orderConfig!.field];
-
-          if (typeof leftValue === 'string' && typeof rightValue === 'string') {
-            const comparison =
-              leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
-            return this.orderConfig!.ascending ? comparison : -comparison;
-          }
-
-          return 0;
-        })
-      : filtered;
-
-    const limited =
-      typeof this.limitCount === 'number'
-        ? ordered.slice(0, this.limitCount)
-        : ordered;
-
-    const cloned = JSON.parse(JSON.stringify(limited)) as T[];
-    return { data: cloned, error: null };
-  }
-
-  then<TResult1 = { data: T[]; error: null }, TResult2 = never>(
-    onfulfilled?:
-      | ((value: { data: T[]; error: null }) => TResult1 | PromiseLike<TResult1>)
-      | undefined
-      | null,
-    onrejected?:
-      | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
-      | undefined
-      | null,
-  ): Promise<TResult1 | TResult2> {
-    try {
-      const result = this.build();
-      return Promise.resolve(result).then(onfulfilled, onrejected);
-    } catch (error) {
-      return Promise.reject(error).then(onfulfilled, onrejected);
     }
   }
-}
 
-const supabase = {
-  auth: {
-    getSession: vi.fn(async () => ({
-      data: { session: { user: { id: supabaseAuthUserId } } },
-    })),
-  },
-  from: vi.fn((tableName: keyof typeof tableData) => {
-    if (!(tableName in tableData)) {
-      throw new Error(`Table ${tableName.toString()} is not mocked`);
-    }
-    return new QueryBuilder(tableName);
-  }),
-};
+  const supabase = {
+    auth: {
+      getSession: vi.fn(async () => ({
+        data: { session: { user: { id: supabaseAuthUserId } } },
+      })),
+    },
+    from: vi.fn((tableName: keyof typeof tableData) => {
+      if (!(tableName in tableData)) {
+        throw new Error(`Table ${tableName.toString()} is not mocked`);
+      }
+      return new QueryBuilder(tableName);
+    }),
+  };
+
+  return { supabase, hoistedTables: tableData, supabaseAuthUserId, QueryBuilder };
+});
 
 vi.mock('@/lib/supabase', () => ({
   supabase,
-  __mockTables: tableData,
+  __mockTables: hoistedTables,
+}));
+
+vi.mock('@/app/api/reflections/utils', () => ({
+  getAuthenticatedUserId: vi.fn(async () => supabaseAuthUserId),
+}));
+
+vi.mock('@/lib/supabase/admin', () => ({
+  getSupabaseAdminClient: () => ({
+    from: (tableName: keyof typeof hoistedTables) => new QueryBuilder(tableName as keyof typeof hoistedTables),
+  }),
 }));
 
 import type { PrioritizedTaskPlan } from '@/lib/types/agent';
 import { GET as reflectionsGet } from '@/app/api/reflections/route';
-import { buildAdjustedPlanFromReflections } from '@/lib/services/reflectionBasedRanking';
+import { buildAdjustedPlanFromReflections } from '@/lib/services/reflectionAdjustment';
 import { __mockTables } from '@/lib/supabase';
 
 const MOCK_NOW = new Date('2025-02-01T12:00:00.000Z');
@@ -318,4 +341,3 @@ describe('Recency weighting integration (T012)', () => {
     expect(betaMovement?.to).toBe(2);
   });
 });
-

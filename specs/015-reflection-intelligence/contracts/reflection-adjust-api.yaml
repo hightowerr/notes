@@ -1,0 +1,267 @@
+openapi: 3.1.0
+info:
+  title: Reflection Adjust API
+  description: API for applying reflection effects to task prioritization
+  version: 1.0.0
+
+paths:
+  /api/reflections/adjust:
+    post:
+      operationId: adjustPrioritization
+      summary: Apply reflection effects to tasks
+      description: |
+        Applies the effects of active reflections to the current task list.
+        Uses cached intents for fast execution (<500ms for toggles, <3s for new reflections).
+      tags:
+        - Reflections
+        - Prioritization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdjustRequest'
+      responses:
+        '200':
+          description: Successfully applied reflection effects
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdjustResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Cannot suppress below minimum task floor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FloorWarningResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/reflections/{id}/toggle:
+    patch:
+      operationId: toggleReflectionEffect
+      summary: Toggle reflection active state with fast adjustment
+      description: |
+        Toggles a reflection's active state and immediately applies/removes its effects.
+        Uses cached intent - no LLM call required. Target latency: <500ms.
+      tags:
+        - Reflections
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Reflection ID to toggle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToggleRequest'
+      responses:
+        '200':
+          description: Successfully toggled reflection and applied effects
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToggleResponse'
+        '404':
+          description: Reflection not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    AdjustRequest:
+      type: object
+      required:
+        - reflection_ids
+      properties:
+        reflection_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          minItems: 1
+          maxItems: 10
+          description: IDs of active reflections to apply
+        task_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Optional subset of tasks to adjust (defaults to all)
+
+    AdjustResponse:
+      type: object
+      required:
+        - effects
+        - tasks_affected
+        - latency_ms
+      properties:
+        effects:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReflectionEffect'
+        tasks_affected:
+          type: integer
+          minimum: 0
+          description: Number of tasks affected by reflections
+        tasks_blocked:
+          type: integer
+          minimum: 0
+          description: Number of tasks blocked by hard constraints
+        tasks_boosted:
+          type: integer
+          minimum: 0
+          description: Number of tasks boosted by opportunities
+        tasks_demoted:
+          type: integer
+          minimum: 0
+          description: Number of tasks demoted by soft constraints
+        latency_ms:
+          type: integer
+          minimum: 0
+          description: Time taken to apply adjustments
+
+    ReflectionEffect:
+      type: object
+      required:
+        - reflection_id
+        - task_id
+        - effect
+        - magnitude
+        - reason
+      properties:
+        reflection_id:
+          type: string
+          format: uuid
+          description: Source reflection
+        task_id:
+          type: string
+          format: uuid
+          description: Affected task
+        effect:
+          type: string
+          enum:
+            - blocked
+            - demoted
+            - boosted
+            - unchanged
+          description: Type of effect on the task
+        magnitude:
+          type: number
+          minimum: -10
+          maximum: 10
+          description: Position change (negative = demoted, positive = boosted)
+        reason:
+          type: string
+          maxLength: 200
+          description: Plain language explanation for UI display
+          example: "Blocked: Legal hold prevents customer outreach"
+
+    ToggleRequest:
+      type: object
+      required:
+        - is_active
+      properties:
+        is_active:
+          type: boolean
+          description: New active state for the reflection
+
+    ToggleResponse:
+      type: object
+      required:
+        - reflection
+        - effects_applied
+        - latency_ms
+      properties:
+        reflection:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            is_active_for_prioritization:
+              type: boolean
+        effects_applied:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReflectionEffect'
+        effects_removed:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReflectionEffect'
+          description: Effects that were removed when toggling off
+        latency_ms:
+          type: integer
+          minimum: 0
+          description: Time taken for toggle operation
+
+    FloorWarningResponse:
+      type: object
+      required:
+        - error
+        - message
+        - tasks_remaining
+        - minimum_floor
+      properties:
+        error:
+          type: string
+          enum:
+            - FLOOR_VIOLATION
+        message:
+          type: string
+          example: "Cannot suppress below 5 active tasks without confirmation"
+        tasks_remaining:
+          type: integer
+          description: Number of tasks that would remain active
+        minimum_floor:
+          type: integer
+          description: Minimum number of active tasks required (5)
+        force_url:
+          type: string
+          description: URL to call with force=true to override
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+        message:
+          type: string

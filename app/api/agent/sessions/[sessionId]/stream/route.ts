@@ -18,20 +18,30 @@ function formatEvent(event: string, data: unknown) {
   return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-export async function GET(req: NextRequest, { params }: { params: { sessionId: string } }) {
-  const { sessionId } = params;
+type RouteParams = {
+  sessionId: string;
+};
+
+export async function GET(req: NextRequest, { params }: { params: Promise<RouteParams> }) {
+  const { sessionId } = await params;
   if (!sessionId) {
     return new Response('Missing sessionId', { status: 400 });
   }
 
   const base = new URL(req.url).origin;
   let failures = 0;
+  let isClosed = false;
 
   const stream = new ReadableStream({
     async start(controller) {
       const abort = () => {
+        if (isClosed) {
+          return;
+        }
+        console.debug('[SessionStream] aborting stream', { sessionId, failures });
         controller.enqueue(encoder.encode('event: close\ndata: {}\n\n'));
         controller.close();
+        isClosed = true;
       };
 
       const poll = async () => {
@@ -58,7 +68,16 @@ export async function GET(req: NextRequest, { params }: { params: { sessionId: s
 
           failures = 0;
         } catch (error) {
+          if (isClosed) {
+            console.debug('[SessionStream] poll skipped: controller already closed', {
+              sessionId,
+              failures,
+              error: String(error),
+            });
+            return;
+          }
           failures += 1;
+          console.debug('[SessionStream] poll failure', { sessionId, failures, error: String(error) });
           controller.enqueue(
             formatEvent('warning', { message: 'Polling failed', failures, error: String(error) })
           );
