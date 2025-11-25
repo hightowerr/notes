@@ -39,6 +39,7 @@ import { formatTaskId } from '@/app/priorities/utils/formatTaskId';
 import { hybridLoopMetadataSchema, type HybridLoopMetadata } from '@/lib/schemas/hybridLoopMetadataSchema';
 import ReasoningChain from '@/app/priorities/components/ReasoningChain';
 import ErrorBanner from '@/app/components/ErrorBanner';
+import type { DocumentStatusResponse } from '@/lib/schemas/documentStatus';
 import {
   GapDetectionModal,
   type GapSuggestionState,
@@ -64,6 +65,10 @@ import {
 } from '@/lib/utils/dependencyOverrides';
 import { usePrioritizationStream } from '@/lib/hooks/usePrioritizationStream';
 import { PrioritizationSummary } from '@/app/priorities/components/PrioritizationSummary';
+import { OutcomeCard } from '@/app/priorities/components/OutcomeCard';
+import { SourceDocuments } from '@/app/priorities/components/SourceDocuments';
+import { useDocumentStatus } from '@/lib/hooks/useDocumentStatus';
+import { useDocumentExclusions } from '@/lib/hooks/useDocumentExclusions';
 
 const DEFAULT_USER_ID = 'default-user';
 const POLL_INTERVAL_MS = 2000;
@@ -71,6 +76,7 @@ const POLL_INTERVAL_MS = 2000;
 const METADATA_POLL_INTERVAL_MS = 2000;
 const MAX_SESSION_DURATION_MS = 120_000;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const DOCUMENT_PAGE_SIZE = 50;
 const MINUTE_IN_MS = 60 * 1000;
 const HOUR_IN_MS = 60 * 60 * 1000;
 const DAY_IN_MS = 24 * HOUR_IN_MS;
@@ -170,12 +176,73 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
   const [adjustmentWarnings, setAdjustmentWarnings] = useState<string[]>([]);
   const [baselineCreatedAt, setBaselineCreatedAt] = useState<string | null>(null);
   const [baselineReflectionIds, setBaselineReflectionIds] = useState<string[]>([]);
+  const [documentIdsForExclusions, setDocumentIdsForExclusions] = useState<string[] | undefined>(undefined);
+  const [documentOffset, setDocumentOffset] = useState(0);
+  const [documentStatus, setDocumentStatus] = useState<DocumentStatusResponse | null>(null);
+  const { excludedIds, toggleExclusion, setExcludedIds } = useDocumentExclusions(
+    activeOutcome?.id ?? null,
+    { validDocumentIds: documentIdsForExclusions }
+  );
   const {
     progressPct: prioritizationProgress,
     connectionState: streamConnectionState,
     partialPlan: streamedPlan,
     stage: streamStage,
   } = usePrioritizationStream(currentSessionId);
+  const {
+    data: documentStatusPage,
+    isLoading: documentStatusLoading,
+    error: documentStatusError,
+    refresh: refreshDocumentStatus,
+  } = useDocumentStatus({
+    outcomeId: activeOutcome?.id ?? null,
+    excludedIds,
+    limit: DOCUMENT_PAGE_SIZE,
+    offset: documentOffset,
+    enabled: Boolean(activeOutcome && !outcomeLoading),
+  });
+  useEffect(() => {
+    if (!documentStatusPage) {
+      return;
+    }
+
+    setDocumentStatus(prev => {
+      if (documentOffset === 0 || !prev) {
+        return documentStatusPage;
+      }
+
+      const mergedDocuments = [...prev.documents];
+      documentStatusPage.documents.forEach(doc => {
+        const existingIndex = mergedDocuments.findIndex(item => item.id === doc.id);
+        if (existingIndex === -1) {
+          mergedDocuments.push(doc);
+        } else {
+          mergedDocuments[existingIndex] = doc;
+        }
+      });
+
+      const total = documentStatusPage.total ?? mergedDocuments.length;
+
+      return {
+        documents: mergedDocuments,
+        summary: documentStatusPage.summary,
+        total,
+      };
+    });
+  }, [documentStatusPage, documentOffset]);
+  useEffect(() => {
+    if (!documentStatus?.documents) {
+      setDocumentIdsForExclusions(undefined);
+      return;
+    }
+    const ids = documentStatus.documents.map(doc => doc.id);
+    setDocumentIdsForExclusions(ids);
+  }, [documentStatus]);
+  const exclusionsKey = useMemo(() => excludedIds.join(','), [excludedIds]);
+  useEffect(() => {
+    setDocumentOffset(0);
+    setDocumentStatus(null);
+  }, [activeOutcome?.id, exclusionsKey]);
   const lastStreamSignatureRef = useRef<string | null>(null);
   const completionDurationMs =
     evaluationMetadata?.duration_ms ??
@@ -858,7 +925,6 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
   }, [baselineAgeInfo]);
 
   const disableContextToggles = isBaselineExpired;
-  const disableRecalculate = isTriggering || sessionStatus === 'running';
   const handleActiveReflectionsChange = useCallback((ids: string[]) => {
     setActiveReflectionIds(prevIds => {
       if (prevIds.length === ids.length && prevIds.every((id, index) => id === ids[index])) {
@@ -1176,6 +1242,7 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
           outcome_id: activeOutcome.id,
           user_id: DEFAULT_USER_ID,
           active_reflection_ids: validActiveReflectionIds,
+          excluded_document_ids: excludedIds,
           dependency_overrides: dependencyOverrideEdges,
         }),
       });
@@ -1264,9 +1331,6 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
     setShowQualitySurvey(false);
   }, [getSurveyState, persistSurveyState]);
 
-  const isButtonDisabled =
-    !activeOutcome || outcomeLoading || isTriggering || sessionStatus === 'running' || isInstantAdjusting;
-
   const streamingProgressLabel = useMemo(() => {
     if (streamStage === 'refining') {
       return 'Refining prioritization order…';
@@ -1285,6 +1349,25 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
   const showProgress = sessionStatus === 'running';
   const showCollapsedPrimaryCard = hasTriggered && !outcomeLoading;
   const hasPlan = prioritizedPlan !== null;
+  const pendingDocumentCount = documentStatus?.summary.pending_count ?? 0;
+  const hasDocumentBaseline =
+    (documentStatus?.documents ?? []).some(doc => doc.status === 'included' || doc.status === 'excluded');
+  const totalDocuments = documentStatus?.documents.length ?? 0;
+  const excludedDocumentCount = documentStatus?.documents?.filter(doc => excludedIds.includes(doc.id)).length ?? 0;
+  const allDocumentsExcluded = totalDocuments > 0 && excludedDocumentCount === totalDocuments;
+  const documentStatusBadgeLabel = useMemo(() => {
+    if (!documentStatus) {
+      return null;
+    }
+    if (pendingDocumentCount > 0) {
+      return `${pendingDocumentCount} new`;
+    }
+    if (hasDocumentBaseline) {
+      return 'up to date';
+    }
+    return null;
+  }, [documentStatus, pendingDocumentCount, hasDocumentBaseline]);
+  const documentStatusBadgeVariant = pendingDocumentCount > 0 ? 'secondary' : 'outline';
   const showPerformanceSummary = sessionStatus === 'completed' && completionDurationMs !== null;
   const analyzeButtonLabel = () => {
     if (isTriggering) {
@@ -1295,6 +1378,25 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
     }
     return hasPlan ? 'Recalculate priorities' : 'Analyze Tasks';
   };
+  const isButtonDisabled =
+    !activeOutcome ||
+    outcomeLoading ||
+    isTriggering ||
+    sessionStatus === 'running' ||
+    isInstantAdjusting ||
+    allDocumentsExcluded;
+  const disableRecalculate = isTriggering || sessionStatus === 'running' || allDocumentsExcluded;
+  const handleShowMoreDocuments = useCallback(() => {
+    if (documentStatusLoading) {
+      return;
+    }
+    const loadedCount = documentStatus?.documents.length ?? 0;
+    const totalAvailable = documentStatus?.total ?? loadedCount;
+    if (loadedCount >= totalAvailable) {
+      return;
+    }
+    setDocumentOffset(prev => prev + DOCUMENT_PAGE_SIZE);
+  }, [documentStatus, documentStatusLoading]);
 
   const isGeneratingGaps = gapGenerationRunning;
 
@@ -1307,6 +1409,9 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
     }
     if (isInstantAdjusting) {
       return 'Finish applying instant adjustments before running a new analysis.';
+    }
+    if (allDocumentsExcluded) {
+      return 'Select at least one document to include before recalculating.';
     }
     if (!activeOutcome && !outcomeLoading) {
       return 'Create an active outcome to unlock prioritization.';
@@ -1323,6 +1428,12 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
     !isTriggering &&
     sessionStatus !== 'running' &&
     !isInstantAdjusting;
+
+  useEffect(() => {
+    if (sessionStatus === 'completed') {
+      void refreshDocumentStatus();
+    }
+  }, [sessionStatus, refreshDocumentStatus]);
 
   const handleDiffSummary = useCallback(
     ({ hasChanges, isInitial }: { hasChanges: boolean; isInitial: boolean }) => {
@@ -2298,6 +2409,8 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
           isBaselineExpired={isBaselineExpired}
           onRecalculate={handleAnalyzeTasks}
           disableRecalculate={disableRecalculate}
+          pendingDocumentCount={documentStatusBadgeLabel ? pendingDocumentCount : null}
+          hasBaselineDocuments={hasDocumentBaseline}
         />
 
         {/* Banner for when no active outcome exists - T012 requirement */}
@@ -2355,11 +2468,6 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
                             ? 'Last plan is ready. Recalculate whenever your task stack changes.'
                             : 'Run the agent to build your first prioritized list.'}
                     </span>
-                    {activeOutcome && (
-                      <span className="truncate text-muted-foreground">
-                        Outcome: {activeOutcome.assembled_text}
-                      </span>
-                    )}
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-3">
@@ -2369,7 +2477,7 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
                       In progress
                     </Badge>
                   )}
-                  <Button onClick={handleAnalyzeTasks} disabled={isButtonDisabled}>
+                  <Button onClick={handleAnalyzeTasks} disabled={isButtonDisabled} className="gap-2">
                     {sessionStatus === 'running' ? (
                       <>
                         <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
@@ -2384,11 +2492,24 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
                       analyzeButtonLabel()
                     )}
                   </Button>
+                  {documentStatusBadgeLabel && (
+                    <Badge
+                      variant={documentStatusBadgeVariant}
+                      className="h-7 rounded-full px-2 text-xs"
+                    >
+                      {documentStatusBadgeLabel}
+                    </Badge>
+                  )}
                 </div>
                 {triggerError && (
                   <p className="text-sm text-destructive">{triggerError}</p>
                 )}
               </CardHeader>
+              {activeOutcome && (
+                <CardContent className="pt-0">
+                  <OutcomeCard outcome={activeOutcome} />
+                </CardContent>
+              )}
               {sessionStatus === 'running' && (
                 <CardContent className="pt-0">
                   <div className="space-y-2">
@@ -2425,24 +2546,7 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
                     {outcomeLoading ? (
                       <div className="h-16 animate-pulse rounded-lg bg-muted" />
                     ) : activeOutcome ? (
-                      <div className="space-y-2">
-                        <p className="text-sm font-medium text-muted-foreground">Active Outcome</p>
-                        <div className="rounded-lg border border-border bg-background px-4 py-3">
-                          <p className="text-base leading-relaxed text-foreground">{activeOutcome.assembled_text}</p>
-                          <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
-                            {activeOutcome.state_preference && (
-                              <Badge variant="secondary">
-                                State Preference: {activeOutcome.state_preference}
-                              </Badge>
-                            )}
-                            {activeOutcome.daily_capacity_hours !== null && (
-                              <Badge variant="outline">
-                                Daily Capacity: {activeOutcome.daily_capacity_hours}h
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                      </div>
+                      <OutcomeCard outcome={activeOutcome} />
                     ) : (
                       <div className="space-y-3 rounded-xl border border-primary/40 bg-primary/5 p-4">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -2468,21 +2572,31 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
                 )}
 
                 <div className="flex flex-col gap-3">
-                  <Button onClick={handleAnalyzeTasks} disabled={isButtonDisabled} className="w-fit">
-                    {sessionStatus === 'running' ? (
-                      <>
-                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                        {analyzeButtonLabel()}
-                      </>
-                    ) : isTriggering ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        {analyzeButtonLabel()}
-                      </>
-                    ) : (
-                      analyzeButtonLabel()
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button onClick={handleAnalyzeTasks} disabled={isButtonDisabled} className="w-fit gap-2">
+                      {sessionStatus === 'running' ? (
+                        <>
+                          <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                          {analyzeButtonLabel()}
+                        </>
+                      ) : isTriggering ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          {analyzeButtonLabel()}
+                        </>
+                      ) : (
+                        analyzeButtonLabel()
+                      )}
+                    </Button>
+                    {documentStatusBadgeLabel && (
+                      <Badge
+                        variant={documentStatusBadgeVariant}
+                        className="h-7 rounded-full px-2 text-xs"
+                      >
+                        {documentStatusBadgeLabel}
+                      </Badge>
                     )}
-                  </Button>
+                  </div>
 
                   {analyzeButtonHelper && (
                     <p className="text-xs text-muted-foreground">
@@ -2523,8 +2637,31 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
                 <AlertDescription>{triggerError}</AlertDescription>
               </Alert>
             </CardContent>
-          )}
+        )}
         </Card>
+
+        {activeOutcome && (
+          <SourceDocuments
+            status={documentStatus}
+            isLoading={documentStatusLoading || outcomeLoading}
+            error={documentStatusError}
+            onRetry={refreshDocumentStatus}
+            excludedIds={excludedIds}
+            onExcludedChange={setExcludedIds}
+            disabled={sessionStatus === 'running' || isTriggering}
+            total={documentStatus?.total ?? documentStatus?.documents.length ?? 0}
+            onShowMore={handleShowMoreDocuments}
+          />
+        )}
+
+        {allDocumentsExcluded && activeOutcome && (
+          <Alert variant="default" className="border-amber-300 bg-amber-50">
+            <AlertTitle>All documents excluded</AlertTitle>
+            <AlertDescription className="text-sm text-foreground">
+              Select at least one document to include before running prioritization.
+            </AlertDescription>
+          </Alert>
+        )}
 
         {resultsError && (
           <Alert variant="destructive">
@@ -2609,6 +2746,7 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
               onActiveIdsChange={setActiveTaskIds}
               metadataRefreshKey={reflectionEffectsRefreshKey}
               activeReflectionIds={activeReflectionIds}
+              excludedDocumentIds={excludedIds}
             />
             {prioritizedPlan.excluded_tasks && prioritizedPlan.excluded_tasks.length > 0 && (
               <ExcludedTasksSection excludedTasks={prioritizedPlan.excluded_tasks} />

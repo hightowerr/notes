@@ -10,7 +10,10 @@ export const GENERATOR_PROMPT = `You are a task prioritization expert. Your miss
 ## USER REFLECTIONS (Recent context)
 {reflections}
 
-## TASKS TO EVALUATE ({taskCount})
+## BASELINE CONTEXT
+{baselineSummary}
+
+## NEW TASKS TO EVALUATE ({newTaskCount} new, {taskCount} total)
 {tasks}
 
 ## PREVIOUS PLAN (Context)
@@ -129,19 +132,37 @@ export interface PrioritizationContext {
   outcome: string;
   reflections: string;
   taskCount: number;
+  newTaskCount?: number;
   tasks: string;
+  baselineSummary?: string;
   previousPlan: string;
   dependencyConstraints: string;
 }
 
 export function generatePrioritizationInstructions(context: PrioritizationContext): string {
-  return GENERATOR_PROMPT
+  const hasBaseline = Boolean(context.baselineSummary);
+  const newTaskCount = context.newTaskCount ?? context.taskCount;
+
+  let prompt = GENERATOR_PROMPT
     .replace('{outcome}', context.outcome)
     .replace('{reflections}', context.reflections)
     .replace('{taskCount}', String(context.taskCount))
+    .replace('{newTaskCount}', String(newTaskCount))
     .replace('{tasks}', context.tasks)
+    .replace('{baselineSummary}', context.baselineSummary || 'No baseline available. This is the first prioritization.')
     .replace('{previousPlan}', context.previousPlan)
     .replace('{dependencyConstraints}', context.dependencyConstraints);
+
+  // Log token efficiency gains
+  if (hasBaseline && newTaskCount < context.taskCount) {
+    console.log('[PrioritizationGenerator] Using incremental context:', {
+      total_tasks: context.taskCount,
+      new_tasks: newTaskCount,
+      baseline_tasks: context.taskCount - newTaskCount,
+    });
+  }
+
+  return prompt;
 }
 
 export const prioritizationGenerator = createPrioritizationAgent(GENERATOR_PROMPT, initializeMastra());

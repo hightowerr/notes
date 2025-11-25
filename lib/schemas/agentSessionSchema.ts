@@ -12,6 +12,7 @@ export const agentSessionSchema = z.object({
   outcome_id: z.string().uuid(),
   status: agentSessionStatusSchema,
   prioritized_plan: prioritizedPlanSchema.nullable(),
+  baseline_document_ids: z.array(z.string().uuid()).nullable(),
   baseline_plan: prioritizedPlanSchema.nullable(),
   adjusted_plan: adjustedPlanSchema.nullable(),
   execution_metadata: executionMetadataSchema,

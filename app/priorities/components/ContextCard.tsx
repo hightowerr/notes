@@ -27,6 +27,8 @@ type ContextCardProps = {
   isBaselineExpired?: boolean;
   onRecalculate?: () => void | Promise<void>;
   disableRecalculate?: boolean;
+  pendingDocumentCount?: number | null;
+  hasBaselineDocuments?: boolean;
 };
 
 type ReflectionWithLocalState = ReflectionWithWeight & {
@@ -68,6 +70,8 @@ export function ContextCard({
   isBaselineExpired = false,
   onRecalculate,
   disableRecalculate = false,
+  pendingDocumentCount = null,
+  hasBaselineDocuments = false,
 }: ContextCardProps) {
   const [localReflections, setLocalReflections] = useState<ReflectionWithLocalState[]>(
     () => prepareReflections(reflections)
@@ -85,6 +89,12 @@ export function ContextCard({
   const staleMessage = baselineAgeLabel
     ? `Your priorities were last analyzed ${baselineAgeLabel} ago. Consider running a full analysis for best results.`
     : 'Your priorities were last analyzed over 24 hours ago. Consider running a full analysis for best results.';
+  const showPendingBadge =
+    typeof pendingDocumentCount === 'number' &&
+    (pendingDocumentCount > 0 || hasBaselineDocuments);
+  const pendingBadgeVariant = pendingDocumentCount && pendingDocumentCount > 0 ? 'secondary' : 'outline';
+  const pendingBadgeLabel =
+    pendingDocumentCount && pendingDocumentCount > 0 ? `${pendingDocumentCount} new` : 'up to date';
 
   useEffect(() => {
     setLocalReflections(prepareReflections(reflections));
@@ -224,24 +234,31 @@ export function ContextCard({
             <AlertDescription className="flex flex-col gap-3 text-sm">
               <span>{showExpiredBanner ? expiredMessage : staleMessage}</span>
               {onRecalculate && (
-                <Button
-                  size="sm"
-                  variant={showExpiredBanner ? 'destructive' : 'outline'}
-                  className={
-                    showExpiredBanner
-                      ? 'self-start'
-                      : 'self-start border-amber-500 text-amber-900 hover:bg-amber-500/20'
-                  }
-                  onClick={() => {
-                    if (!disableRecalculate) {
-                      void onRecalculate();
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant={showExpiredBanner ? 'destructive' : 'outline'}
+                    className={
+                      showExpiredBanner
+                        ? 'self-start'
+                        : 'self-start border-amber-500 text-amber-900 hover:bg-amber-500/20'
                     }
-                  }}
-                  disabled={disableRecalculate}
-                >
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Recalculate
-                </Button>
+                    onClick={() => {
+                      if (!disableRecalculate) {
+                        void onRecalculate();
+                      }
+                    }}
+                    disabled={disableRecalculate}
+                  >
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Recalculate
+                  </Button>
+                  {showPendingBadge && (
+                    <Badge variant={pendingBadgeVariant} className="h-6 rounded-full px-2 text-xs">
+                      {pendingBadgeLabel}
+                    </Badge>
+                  )}
+                </div>
               )}
             </AlertDescription>
           </Alert>

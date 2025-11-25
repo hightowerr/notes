@@ -15,14 +15,23 @@ An autonomous document intelligence workspace that ingests meeting notes and res
 
 ## Highlights
 - Multi-format ingestion (PDF, DOCX, TXT, Markdown) with deduplication and OCR fallback.
+- Optional Google Drive integration for seamless document sync.
 - Outcome-aware scoring blends AI summaries with the current strategic outcome and reflections.
 - Mastra-powered agent orchestrates prioritisation using semantic search, dependency detection, and clustering tools.
+- Document-aware prioritization with source transparency and selective inclusion/exclusion controls.
 - Realtime dashboard surfaces document status, queue load, and prioritised plans.
-- Built with Next.js 15, React 19, Tailwind, and Supabase for storage, vector search, and telemetry.
+- Built with Next.js 15, React 19, Tailwind CSS v4, and Supabase for storage, vector search, and telemetry.
 
 ## System Overview
+
+**Current Development Phase**: Phase 16 - Document-Aware Prioritization (Branch: `014-document-aware-prioritization`)
+- Enhanced outcome visibility with prominent styling
+- Pending document count badges for recalculation awareness
+- Source document transparency with task counts
+- Document inclusion/exclusion controls per outcome
+
 ### Frontend
-- App Router in `app/` renders the upload flow (`app/page.tsx`) and dashboard (`app/dashboard/page.tsx`).
+- App Router in `app/` renders the upload flow (`app/page.tsx`), dashboard (`app/dashboard/page.tsx`), and priorities view (`app/priorities/page.tsx`).
 - UI primitives live in `app/components/` and `components/ui/`, using shadcn + Radix.
 - Client-side polling keeps file status fresh via `/api/status` and `/api/agent/sessions` endpoints.
 
@@ -104,6 +113,13 @@ An autonomous document intelligence workspace that ingests meeting notes and res
    ```
    Generate the encryption key with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` and store it securely.
 
+   Optional variables (for Google Drive integration):
+   ```env
+   GOOGLE_CLIENT_ID=your_google_client_id
+   GOOGLE_CLIENT_SECRET=your_google_client_secret
+   GOOGLE_REDIRECT_URI=http://localhost:3000/api/auth/google/callback
+   ```
+
 3. Apply database migrations using the Supabase CLI (≥1.188).
    ```bash
    supabase db push
@@ -119,16 +135,33 @@ An autonomous document intelligence workspace that ingests meeting notes and res
    Visit `http://localhost:3000` to upload documents and monitor prioritisation sessions.
 
 ## Development & Quality
+
+### Commands
+- `pnpm dev` – Start development server (http://localhost:3000)
+- `pnpm build` – Build for production
+- `pnpm start` – Start production server
 - `pnpm lint` – ESLint + Prettier (TypeScript strict mode)
-- `pnpm test` – Vitest in watch mode; for single pass use `pnpm test:run`
-- `pnpm test:ui` – launches the Vitest UI dashboard
+- `pnpm test` – Vitest in watch mode (TDD)
+- `pnpm test:run` – Run tests once (CI mode)
+- `pnpm test:ui` – Vitest UI dashboard
+- `pnpm test:run <file>` – Run specific test file
+
+### Testing Guidelines
+- Unit tests sit alongside services/components; contract and integration suites live in `__tests__/contract/` and `__tests__/integration/` respectively.
+- Target ≥80 % coverage, adding regression specs for every bug fix or retry logic tweak.
+- Supabase-dependent tests require `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`; mock external APIs where possible.
 - Integration specs that stress Tinypool threads: `pnpm test:run -- --pool=threads --poolOptions.threads.minThreads=1 --poolOptions.threads.maxThreads=1`
 - Explorer scripts live in `scripts/` (e.g. `scripts/test-mastra.ts` for agent health)
 
-Testing guidelines:
-- Unit tests sit alongside services/components; contract and integration suites live in `__tests__/contract/` and `__tests__/integration/` respectively.
-- Target ≥80 % coverage, adding regression specs for every bug fix or retry logic tweak.
-- Supabase-dependent tests require `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`; mock external APIs where possible.
+### Development Workflow
+This project uses a spec-driven workflow with custom slash commands:
+1. `/specify "feature description"` – Create feature specification
+2. `/plan` – Generate implementation plan
+3. `/tasks` – Break down into vertical slice tasks
+4. `/implement` – Execute tasks with TDD
+5. `/analyze` – Validate cross-artifact consistency
+
+See `CLAUDE.md` for full workflow details.
 
 ## Project Structure
 ```
@@ -136,12 +169,23 @@ notes/
 ├── app/                      # Next.js App Router, API routes, and shared UI
 │   ├── api/                  # Upload, process, export, agent, status endpoints
 │   ├── components/           # Feature-specific UI blocks
-│   └── dashboard/            # Outcome and document dashboards
+│   ├── dashboard/            # Document management dashboard
+│   └── priorities/           # Task prioritization with agent orchestration
 ├── lib/
 │   ├── mastra/               # Agents, tool registry, orchestration services
 │   ├── services/             # File conversion, AI summarisation, embeddings, queues
 │   ├── schemas/              # Zod schemas + helpers
 │   └── hooks/                # Client-side data hooks
+├── .claude/                  # Agent workspace
+│   ├── agents/               # Agent definitions
+│   ├── state/                # Task state tracking
+│   ├── docs/                 # Implementation plans
+│   ├── logs/                 # Test results, debug reports
+│   └── reviews/              # Code review outputs
+├── .specify/                 # Spec-driven workflow
+│   ├── specs/                # Feature specifications
+│   ├── templates/            # Workflow templates
+│   └── memory/               # Project constitution
 ├── __tests__/                # Contract + integration suites
 ├── specs/                    # Feature specs & runbooks
 ├── supabase/                 # SQL migrations and storage policies
@@ -156,12 +200,35 @@ notes/
 4. Ensure Supabase Row Level Security policies mirror the migrations shipped in `supabase/migrations/` to protect uploaded assets and agent traces.
 
 ## Resources
-- Specs & planning artifacts – `specs/`
-- Agent transcripts & debugging context – `.claude/`
-- Implementation examples & standards – `IMPLEMENTATION_EXAMPLES.md`, `standards.md`
-- Mobile QA and visual baselines – `MOBILE_RESPONSIVENESS_REPORT.md`, `VISUAL_COMPARISON.md`
-- High-level visual and component guidelines – `design.json`
-- Need to validate Mastra wiring? `npx tsx scripts/test-mastra.ts`
+
+### Documentation
+- **CLAUDE.md** – Quick start guide for Claude Code instances (start here!)
+- **AGENTS.md** – Repository workflow, commit guidelines, testing standards
+- **IMPLEMENTATION_STATUS.md** – Feature completion status and roadmap
+- **.claude/SYSTEM_RULES.md** – Vertical slice protocol (mandatory reading)
+- **.claude/standards.md** – TypeScript, TDD, design system, common patterns
+
+### Specifications & Planning
+- `specs/` – Feature specifications and runbooks
+- `.claude/` – Agent transcripts & debugging context
+- `.specify/` – Spec-driven workflow templates and memory
+
+### Design & QA
+- `design.json` / `design/design-system.json` – Visual language and component guidelines
+- `MOBILE_RESPONSIVENESS_REPORT.md` – Mobile QA baselines
+- `VISUAL_COMPARISON.md` – Visual regression tracking
+- `IMPLEMENTATION_EXAMPLES.md` – Code patterns and examples
+
+### Alternative AI Providers
+- **GEMINI.md** – Google Gemini integration guide
+- **QWEN.md** – Qwen model integration guide
+
+### Utilities
+- `npx tsx scripts/test-mastra.ts` – Validate Mastra tool registry and telemetry
+- `npx tsx scripts/check-database-tasks.ts` – Verify task embeddings
 
 ---
 Built with ❤️ using Next.js 15, React 19, TypeScript, Supabase, and Mastra.
+
+## Contributing
+This project follows a strict **vertical slice development** protocol. Every code change must enable a user to SEE, DO, and VERIFY a feature. Read `.claude/SYSTEM_RULES.md` before contributing.

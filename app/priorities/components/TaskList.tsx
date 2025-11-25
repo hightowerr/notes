@@ -185,6 +185,7 @@ type TaskListProps = {
   sortingStrategy?: SortingStrategy;
   onTaskMetadataUpdate?: (metadata: Record<string, { title: string }>) => void;
   onActiveIdsChange?: (ids: string[]) => void;
+  excludedDocumentIds?: string[];
 };
 
 const DEFAULT_REMOVAL_REASON =
@@ -409,6 +410,7 @@ function TaskListContent({
   sortingStrategy = 'balanced',
   onTaskMetadataUpdate,
   onActiveIdsChange,
+  excludedDocumentIds = [],
 }: TaskListProps) {
   const renderStartRef = useRef<number>(getNowMs());
   const lastRenderLogRef = useRef<number>(0);
@@ -1886,10 +1888,20 @@ function TaskListContent({
     return blocked;
   }, [orderedActiveIds, nodeMap, taskLookup, activeReflectionIds]);
 
+  const excludedDocumentSet = useMemo(
+    () => new Set(excludedDocumentIds.filter(Boolean)),
+    [excludedDocumentIds]
+  );
+
   const activeTasks = orderedActiveIds
     .map((taskId, index) => {
       const node = nodeMap[taskId];
       if (!node) {
+        return null;
+      }
+
+      // Filter out tasks from excluded documents
+      if (node.documentId && excludedDocumentSet.has(node.documentId)) {
         return null;
       }
 
