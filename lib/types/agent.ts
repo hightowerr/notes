@@ -88,6 +88,13 @@ export interface AgentRuntimeContext {
   history?: {
     previous_plan?: PrioritizedTaskPlan;
   };
+  incrementalContext?: {
+    baseline_document_ids: string[];
+    baseline_created_at: string | null;
+    is_first_run: boolean;
+    new_task_count: number;
+    token_savings_estimate: number;
+  };
 }
 
 export interface AgentRunSuccess {

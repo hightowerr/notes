@@ -68,6 +68,7 @@ const requestSchema = z.object({
   user_id: z.string().min(1),
   active_reflection_ids: z.array(z.string().uuid()).max(50).optional(),
   dependency_overrides: z.array(dependencyOverrideSchema).optional(),
+  excluded_document_ids: z.array(z.string().uuid()).max(100).optional(),
 });
 
 const progressQuerySchema = z.object({
@@ -77,14 +78,23 @@ const progressQuerySchema = z.object({
 
 async function prepareStrategicData(
   sessionId: string,
-  outcomeText: string | null
+  outcomeText: string | null,
+  excludedDocumentIds: string[] = []
 ): Promise<PreparedStrategicData> {
   try {
-    const { data: taskRows, error } = await supabase
+    let query = supabase
       .from('task_embeddings')
       .select('task_id, task_text, document_id, status, manual_overrides')
       .eq('status', 'completed')
+      .not('document_id', 'is', null)
       .limit(200);
+
+    if (excludedDocumentIds.length > 0) {
+      const exclusionList = `(${excludedDocumentIds.map(id => `'${id}'`).join(',')})`;
+      query = query.not('document_id', 'in', exclusionList);
+    }
+
+    const { data: taskRows, error } = await query;
 
     if (error) {
       console.error('[Agent Prioritize API] Failed to load tasks for scoring', error);
@@ -148,6 +158,7 @@ export async function POST(request: Request) {
     }
 
     const { outcome_id: outcomeId, user_id: userId } = parsed.data;
+    const excludedDocumentIds = parsed.data.excluded_document_ids ?? [];
     const activeReflectionIds = parsed.data.active_reflection_ids ?? [];
     const dependencyOverrideEdges = parsed.data.dependency_overrides ?? [];
     const dependencyOverrides: TaskDependency[] = dependencyOverrideEdges.map(edge => ({
@@ -212,6 +223,7 @@ export async function POST(request: Request) {
       }
     }
 
+    // Clear manual overrides to prevent stale annotations
     const { error: clearOverridesError } = await supabase
       .from('task_embeddings')
       .update({ manual_overrides: null })
@@ -224,6 +236,11 @@ export async function POST(request: Request) {
         { status: 500 }
       );
     }
+
+    // BUGFIX: Clear task annotations from previous sessions to prevent duplicate "manual override" badges
+    // This prevents tasks from being incorrectly marked as manual_override when documents are toggled
+    console.log('[Agent Prioritize API] Cleared manual overrides to prevent duplicate task annotations');
+
 
     resetRetryQueue({ clearCache: false });
 
@@ -262,6 +279,7 @@ export async function POST(request: Request) {
         outcomeId,
         activeReflectionIds,
         dependencyOverrides,
+        excludedDocumentIds,
       }).catch((error) => {
         console.error('[Agent Prioritize API] Background orchestration failed', error);
       });
@@ -269,7 +287,8 @@ export async function POST(request: Request) {
 
     const { strategicScores, prioritizedTasks } = await prepareStrategicData(
       session.id,
-      activeOutcome.assembled_text ?? null
+      activeOutcome.assembled_text ?? null,
+      excludedDocumentIds
     );
 
     return NextResponse.json(

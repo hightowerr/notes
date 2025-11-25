@@ -98,16 +98,20 @@ After ANY implementation: `code-reviewer` → `test-runner` → (if fail) `debug
 **Tech Stack:**
 - **Frontend**: Next.js 15, React 19, TypeScript, Tailwind CSS v4, shadcn/ui
 - **Backend**: Vercel AI SDK (OpenAI GPT-4o), Supabase (PostgreSQL + pgvector), Mastra
-- **External**: Google Drive API, pdf-parse, mammoth, Tesseract.js (OCR)
+- **External**: Google Drive API (optional sync), pdf-parse, mammoth, Tesseract.js (OCR)
 
 **Package Manager:** pnpm (not npm) | **Node:** 20+ required (`nvm use`)
+
+**Alternative AI Providers:** See GEMINI.md for Gemini integration, QWEN.md for Qwen integration
 
 ## Architecture
 
 ```
-Upload → Convert → AI Extract → Embed → Display → Prioritize
-  ↓        ↓           ↓          ↓        ↓          ↓
-/api/   noteProcessor aiSummarizer pgvector Dashboard  Mastra Agent
+Upload/Sync → Convert → AI Extract → Embed → Display → Prioritize
+     ↓          ↓           ↓          ↓        ↓          ↓
+/api/upload  noteProcessor aiSummarizer pgvector Dashboard  Mastra Agent
+  (or)
+Google Drive
 ```
 
 **Document Pipeline** (`lib/services/`):
@@ -125,9 +129,14 @@ Upload → Convert → AI Extract → Embed → Display → Prioritize
 **Main Pages:**
 - `app/page.tsx` - Upload UI with drag-and-drop
 - `app/dashboard/page.tsx` - Document grid, filtering, export
-- `app/priorities/page.tsx` - Agent-prioritized tasks with reasoning
+- `app/priorities/page.tsx` - Agent-prioritized tasks with reasoning and source document management
 
 **UI Library:** shadcn/ui (`npx shadcn@latest add <component>`)
+
+**Current Development Phase:**
+- **Branch**: `014-document-aware-prioritization`
+- **Focus**: Document exclusion, pending count badges, source transparency
+- **Spec**: `specs/014-document-aware-prioritization/spec.md`
 
 ## Database
 
@@ -137,7 +146,7 @@ Upload → Convert → AI Extract → Embed → Display → Prioritize
 - `task_embeddings` - Vector embeddings (1536-dim) with pgvector IVFFlat index
 - `user_outcomes` - User-defined outcome statements
 - `reflections` - Quick-capture reflections
-- `agent_sessions` - Agent execution traces
+- `agent_sessions` - Agent execution traces, baseline_document_ids for change tracking
 
 **Storage:** `notes/` bucket (original files, hash-based naming)
 **Migrations:** `supabase/migrations/`
@@ -176,6 +185,13 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_anon_key
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 OPENAI_API_KEY=sk-proj-...
 ENCRYPTION_KEY=32_byte_hex  # node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+**Optional** (for Google Drive integration):
+```env
+GOOGLE_CLIENT_ID=your_client_id
+GOOGLE_CLIENT_SECRET=your_client_secret
+GOOGLE_REDIRECT_URI=http://localhost:3000/api/auth/google/callback
 ```
 
 **TypeScript:** Strict mode, path alias `@/*` → project root
@@ -241,3 +257,16 @@ If agent prioritization fails:
 - `IMPLEMENTATION_STATUS.md` - Completion status
 - `.claude/state/` - Task state tracking JSON files
 - `.claude/logs/` - Test results and debug reports
+- `GEMINI.md` / `QWEN.md` - Alternative AI provider configurations
+
+## Slash Command Workflow
+
+The feature development workflow uses custom slash commands that integrate with `.specify/` directory structure:
+
+1. **/specify** `"feature description"` - Creates `specs/<feature-number>/spec.md` with user stories
+2. **/plan** - Generates `specs/<feature-number>/plan.md` with implementation approach
+3. **/tasks** - Breaks plan into `specs/<feature-number>/tasks.md` vertical slice tasks
+4. **/implement** - Executes tasks in order, creating `.claude/state/*.json` tracking files
+5. **/analyze** - Cross-checks spec, plan, tasks for consistency and completeness
+
+Each command references `.specify/templates/` and `.specify/memory/constitution.md` for standards.

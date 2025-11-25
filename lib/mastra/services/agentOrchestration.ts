@@ -24,6 +24,13 @@ import {
 } from '@/lib/mastra/services/resultParser';
 import { resolveOutcomeAlignedTasks } from '@/lib/services/lnoTaskService';
 import { emitPrioritizationProgress } from '@/lib/services/prioritizationStream';
+import {
+  buildIncrementalContext,
+  buildIncrementalPromptContext,
+  formatBaselineSummary,
+  formatNewTasks,
+  type IncrementalContext,
+} from '@/lib/services/incrementalContext';
 import type {
   AgentRuntimeContext,
   AgentRunResult,
@@ -44,6 +51,7 @@ type OrchestrateTaskOptions = {
   outcomeId: string;
   activeReflectionIds?: string[];
   dependencyOverrides?: TaskDependency[];
+  excludedDocumentIds?: string[];
 };
 
 type SupabaseOutcomeRow = {
@@ -149,7 +157,7 @@ async function hydrateFallbackEmbeddings(tasks: TaskSummary[]): Promise<TaskSumm
 async function fetchRuntimeContext(
   userId: string,
   outcomeId: string,
-  options: { activeReflectionIds?: string[] } = {}
+  options: { activeReflectionIds?: string[]; excludedDocumentIds?: string[] } = {}
 ): Promise<AgentRuntimeContext> {
   const [{ data: outcome, error: outcomeError }] = await Promise.all([
     supabase
@@ -204,16 +212,23 @@ async function fetchRuntimeContext(
     }
   })();
 
-  const tasksPromise = supabase
+  let tasksQuery = supabase
     .from('task_embeddings')
     .select('task_id, task_text, document_id')
     .eq('status', 'completed')
-    .limit(200)
-    .returns<TaskEmbeddingRow[]>();
+    .not('document_id', 'is', null)
+    .limit(200);
+
+  if (options.excludedDocumentIds && options.excludedDocumentIds.length > 0) {
+    const exclusionList = `(${options.excludedDocumentIds.map(id => `'${id}'`).join(',')})`;
+    tasksQuery = tasksQuery.not('document_id', 'in', exclusionList);
+  }
+
+  const tasksPromise = tasksQuery.returns<TaskEmbeddingRow[]>();
 
   const previousPlanPromise = supabase
     .from('agent_sessions')
-    .select('prioritized_plan')
+    .select('prioritized_plan, baseline_document_ids, created_at')
     .eq('user_id', userId)
     .eq('outcome_id', outcomeId)
     .eq('status', 'completed')
@@ -370,6 +385,41 @@ async function fetchRuntimeContext(
 
   const alignedTasks = await alignTasksWithOutcome(taskSummaries, outcome.assembled_text);
 
+  // BUGFIX: Deduplicate tasks by task_id to prevent duplicate "manual override" badges
+  // This can happen when LNO alignment processes the same task twice
+  const deduplicatedTasks: TaskSummary[] = [];
+  const seenTaskIds = new Set<string>();
+
+  alignedTasks.forEach(task => {
+    if (!seenTaskIds.has(task.task_id)) {
+      seenTaskIds.add(task.task_id);
+      deduplicatedTasks.push(task);
+    } else {
+      console.warn('[AgentOrchestration] Duplicate task ID detected and removed:', {
+        task_id: task.task_id.substring(0, 16) + '...',
+        task_text: task.task_text.substring(0, 50) + '...',
+      });
+    }
+  });
+
+  if (deduplicatedTasks.length < alignedTasks.length) {
+    console.log('[AgentOrchestration] Deduplication removed', alignedTasks.length - deduplicatedTasks.length, 'duplicate tasks');
+  }
+
+  // Build incremental context for token-efficient prioritization
+  const baselineDocumentIds = Array.isArray(previousSession?.baseline_document_ids)
+    ? previousSession.baseline_document_ids.filter((id): id is string => typeof id === 'string')
+    : [];
+  const baselineCreatedAt = typeof previousSession?.created_at === 'string'
+    ? previousSession.created_at
+    : null;
+
+  const incrementalContext = buildIncrementalContext(
+    deduplicatedTasks,
+    baselineDocumentIds,
+    baselineCreatedAt
+  );
+
   return {
     outcome: {
       id: outcome.id,
@@ -388,9 +438,9 @@ async function fetchRuntimeContext(
       weight: reflection.weight,
       relative_time: reflection.relative_time,
     })),
-    tasks: alignedTasks,
+    tasks: deduplicatedTasks,
     metadata: {
-      task_count: taskSummaries.length,
+      task_count: deduplicatedTasks.length,
       document_count: documentCount,
       reflection_count: reflections.length,
       has_previous_plan: !!previousPlan,
@@ -400,6 +450,13 @@ async function fetchRuntimeContext(
           previous_plan: previousPlan,
         }
       : undefined,
+    incrementalContext: {
+      baseline_document_ids: baselineDocumentIds,
+      baseline_created_at: baselineCreatedAt,
+      is_first_run: incrementalContext.is_first_run,
+      new_task_count: incrementalContext.new_tasks.length,
+      token_savings_estimate: incrementalContext.token_savings_estimate,
+    },
   };
 }
 
@@ -879,17 +936,42 @@ async function runLegacyAgent(
     const reflectionsText = context.reflections.length > 0
       ? context.reflections.map(r => `- ${r.text}`).join('\n')
       : 'No active reflections.';
-    
-    const tasksText = context.tasks.map(t => 
-      JSON.stringify({ id: t.task_id, text: t.task_text, source: t.source })
-    ).join('\n');
+
+    // Build incremental context-aware prompt for token efficiency
+    const baselineDocIds = context.incrementalContext?.baseline_document_ids ?? [];
+    const baselineCreatedAt = context.incrementalContext?.baseline_created_at ?? null;
+    const isFirstRun = context.incrementalContext?.is_first_run ?? true;
+
+    const incrementalCtx = buildIncrementalContext(context.tasks, baselineDocIds, baselineCreatedAt);
+
+    let tasksText: string;
+    let baselineSummaryText = '';
+
+    if (isFirstRun || incrementalCtx.new_tasks.length === context.tasks.length) {
+      // First run or no baseline: send all tasks
+      tasksText = context.tasks.map(t =>
+        JSON.stringify({ id: t.task_id, text: t.task_text, source: t.source, lnoCategory: t.lnoCategory })
+      ).join('\n');
+    } else {
+      // Incremental run: send baseline summary + new tasks
+      baselineSummaryText = formatBaselineSummary(incrementalCtx.baseline);
+      tasksText = formatNewTasks(incrementalCtx.new_tasks);
+
+      // Log token savings for monitoring
+      console.log('[AgentOrchestration] Incremental context built:', {
+        total_tasks: context.tasks.length,
+        new_tasks: incrementalCtx.new_tasks.length,
+        baseline_tasks: context.tasks.length - incrementalCtx.new_tasks.length,
+        token_savings_estimate: incrementalCtx.token_savings_estimate,
+      });
+    }
 
     const previousPlanText = previousPlan
       ? JSON.stringify(previousPlan, null, 2)
       : 'No previous plan available.';
 
     const dependencyConstraintsText = dependencyOverrides.length > 0
-      ? dependencyOverrides.map(d => 
+      ? dependencyOverrides.map(d =>
           `- ${d.source_task_id} ${d.relationship_type} ${d.target_task_id} (Confidence: ${d.confidence})`
         ).join('\n')
       : 'No manual dependency overrides.';
@@ -898,7 +980,9 @@ async function runLegacyAgent(
       outcome: outcomeText,
       reflections: reflectionsText,
       taskCount: context.tasks.length,
+      newTaskCount: incrementalCtx.new_tasks.length,
       tasks: tasksText,
+      baselineSummary: baselineSummaryText,
       previousPlan: previousPlanText,
       dependencyConstraints: dependencyConstraintsText,
     });
@@ -1180,13 +1264,23 @@ async function persistTrace(trace: ReasoningTraceRecord): Promise<void> {
 
 
 export async function orchestrateTaskPriorities(options: OrchestrateTaskOptions): Promise<void> {
-  const { sessionId, userId, outcomeId, activeReflectionIds, dependencyOverrides: overrideInput } =
+  const {
+    sessionId,
+    userId,
+    outcomeId,
+    activeReflectionIds,
+    dependencyOverrides: overrideInput,
+    excludedDocumentIds = [],
+  } =
     options;
   const dependencyOverrides = sanitizeDependencyOverrides(overrideInput);
 
   let context: AgentRuntimeContext;
   try {
-    context = await fetchRuntimeContext(userId, outcomeId, { activeReflectionIds });
+    context = await fetchRuntimeContext(userId, outcomeId, {
+      activeReflectionIds,
+      excludedDocumentIds,
+    });
     context = applyOverridesToContext(context, dependencyOverrides);
   } catch (error) {
     console.error('[AgentOrchestration] Unable to build runtime context', error);
@@ -1226,6 +1320,13 @@ export async function orchestrateTaskPriorities(options: OrchestrateTaskOptions)
       };
 
   const updatedAt = new Date().toISOString();
+  const baselineDocumentIds = Array.from(
+    new Set(
+      (context.tasks ?? [])
+        .map(task => task.document_id)
+        .filter((id): id is string => Boolean(id))
+    )
+  );
   
   const prioritizedPlan =
     agentRun.primary.status === 'completed' ? agentRun.primary.plan : null;
@@ -1244,6 +1345,7 @@ export async function orchestrateTaskPriorities(options: OrchestrateTaskOptions)
     excluded_tasks:
       agentRun.primary.status === 'completed' ? agentRun.primary.plan?.excluded_tasks : null,
     baseline_plan: baselinePlan,
+    baseline_document_ids: agentRun.primary.status === 'completed' ? baselineDocumentIds : null,
     execution_metadata: agentRun.primary.metadata,
     evaluation_metadata: agentRun.primary.evaluationMetadata ?? null,
     updated_at: updatedAt,

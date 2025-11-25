@@ -2,25 +2,27 @@
 ============================================================================
 SYNC IMPACT REPORT
 ============================================================================
-Version Change: [Initial] → 1.0.0
-Modified Principles: N/A (initial creation)
-Added Sections:
-  - Core Principles (all 5 principles newly defined)
-  - Quality Standards
-  - Development Workflow
-  - Governance
+Version Change: 1.0.0 → 1.0.1
+Modified Principles: None
+Added Sections: None
+Removed Sections: None
 
 Templates Requiring Updates:
-  ✅ plan-template.md - Constitution Check section references this file
+  ✅ plan-template.md - Constitution Check references remain valid
   ✅ spec-template.md - User story format aligns with vertical slice mandate
   ✅ tasks-template.md - Task structure supports vertical slice delivery
 
+Documentation Updates:
+  ✅ CLAUDE.md - Enhanced with current phase context, Google Drive setup, slash commands
+  ✅ README.md - Reorganized resources section, added development workflow clarity
+
 Follow-up TODOs: None
 
-Rationale for Version 1.0.0:
-  - Initial constitution codifying existing project practices
-  - Formalizes the vertical slice development protocol from SYSTEM_RULES.md
-  - Captures TDD, observability, and architecture principles from CLAUDE.md
+Rationale for Version 1.0.1 (PATCH):
+  - Documentation clarity improvements to CLAUDE.md and README.md
+  - Enhanced runtime guidance section to reflect reorganized documentation structure
+  - No principle changes, no governance changes, no breaking changes
+  - Pure clarification and navigation improvements
 ============================================================================
 -->
 
@@ -133,6 +135,18 @@ All system operations MUST emit structured telemetry:
 3. Identify backend endpoint processing the action
 4. Confirm: Can user test this when complete? (YES required to proceed)
 
+### Spec-Driven Workflow
+
+This project uses a structured feature development workflow with slash commands:
+
+1. `/specify "feature description"` - Create `specs/###-feature/spec.md` with user stories
+2. `/plan` - Generate `specs/###-feature/plan.md` with implementation approach
+3. `/tasks` - Break into `specs/###-feature/tasks.md` vertical slice tasks
+4. `/implement` - Execute tasks in order with TDD, creating `.claude/state/*.json` tracking
+5. `/analyze` - Cross-check spec, plan, tasks for consistency
+
+Each command references `.specify/templates/` and this constitution for standards compliance.
+
 ### Agent Selection Protocol
 
 - **Feature implementation**: ALWAYS use `slice-orchestrator` agent
@@ -201,9 +215,25 @@ Justification captured in feature `plan.md` under "Complexity Tracking" section.
 
 For implementation patterns, standards, and troubleshooting, developers MUST consult:
 
-- `CLAUDE.md` - Primary development guide, architecture overview, troubleshooting
+**Primary Documentation** (start here):
+- `CLAUDE.md` - Quick start guide, architecture overview, troubleshooting, slash command workflow
+- `README.md` - Project overview, getting started, development commands, resource index
+
+**Development Standards**:
 - `.claude/SYSTEM_RULES.md` - Vertical slice protocol, agent coordination rules
-- `.claude/standards.md` - TypeScript conventions, TDD workflow, design system
+- `.claude/standards.md` - TypeScript conventions, TDD workflow, design system, common patterns
 - `AGENTS.md` - Repository workflow, commit guidelines, security posture
 
-**Version**: 1.0.0 | **Ratified**: 2025-01-13 | **Last Amended**: 2025-01-13
+**Specifications**:
+- `specs/###-feature/` - Feature specifications, plans, tasks for each development phase
+- `.specify/templates/` - Templates for spec, plan, tasks, and workflow commands
+
+**Implementation Status**:
+- `IMPLEMENTATION_STATUS.md` - Feature completion matrix, known issues, roadmap
+
+**Design & QA**:
+- `design.json` / `design/design-system.json` - Visual language, component guidelines
+- `MOBILE_RESPONSIVENESS_REPORT.md` - Mobile QA baselines
+- `VISUAL_COMPARISON.md` - Visual regression tracking
+
+**Version**: 1.0.1 | **Ratified**: 2025-01-13 | **Last Amended**: 2025-01-25
