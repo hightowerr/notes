@@ -134,19 +134,21 @@ Google Drive
 **UI Library:** shadcn/ui (`npx shadcn@latest add <component>`)
 
 **Current Development Phase:**
-- **Branch**: `014-document-aware-prioritization`
-- **Focus**: Document exclusion, pending count badges, source transparency
-- **Spec**: `specs/014-document-aware-prioritization/spec.md`
+- **Status**: Phase 2 - Mastra Tool Registry & Agent Orchestration
+- **Focus**: Vector embeddings, agent tools, task prioritization
+- **Active Specs**: See `specs/` directories and `IMPLEMENTATION_STATUS.md` for details
 
 ## Database
 
 **Core Tables** (Supabase PostgreSQL):
 - `uploaded_files` - File metadata, status, queue_position
 - `processed_documents` - AI outputs, Markdown, 30-day auto-expiry
-- `task_embeddings` - Vector embeddings (1536-dim) with pgvector IVFFlat index
-- `user_outcomes` - User-defined outcome statements
-- `reflections` - Quick-capture reflections
+- `task_embeddings` - Vector embeddings (1536-dim) with pgvector IVFFlat index (migration 007-009)
+- `user_outcomes` - User-defined outcome statements (migration 004)
+- `reflections` - Quick-capture reflections with tags (migration 006)
 - `agent_sessions` - Agent execution traces, baseline_document_ids for change tracking
+- `task_relationships` - Dependency graph (prerequisite/blocks/related) (migration 010)
+- `reflection_intents` - Reflection interpretation and sentiment (migration 027)
 
 **Storage:** `notes/` bucket (original files, hash-based naming)
 **Migrations:** `supabase/migrations/`
@@ -175,6 +177,20 @@ Google Drive
 
 **Embeddings not generating**
 - Check `OPENAI_API_KEY` is set, verify migrations with `supabase db push`
+- Run: `npx tsx scripts/check-database-tasks.ts` to verify task embeddings
+
+**Module not found errors**
+- Restart TypeScript server: VSCode Cmd/Ctrl+Shift+P → "TypeScript: Restart TS Server"
+- Verify `@/*` path alias in `tsconfig.json`
+
+**Agent prioritization produces empty results**
+- Check agent_sessions table: `SELECT * FROM agent_sessions ORDER BY created_at DESC LIMIT 5`
+- Verify baseline_document_ids populated
+- Review `lib/mastra/config.ts` for telemetry/timeout settings
+
+**pdf-parse errors after fresh install**
+- Run `pnpm install` to trigger postinstall patch
+- Verify `node_modules/.pnpm/pdf-parse@1.1.1/node_modules/pdf-parse/index.js` line 6 has `isDebugMode = false`
 
 ## Configuration
 
@@ -194,7 +210,12 @@ GOOGLE_CLIENT_SECRET=your_client_secret
 GOOGLE_REDIRECT_URI=http://localhost:3000/api/auth/google/callback
 ```
 
-**TypeScript:** Strict mode, path alias `@/*` → project root
+**TypeScript:** Strict mode enabled, ES2017 target, path alias `@/*` → project root
+
+**Important Notes:**
+- Use `pnpm` as package manager (not npm)
+- Node 20+ required - run `nvm use` to switch
+- After fresh clone/install, verify pdf-parse patch applied (postinstall hook)
 
 ## Design Principles
 
@@ -269,4 +290,14 @@ The feature development workflow uses custom slash commands that integrate with 
 4. **/implement** - Executes tasks in order, creating `.claude/state/*.json` tracking files
 5. **/analyze** - Cross-checks spec, plan, tasks for consistency and completeness
 
-Each command references `.specify/templates/` and `.specify/memory/constitution.md` for standards.
+**Templates Used:**
+- `.specify/templates/spec-template.md` - User story format
+- `.specify/templates/plan-template.md` - Implementation structure
+- `.specify/templates/tasks-template.md` - Vertical slice task breakdown
+- `.specify/memory/constitution.md` - Architectural principles and standards
+
+**State Tracking:**
+- Each task creates `.claude/state/<task-id>.json` with completion status
+- Implementation plans stored in `.claude/docs/<agent>-<task>.md`
+- Test results logged to `.claude/logs/test-result-<task>.md`
+- Code reviews saved to `.claude/reviews/<task>.md`

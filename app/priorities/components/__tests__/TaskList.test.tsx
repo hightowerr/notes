@@ -121,9 +121,10 @@ describe('TaskList header', () => {
 
     expect(screen.getByText(/0 tasks/i)).toBeInTheDocument();
     const sortButton = screen.getByRole('combobox', { name: /sort strategy/i });
-    expect(sortButton).toHaveAttribute('aria-disabled', 'true');
+    expect(sortButton).toHaveAttribute('data-disabled');
 
     await user.hover(sortButton);
-    expect(screen.getByLabelText(/no tasks to sort/i)).toBeInTheDocument();
+    const tooltips = await screen.findAllByText('No tasks to sort');
+    expect(tooltips.length).toBeGreaterThan(0);
   });
 });

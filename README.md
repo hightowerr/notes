@@ -24,11 +24,11 @@ An autonomous document intelligence workspace that ingests meeting notes and res
 
 ## System Overview
 
-**Current Development Phase**: Phase 16 - Document-Aware Prioritization (Branch: `014-document-aware-prioritization`)
-- Enhanced outcome visibility with prominent styling
-- Pending document count badges for recalculation awareness
-- Source document transparency with task counts
-- Document inclusion/exclusion controls per outcome
+**Current Development Phase**: Phase 2 - Mastra Agent Orchestration & Vector Intelligence
+- Vector embeddings with pgvector for semantic search (<500ms)
+- Mastra-powered agent tools (semantic search, dependency detection, clustering)
+- Agent orchestration with tool execution and result parsing
+- Task relationship graph and prioritization intelligence
 
 ### Frontend
 - App Router in `app/` renders the upload flow (`app/page.tsx`), dashboard (`app/dashboard/page.tsx`), and priorities view (`app/priorities/page.tsx`).
@@ -86,10 +86,13 @@ An autonomous document intelligence workspace that ingests meeting notes and res
 
 ## Getting Started
 ### Prerequisites
-- Node.js 20+ (required for native File API) – use `nvm use` to switch
-- pnpm (package manager)
-- Supabase project with storage bucket `notes` and Postgres schema from `supabase/migrations/`
-- OpenAI API key with access to GPT-4o
+- **Node.js 20+** (required for native File API) – use `nvm use` to switch
+- **pnpm** (package manager) – install with `npm install -g pnpm`
+- **Supabase project** with:
+  - Storage bucket `notes`
+  - Postgres schema from `supabase/migrations/`
+  - pgvector extension enabled
+- **OpenAI API key** with access to GPT-4o (or GPT-4)
 
 ### Installation
 1. Clone the repository and move into the workspace.
@@ -148,10 +151,14 @@ An autonomous document intelligence workspace that ingests meeting notes and res
 
 ### Testing Guidelines
 - Unit tests sit alongside services/components; contract and integration suites live in `__tests__/contract/` and `__tests__/integration/` respectively.
-- Target ≥80 % coverage, adding regression specs for every bug fix or retry logic tweak.
+- Target ≥80% coverage, adding regression specs for every bug fix or retry logic tweak.
 - Supabase-dependent tests require `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`; mock external APIs where possible.
 - Integration specs that stress Tinypool threads: `pnpm test:run -- --pool=threads --poolOptions.threads.minThreads=1 --poolOptions.threads.maxThreads=1`
 - Explorer scripts live in `scripts/` (e.g. `scripts/test-mastra.ts` for agent health)
+
+**Known Testing Limitations:**
+- FormData serialization in Vitest requires manual testing for file uploads (see `.claude/testing/T*_MANUAL_TEST.md`)
+- Core logic is fully tested; end-to-end upload flows validated manually
 
 ### Development Workflow
 This project uses a spec-driven workflow with custom slash commands:
@@ -194,10 +201,29 @@ notes/
 ```
 
 ## Deployment
-1. Configure environment variables (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`) in your hosting provider.
-2. Build with `pnpm build` and serve via `pnpm start`.
-3. Vercel is the quickest path (Next.js 15 native); Netlify, Railway, DO App Platform, and AWS Amplify are also supported.
-4. Ensure Supabase Row Level Security policies mirror the migrations shipped in `supabase/migrations/` to protect uploaded assets and agent traces.
+
+### Quick Deploy to Vercel
+1. Configure environment variables in Vercel dashboard:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `OPENAI_API_KEY`
+   - `ENCRYPTION_KEY` (generate with: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`)
+
+2. Deploy:
+   ```bash
+   pnpm build
+   ```
+   Vercel is the recommended platform (Next.js 15 native support).
+
+3. Apply Supabase migrations:
+   ```bash
+   supabase db push
+   ```
+
+4. Ensure Supabase Row Level Security policies mirror the migrations in `supabase/migrations/` to protect uploaded assets and agent traces.
+
+**Alternative Platforms:** Netlify, Railway, DigitalOcean App Platform, and AWS Amplify are also supported.
 
 ## Resources
 
@@ -223,9 +249,15 @@ notes/
 - **GEMINI.md** – Google Gemini integration guide
 - **QWEN.md** – Qwen model integration guide
 
-### Utilities
+### Utilities & Troubleshooting
 - `npx tsx scripts/test-mastra.ts` – Validate Mastra tool registry and telemetry
 - `npx tsx scripts/check-database-tasks.ts` – Verify task embeddings
+
+**Common Issues:**
+- **pdf-parse errors after install:** Run `pnpm install` to trigger postinstall patch
+- **Empty task list:** Ensure `SUPABASE_SERVICE_ROLE_KEY` is set in `.env.local`
+- **Embeddings not generating:** Verify `OPENAI_API_KEY` is set and run `supabase db push` to apply migrations
+- **Module not found:** Restart TypeScript server (VSCode: Cmd/Ctrl+Shift+P → "TypeScript: Restart TS Server")
 
 ---
 Built with ❤️ using Next.js 15, React 19, TypeScript, Supabase, and Mastra.
