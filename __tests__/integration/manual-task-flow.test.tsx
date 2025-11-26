@@ -50,6 +50,8 @@ describe('Manual Task Flow', () => {
             planVersion={1} 
             outcomeId="test-outcome"
             outcomeStatement="Complete legal compliance review"
+            sortingStrategy="balanced"
+            onStrategyChange={vi.fn()}
           />
         </MockedProvider>
       </MemoryRouter>
@@ -116,6 +118,8 @@ describe('Manual Task Flow', () => {
             planVersion={1} 
             outcomeId="test-outcome"
             outcomeStatement="Complete legal compliance review"
+            sortingStrategy="balanced"
+            onStrategyChange={vi.fn()}
           />
         </MockedProvider>
       </MemoryRouter>
@@ -147,6 +151,8 @@ describe('Manual Task Flow', () => {
             planVersion={1} 
             outcomeId={null}
             outcomeStatement={null}
+            sortingStrategy="balanced"
+            onStrategyChange={vi.fn()}
           />
         </MockedProvider>
       </MemoryRouter>

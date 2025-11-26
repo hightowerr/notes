@@ -10,6 +10,7 @@ type ReasoningChainProps = {
   chain?: ChainOfThoughtStep[] | null;
   iterations?: number | null;
   evaluationTriggered?: boolean;
+  debugMode?: boolean;
 };
 
 function formatConfidence(value?: number): string {
@@ -32,7 +33,11 @@ function getConfidenceBadgeClass(confidence?: number): string {
   return 'bg-rose-500/10 text-rose-700 ring-1 ring-inset ring-rose-500/30';
 }
 
-export function ReasoningChain({ chain, iterations, evaluationTriggered }: ReasoningChainProps) {
+export function ReasoningChain({ chain, iterations, evaluationTriggered, debugMode = false }: ReasoningChainProps) {
+  if (!debugMode) {
+    return null;
+  }
+
   const [expanded, setExpanded] = useState(true);
   const orderedChain = useMemo(() => {
     if (!Array.isArray(chain)) {

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { Loader2, ExternalLink, RefreshCw, Lightbulb } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,7 +12,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
 import { MainNav } from '@/components/main-nav';
 import { TaskList } from '@/app/priorities/components/TaskList';
-import { SortingStrategySelector } from '@/app/priorities/components/SortingStrategySelector';
 import type { QuadrantVizTask } from '@/app/priorities/components/QuadrantViz';
 import { QuadrantViz } from '@/app/priorities/components/QuadrantViz';
 import { ContextCard } from '@/app/priorities/components/ContextCard';
@@ -64,7 +64,6 @@ import {
   getOutcomeDependencyOverrides,
 } from '@/lib/utils/dependencyOverrides';
 import { usePrioritizationStream } from '@/lib/hooks/usePrioritizationStream';
-import { PrioritizationSummary } from '@/app/priorities/components/PrioritizationSummary';
 import { OutcomeCard } from '@/app/priorities/components/OutcomeCard';
 import { SourceDocuments } from '@/app/priorities/components/SourceDocuments';
 import { useDocumentStatus } from '@/lib/hooks/useDocumentStatus';
@@ -134,6 +133,8 @@ type PrioritizeResponse = {
 };
 
 export default function TaskPrioritiesPage() {
+  const searchParams = useSearchParams();
+  const debugMode = searchParams?.get('debug') === 'true';
   const [outcomeLoading, setOutcomeLoading] = useState(true);
   const [activeOutcome, setActiveOutcome] = useState<OutcomeResponse | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -244,10 +245,8 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
     setDocumentStatus(null);
   }, [activeOutcome?.id, exclusionsKey]);
   const lastStreamSignatureRef = useRef<string | null>(null);
-  const completionDurationMs =
-    evaluationMetadata?.duration_ms ??
-    (executionMetadata?.total_time_ms ? Number(executionMetadata.total_time_ms) : null);
-  const evaluationWasTriggered = Boolean(evaluationMetadata?.evaluation_triggered);
+  const completionTime = prioritizedPlan?.created_at ? new Date(prioritizedPlan.created_at) : undefined;
+  const evaluationWasTriggered = evaluationMetadata?.evaluation_triggered;
   const scorePollingHaltedRef = useRef(false);
   const surveyStateRef = useRef<SurveyState>({
     runCount: 0,
@@ -1368,7 +1367,6 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
     return null;
   }, [documentStatus, pendingDocumentCount, hasDocumentBaseline]);
   const documentStatusBadgeVariant = pendingDocumentCount > 0 ? 'secondary' : 'outline';
-  const showPerformanceSummary = sessionStatus === 'completed' && completionDurationMs !== null;
   const analyzeButtonLabel = () => {
     if (isTriggering) {
       return 'Initializing…';
@@ -2379,13 +2377,6 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
           </p>
         </div>
 
-        {showPerformanceSummary && (
-          <PrioritizationSummary
-            durationMs={completionDurationMs}
-            evaluationTriggered={evaluationWasTriggered}
-          />
-        )}
-
         {prioritizationError && (
           <ErrorBanner
             message={prioritizationError}
@@ -2411,6 +2402,8 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
           disableRecalculate={disableRecalculate}
           pendingDocumentCount={documentStatusBadgeLabel ? pendingDocumentCount : null}
           hasBaselineDocuments={hasDocumentBaseline}
+          completionTime={completionTime}
+          qualityCheckPassed={evaluationWasTriggered}
         />
 
         {/* Banner for when no active outcome exists - T012 requirement */}
@@ -2709,23 +2702,12 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
                 </AlertDescription>
               </Alert>
             )}
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-bg-layer-2/40 px-4 py-3">
-              <SortingStrategySelector
-                value={sortingStrategy}
-                onChange={setSortingStrategy}
-                disabled={!hasStrategicScores}
-              />
-              {!hasStrategicScores && (
-                <span className="text-xs text-muted-foreground">
-                  Strategic scores will appear after the next prioritization run.
-                </span>
-              )}
-            </div>
-            {evaluationMetadata && (
+            {evaluationMetadata && debugMode && (
               <ReasoningChain
                 chain={evaluationMetadata.chain_of_thought}
                 iterations={evaluationMetadata.iterations}
                 evaluationTriggered={evaluationMetadata.evaluation_triggered}
+                debugMode={debugMode}
               />
             )}
             <TaskList
@@ -2742,6 +2724,7 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
               strategicScores={strategicScores}
               retryStatuses={retryStatuses}
               sortingStrategy={sortingStrategy}
+              onStrategyChange={setSortingStrategy}
               onTaskMetadataUpdate={handleTaskMetadataUpdate}
               onActiveIdsChange={setActiveTaskIds}
               metadataRefreshKey={reflectionEffectsRefreshKey}

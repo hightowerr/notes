@@ -1,0 +1,14 @@
+{
+  "review_file": ".claude/reviews/T001-T003-priorities-ux-phase1.md",
+  "status": "fail",
+  "critical_issues": 0,
+  "high_issues": 2,
+  "return_to": "frontend-ui-builder",
+  "fixes_required": [
+    "Update tests to use `data-disabled` attribute instead of `aria-disabled` (TaskList.test.tsx:124, SortingStrategySelector.test.tsx:53)",
+    "Fix integration test sorting - verify strategic scores are being used for 'balanced' strategy sorting (__tests__/integration/priorities-ux-feedback-loop.test.tsx:92)"
+  ],
+  "vertical_slice_complete": false,
+  "tests_passing": false,
+  "estimated_fix_time": "30-60 minutes"
+}

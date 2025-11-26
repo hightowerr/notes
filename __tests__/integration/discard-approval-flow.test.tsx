@@ -147,6 +147,8 @@ describe('Discard approval flow (T009)', () => {
     sessionStatus: 'completed' as const,
     canTriggerPrioritization: false,
     onRequestPrioritization: vi.fn(),
+    sortingStrategy: 'balanced' as const,
+    onStrategyChange: vi.fn(),
   };
   const initialPlan = buildPlan(['task-1', 'task-2', 'task-3']);
   const removalDetails: TaskRemoval[] = [

@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { TaskList } from '@/app/priorities/components/TaskList';
-import { SortingStrategySelector } from '@/app/priorities/components/SortingStrategySelector';
 import type { PrioritizedTaskPlan } from '@/lib/types/agent';
 import type { StrategicScoresMap } from '@/lib/schemas/strategicScore';
 import type { SortingStrategy } from '@/lib/schemas/sortingStrategy';
@@ -65,7 +64,6 @@ function StrategyHarness({ scores = strategicScores }: { scores?: StrategicScore
 
   return (
     <div>
-      <SortingStrategySelector value={strategy} onChange={setStrategy} />
       <TaskList
         plan={mockPlan}
         executionMetadata={undefined}
@@ -74,6 +72,7 @@ function StrategyHarness({ scores = strategicScores }: { scores?: StrategicScore
         outcomeStatement="Increase activation rate"
         strategicScores={scores}
         sortingStrategy={strategy}
+        onStrategyChange={setStrategy}
       />
     </div>
   );
@@ -108,7 +107,8 @@ describe('Sorting strategies', () => {
       expect(screen.getByText('Optimize onboarding copy')).toBeInTheDocument();
     });
 
-    const trigger = screen.getByLabelText('Sort Strategy');
+    const header = screen.getByTestId('task-list-header');
+    const trigger = within(header).getByLabelText('Sort Strategy');
     await user.click(trigger);
     await user.click(screen.getByRole('option', { name: /Quick Wins/i }));
 
@@ -125,7 +125,7 @@ describe('Sorting strategies', () => {
       expect(screen.getByText('Rebuild analytics pipeline')).toBeInTheDocument();
     });
 
-    const trigger = screen.getByLabelText('Sort Strategy');
+    const trigger = within(screen.getByTestId('task-list-header')).getByLabelText('Sort Strategy');
     await user.click(trigger);
     await user.click(screen.getByRole('option', { name: /Strategic Bets/i }));
 
@@ -167,7 +167,7 @@ describe('Sorting strategies', () => {
       expect(screen.getByText('Fix urgent payment blocker')).toBeInTheDocument();
     });
 
-    const trigger = screen.getByLabelText('Sort Strategy');
+    const trigger = within(screen.getByTestId('task-list-header')).getByLabelText('Sort Strategy');
     await user.click(trigger);
     await user.click(screen.getByRole('option', { name: /Urgent/i }));
 

@@ -3,6 +3,8 @@ import { render, screen } from '@testing-library/react';
 
 import { PrioritizationSummary } from '@/app/priorities/components/PrioritizationSummary';
 
+// Deprecated component: tests remain to catch regressions until removal.
+
 describe('PrioritizationSummary', () => {
   it('shows fast path badge with formatted duration', () => {
     render(<PrioritizationSummary durationMs={17634} evaluationTriggered={false} />);

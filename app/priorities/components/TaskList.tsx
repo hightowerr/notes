@@ -20,6 +20,7 @@ import { TaskRow } from '@/app/priorities/components/TaskRow';
 import { CompletedTasks } from '@/app/priorities/components/CompletedTasks';
 import { DiscardedTasks } from '@/app/priorities/components/DiscardedTasks';
 import { TaskDetailsDrawer } from '@/app/priorities/components/TaskDetailsDrawer';
+import { SortingStrategySelector } from '@/app/priorities/components/SortingStrategySelector';
 import { useTaskDiff } from '@/app/priorities/components/useTaskDiff';
 import { useScrollToTask } from '@/app/priorities/components/useScrollToTask';
 import type { MovementInfo } from '@/app/priorities/components/MovementBadge';
@@ -182,7 +183,8 @@ type TaskListProps = {
   onRequestPrioritization?: () => void | Promise<void>;
   strategicScores?: StrategicScoresMap | null;
   retryStatuses?: Record<string, RetryStatusEntry> | null;
-  sortingStrategy?: SortingStrategy;
+  sortingStrategy: SortingStrategy;
+  onStrategyChange: (strategy: SortingStrategy) => void;
   onTaskMetadataUpdate?: (metadata: Record<string, { title: string }>) => void;
   onActiveIdsChange?: (ids: string[]) => void;
   excludedDocumentIds?: string[];
@@ -408,6 +410,7 @@ function TaskListContent({
   strategicScores = null,
   retryStatuses = null,
   sortingStrategy = 'balanced',
+  onStrategyChange,
   onTaskMetadataUpdate,
   onActiveIdsChange,
   excludedDocumentIds = [],
@@ -2088,6 +2091,10 @@ function TaskListContent({
     : 0;
   const displayedTaskCount = displayedActiveTasks.length;
   const visibleTaskCount = visibleTasks.length;
+  const taskCountLabel = useMemo(
+    () => `${displayedTaskCount} ${displayedTaskCount === 1 ? 'task' : 'tasks'}`,
+    [displayedTaskCount]
+  );
 
   useEffect(() => {
     if (!virtualizationEnabled) {
@@ -2281,6 +2288,26 @@ function TaskListContent({
           {renderTaskRowContent(task)}
         </div>
       ))}
+    </div>
+  );
+
+  const taskListHeader = (
+    <div
+      data-testid="task-list-header"
+      className="flex flex-col justify-between gap-3 border-b border-border p-4 text-sm sm:flex-row sm:items-center sm:justify-between sm:text-base"
+    >
+      <div className="flex h-11 items-center gap-2 sm:h-9">
+        <h2 className="text-sm font-semibold text-foreground sm:text-base">Your Prioritized Tasks</h2>
+        <span className="text-sm text-muted-foreground sm:text-base">{taskCountLabel}</span>
+      </div>
+      <div className="flex w-full justify-start sm:w-auto sm:justify-end">
+        <SortingStrategySelector
+          value={sortingStrategy}
+          onChange={onStrategyChange}
+          compact
+          disabled={displayedTaskCount === 0}
+        />
+      </div>
     </div>
   );
 
@@ -2535,6 +2562,7 @@ function TaskListContent({
         {taskError && <p className="text-xs text-destructive">{taskError}</p>}
 
         <div className="rounded-xl border border-border/60">
+          {taskListHeader}
           {isLoadingTasks ? (
             <div className="p-4">
               <TaskListSkeleton rows={5} />

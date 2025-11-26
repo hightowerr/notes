@@ -1,0 +1,27 @@
+{
+  "review_file": ".claude/reviews/T004-T006-phase2-metadata-integration.md",
+  "status": "request_changes",
+  "critical_issues": 0,
+  "high_issues": 1,
+  "return_to": "frontend-ui-builder",
+  "fixes_required": [
+    "Fix TaskList.test.tsx tooltip selector ambiguity (line 80) - use getByRole + getByLabelText instead of getByText"
+  ],
+  "phase": "Phase 2 - User Story 2",
+  "vertical_slice_complete": true,
+  "integration_verified": true,
+  "test_coverage": "4/5 tests pass (1 test selector issue from Phase 1)",
+  "tasks_reviewed": ["T004", "T005", "T006"],
+  "acceptance_criteria_met": {
+    "T004": true,
+    "T005": true,
+    "T006": true
+  },
+  "blocker_details": {
+    "issue": "Test selector ambiguity in TaskList.test.tsx",
+    "file": "app/priorities/components/__tests__/TaskList.test.tsx",
+    "line": 80,
+    "severity": "HIGH",
+    "fix_time_estimate": "10 minutes"
+  }
+}

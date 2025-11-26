@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronUp, Loader2, MessageSquare, RefreshCw } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
 import type { ReflectionWithWeight } from '@/lib/schemas/reflectionSchema';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -29,6 +30,8 @@ type ContextCardProps = {
   disableRecalculate?: boolean;
   pendingDocumentCount?: number | null;
   hasBaselineDocuments?: boolean;
+  completionTime?: Date;
+  qualityCheckPassed?: boolean;
 };
 
 type ReflectionWithLocalState = ReflectionWithWeight & {
@@ -72,6 +75,8 @@ export function ContextCard({
   disableRecalculate = false,
   pendingDocumentCount = null,
   hasBaselineDocuments = false,
+  completionTime,
+  qualityCheckPassed,
 }: ContextCardProps) {
   const [localReflections, setLocalReflections] = useState<ReflectionWithLocalState[]>(
     () => prepareReflections(reflections)
@@ -95,6 +100,7 @@ export function ContextCard({
   const pendingBadgeVariant = pendingDocumentCount && pendingDocumentCount > 0 ? 'secondary' : 'outline';
   const pendingBadgeLabel =
     pendingDocumentCount && pendingDocumentCount > 0 ? `${pendingDocumentCount} new` : 'up to date';
+  const hasMetadata = Boolean(completionTime) || qualityCheckPassed !== undefined;
 
   useEffect(() => {
     setLocalReflections(prepareReflections(reflections));
@@ -219,6 +225,21 @@ export function ContextCard({
       </CardHeader>
 
       <CardContent className="space-y-4">
+        {hasMetadata && (
+          <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+            {completionTime && (
+              <span>
+                Completed {formatDistanceToNow(completionTime, { addSuffix: true })}
+              </span>
+            )}
+            {qualityCheckPassed !== undefined && (
+              <Badge variant={qualityCheckPassed ? 'default' : 'secondary'}>
+                Quality check: {qualityCheckPassed ? '✓ Passed' : '⚠ Review'}
+              </Badge>
+            )}
+          </div>
+        )}
+
         {(showExpiredBanner || showStaleBanner) && (
           <Alert
             variant={showExpiredBanner ? 'destructive' : 'default'}

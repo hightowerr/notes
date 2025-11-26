@@ -1,3 +1,8 @@
+/**
+ * @deprecated This component is deprecated as of 2025-11-25.
+ * Use ContextCard with completionTime and qualityCheckPassed props instead.
+ * This file will be removed in a future cleanup.
+ */
 import { CheckCircle, Zap } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';

@@ -61,6 +61,8 @@ describe('Task Edit Flow', () => {
             planVersion={1} 
             outcomeId="test-outcome"
             outcomeStatement="Complete legal compliance review"
+            sortingStrategy="balanced"
+            onStrategyChange={vi.fn()}
           />
         </MockedProvider>
       </MemoryRouter>
@@ -100,6 +102,8 @@ describe('Task Edit Flow', () => {
             planVersion={1} 
             outcomeId="test-outcome"
             outcomeStatement="Complete legal compliance review"
+            sortingStrategy="balanced"
+            onStrategyChange={vi.fn()}
           />
         </MockedProvider>
       </MemoryRouter>
@@ -136,6 +140,8 @@ describe('Task Edit Flow', () => {
             planVersion={1} 
             outcomeId="test-outcome"
             outcomeStatement="Complete legal compliance review"
+            sortingStrategy="balanced"
+            onStrategyChange={vi.fn()}
           />
         </MockedProvider>
       </MemoryRouter>
@@ -172,6 +178,8 @@ describe('Task Edit Flow', () => {
             planVersion={1} 
             outcomeId="test-outcome"
             outcomeStatement="Complete legal compliance review"
+            sortingStrategy="balanced"
+            onStrategyChange={vi.fn()}
             sessionStatus="running" // Simulate active prioritization
           />
         </MockedProvider>
@@ -200,6 +208,8 @@ describe('Task Edit Flow', () => {
             planVersion={1} 
             outcomeId="test-outcome"
             outcomeStatement="Complete legal compliance review"
+            sortingStrategy="balanced"
+            onStrategyChange={vi.fn()}
           />
         </MockedProvider>
       </MemoryRouter>

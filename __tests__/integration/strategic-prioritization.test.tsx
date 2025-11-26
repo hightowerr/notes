@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { TaskList } from '@/app/priorities/components/TaskList';
 import type { PrioritizedTaskPlan } from '@/lib/types/agent';
 import type { StrategicScoresMap } from '@/lib/schemas/strategicScore';
@@ -71,12 +71,16 @@ describe('Strategic prioritization display', () => {
         outcomeStatement="Increase activation rate"
         strategicScores={mockScores}
         sortingStrategy="balanced"
+        onStrategyChange={vi.fn()}
       />
     );
 
     await waitFor(() => {
       expect(screen.getByText(/Impact: 8\.5/)).toBeInTheDocument();
     });
+
+    const header = screen.getByTestId('task-list-header');
+    expect(within(header).getAllByLabelText('Sort Strategy').length).toBe(1);
 
     const rows = Array.from(document.querySelectorAll('[data-task-id]'));
     expect(rows[0]).toHaveAttribute('data-task-id', 'task-high-priority');

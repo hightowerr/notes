@@ -28,7 +28,7 @@ describe('ReasoningChain', () => {
   ];
 
   it('renders reasoning steps in order with confidence badges and evaluator feedback', () => {
-    render(<ReasoningChain chain={chain} iterations={3} evaluationTriggered />);
+    render(<ReasoningChain chain={chain} iterations={3} evaluationTriggered debugMode />);
 
     expect(screen.getByText('Reasoning Chain')).toBeInTheDocument();
     expect(screen.getAllByText(/Iteration \d/)).toHaveLength(3);
@@ -49,7 +49,7 @@ describe('ReasoningChain', () => {
   });
 
   it('toggles visibility when clicking expand/collapse button', () => {
-    render(<ReasoningChain chain={chain} iterations={3} evaluationTriggered />);
+    render(<ReasoningChain chain={chain} iterations={3} evaluationTriggered debugMode />);
 
     const toggleButton = screen.getByRole('button', { name: /collapse reasoning chain/i });
     fireEvent.click(toggleButton);
@@ -63,10 +63,18 @@ describe('ReasoningChain', () => {
   });
 
   it('shows placeholder when no chain is available', () => {
-    render(<ReasoningChain chain={null} iterations={2} evaluationTriggered={false} />);
+    render(<ReasoningChain chain={null} iterations={2} evaluationTriggered={false} debugMode />);
 
     expect(
       screen.getByText(/Awaiting reasoning chain \(expected 2 iterations\)/i)
     ).toBeInTheDocument();
+  });
+
+  it('returns null when debug mode is disabled', () => {
+    const { container } = render(
+      <ReasoningChain chain={chain} iterations={3} evaluationTriggered={false} />
+    );
+
+    expect(container.firstChild).toBeNull();
   });
 });
