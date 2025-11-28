@@ -73,6 +73,7 @@ export function QuadrantViz({ tasks, onTaskClick, showCountBadge = true }: Quadr
     [normalizedTasks]
   );
   const xDomain: [number, number] = [1, Math.max(maxEffort * 1.25, LOW_EFFORT_THRESHOLD * 2)];
+  const xTicks = useMemo(() => buildLogTicks(xDomain[1]), [xDomain]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -112,19 +113,9 @@ export function QuadrantViz({ tasks, onTaskClick, showCountBadge = true }: Quadr
         name="Effort"
         scale="log"
         domain={xDomain}
-        tickFormatter={value => `${value}h`}
-        tick={({ x, y, payload }) => {
-          const safeVal = typeof payload?.value === 'number' ? payload.value : Number(payload?.value);
-          const label = Number.isFinite(safeVal) ? `${safeVal}h` : '';
-          const key = `x-tick-${safeVal}-${x}-${y}`;
-          return (
-            <g transform={`translate(${x},${y})`} key={key}>
-              <text dy={16} textAnchor="middle" fill="#64748b" fontSize={12}>
-                {label}
-              </text>
-            </g>
-          );
-        }}
+        ticks={xTicks}
+        tickFormatter={value => (Number.isFinite(value) ? `${value}h` : '')}
+        tick={{ fill: '#64748b', fontSize: 12 }}
       >
         <Label value="Effort (hours, log scale)" offset={-10} position="insideBottom" />
       </XAxis>
@@ -133,18 +124,8 @@ export function QuadrantViz({ tasks, onTaskClick, showCountBadge = true }: Quadr
         dataKey="impact"
         name="Impact"
         domain={[0, 10]}
-        tick={({ x, y, payload }) => {
-          const safeVal = typeof payload?.value === 'number' ? payload.value : Number(payload?.value);
-          const label = Number.isFinite(safeVal) ? safeVal : '';
-          const key = `y-tick-${safeVal}-${x}-${y}`;
-          return (
-            <g transform={`translate(${x},${y})`} key={key}>
-              <text dx={-6} dy={4} textAnchor="end" fill="#64748b" fontSize={12}>
-                {label}
-              </text>
-            </g>
-          );
-        }}
+        tickFormatter={value => (Number.isFinite(value) ? value : '')}
+        tick={{ fill: '#64748b', fontSize: 12 }}
       >
         <Label value="Impact (0-10)" angle={-90} position="insideLeft" offset={10} />
       </YAxis>
@@ -223,6 +204,25 @@ function clusterTasks(tasks: QuadrantVizTask[]): ClusterPoint[] {
     });
     return clusters;
   }, []);
+}
+
+function buildLogTicks(upperBound: number): number[] {
+  const ticks = new Set<number>();
+  const safeUpper = Number.isFinite(upperBound) ? upperBound : LOW_EFFORT_THRESHOLD * 2;
+  ticks.add(1);
+  ticks.add(LOW_EFFORT_THRESHOLD);
+
+  let value = 2;
+  while (value <= safeUpper) {
+    ticks.add(Number(value.toFixed(2)));
+    value *= 2;
+  }
+
+  ticks.add(Math.round(safeUpper));
+
+  return Array.from(ticks)
+    .filter(tick => Number.isFinite(tick) && tick >= 1 && tick <= safeUpper)
+    .sort((a, b) => a - b);
 }
 
 function renderQuadrantAreas() {

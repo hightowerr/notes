@@ -24,7 +24,11 @@ An autonomous document intelligence workspace that ingests meeting notes and res
 
 ## System Overview
 
-**Current Development Phase**: Phase 2 - Mastra Agent Orchestration & Vector Intelligence
+**Current Development Phase**: Phase 18 - Manual Task Creation & Placement
+- Manual task placement with agent-driven status badges and discard/override flows
+- Duplicate detection with conflict warnings and force-create option
+- Outcome change invalidates manual tasks into discard pile (soft delete, 30-day recovery)
+- 1.2x impact boost for manual tasks during reprioritization
 - Vector embeddings with pgvector for semantic search (<500ms)
 - Mastra-powered agent tools (semantic search, dependency detection, clustering)
 - Agent orchestration with tool execution and result parsing

@@ -46,6 +46,8 @@ import type { ReflectionEffect } from '@/lib/services/reflectionAdjuster';
 import { formatTaskId } from '@/app/priorities/utils/formatTaskId';
 import type { ManualOverrideState } from '@/lib/schemas/manualOverride';
 import { calculatePriority } from '@/lib/utils/strategicPriority';
+import type { ManualTaskBadgeStatus } from '@/app/priorities/components/ManualTaskBadge';
+import { DiscardPileSection } from '@/app/priorities/components/DiscardPileSection';
 
 type TaskStatus = 'active' | 'completed' | 'discarded';
 
@@ -188,6 +190,10 @@ type TaskListProps = {
   onTaskMetadataUpdate?: (metadata: Record<string, { title: string }>) => void;
   onActiveIdsChange?: (ids: string[]) => void;
   excludedDocumentIds?: string[];
+  discardActionsRef?: React.MutableRefObject<{
+    overrideDiscard: (taskId: string) => void;
+    confirmDiscard: (taskId: string) => void;
+  } | null>;
 };
 
 const DEFAULT_REMOVAL_REASON =
@@ -414,7 +420,14 @@ function TaskListContent({
   onTaskMetadataUpdate,
   onActiveIdsChange,
   excludedDocumentIds = [],
+  discardActionsRef,
 }: TaskListProps) {
+  console.log('[TaskList][Render]', {
+    planIds: Array.isArray(plan?.ordered_task_ids) ? plan.ordered_task_ids.length : 'missing',
+    annotationsType: typeof plan?.task_annotations,
+    hasStrategicScores: Boolean(strategicScores),
+    hasDiscardRef: Boolean(discardActionsRef?.current),
+  });
   const renderStartRef = useRef<number>(getNowMs());
   const lastRenderLogRef = useRef<number>(0);
   renderStartRef.current = getNowMs();
@@ -425,6 +438,9 @@ function TaskListContent({
     () => (Array.isArray(plan.dependencies) ? plan.dependencies : EMPTY_DEPENDENCIES),
     [plan.dependencies]
   );
+  if (!Array.isArray(plan?.ordered_task_ids)) {
+    console.warn('[TaskList][Debug] plan.ordered_task_ids missing or invalid', plan?.ordered_task_ids);
+  }
 
   // Extract movement reasons from adjusted_plan.diff (T008 requirement)
   const adjustmentReasons = useMemo(() => {
@@ -526,6 +542,15 @@ function TaskListContent({
     });
     onTaskMetadataUpdate(summary);
   }, [taskLookup, onTaskMetadataUpdate]);
+
+  useEffect(() => {
+    console.log('[TaskList][StrategyChange]', {
+      strategy: sortingStrategy,
+      taskCount: sanitizedTaskIds.length,
+      scoredCount: Object.keys(strategicScores ?? {}).length,
+      scoresSample: Object.entries(strategicScores ?? {}).slice(0, 3),
+    });
+  }, [sortingStrategy, sanitizedTaskIds.length, strategicScores]);
   const outcomeKey = outcomeId ?? 'global';
   const safeLockStore = useMemo(
     () => ensureRecord<Record<string, LockedTaskState>>(lockStore),
@@ -623,6 +648,14 @@ function TaskListContent({
   const previousStorageKeyRef = useRef<string | null>(null);
   const didUnmountRef = useRef(false);
   const hiddenDueToReflectionRef = useRef<Set<string>>(new Set());
+  const manualStatusAttemptsRef = useRef<Record<string, number>>({});
+  const manualDropNotifiedRef = useRef<Set<string>>(new Set());
+  const manualTimeoutNotifiedRef = useRef<Set<string>>(new Set());
+  const [manualStatuses, setManualStatuses] = useState<Record<string, ManualTaskBadgeStatus>>({});
+  const [manualStatusDetails, setManualStatusDetails] = useState<
+    Record<string, string | undefined>
+  >({});
+  const [manualEditTask, setManualEditTask] = useState<{ id: string; title: string } | null>(null);
 
   useEffect(() => {
     priorityStateRef.current = priorityState;
@@ -655,6 +688,8 @@ function TaskListContent({
 
   const attachManualTask = useCallback(
     (taskId: string, taskText: string, { flash = true }: { flash?: boolean } = {}) => {
+      const existingLookup = taskLookup[taskId];
+
       setTaskLookup(prev => {
         const existing = prev[taskId];
         const nextEntry = {
@@ -684,8 +719,8 @@ function TaskListContent({
       metadataRef.current[taskId] = {
         id: taskId,
         title: taskText,
-        documentId: previousNode?.documentId ?? existing?.documentId ?? null,
-        documentName: previousNode?.documentName ?? existing?.documentName ?? null,
+        documentId: previousNode?.documentId ?? existingLookup?.documentId ?? null,
+        documentName: previousNode?.documentName ?? existingLookup?.documentName ?? null,
         category: previousNode?.category ?? null,
         rationale: previousNode?.rationale ?? null,
         sourceText: previousNode?.sourceText ?? taskText,
@@ -723,7 +758,7 @@ function TaskListContent({
         flashTask(taskId);
       }
     },
-    [flashTask, sanitizedTaskIds.length, setTaskLookup, updatePriorityState]
+    [flashTask, sanitizedTaskIds.length, setTaskLookup, taskLookup, updatePriorityState]
   );
 
   const triggerAutoPrioritization = useCallback(() => {
@@ -772,6 +807,9 @@ function TaskListContent({
       if (prioritizationTriggered && outcomeId) {
         setPrioritizingTasks(prev => ({ ...prev, [taskId]: Date.now() }));
         triggerAutoPrioritization();
+        setManualStatuses(prev => ({ ...prev, [taskId]: 'analyzing' }));
+        manualStatusAttemptsRef.current[taskId] = 0;
+        setManualStatusDetails(prev => ({ ...prev, [taskId]: undefined }));
       } else if (!prioritizationTriggered) {
         // Show info toast when no re-prioritization is triggered
         toast.info('Task added. Set an outcome to enable auto-prioritization.');
@@ -788,9 +826,33 @@ function TaskListContent({
 
   const handleDuplicateTaskFound = useCallback(
     (taskId: string) => {
+      setIsManualTaskModalOpen(false);
       scrollToTask(taskId);
+      flashTask(taskId);
+      toast.info('Showing existing task');
     },
-    [scrollToTask]
+    [flashTask, scrollToTask]
+  );
+
+  const handleManualTaskUpdated = useCallback(
+    (taskId: string, taskText: string) => {
+      setManualEditTask(null);
+      attachManualTask(taskId, taskText, { flash: true });
+      setManualStatuses(prev => ({ ...prev, [taskId]: 'analyzing' }));
+      manualStatusAttemptsRef.current[taskId] = 0;
+      setManualStatusDetails(prev => ({ ...prev, [taskId]: undefined }));
+    },
+    [attachManualTask]
+  );
+
+  const handleManualModalOpenChange = useCallback(
+    (open: boolean) => {
+      setIsManualTaskModalOpen(open);
+      if (!open) {
+        setManualEditTask(null);
+      }
+    },
+    []
   );
 
   const handleTaskTitleChange = useCallback(
@@ -1755,6 +1817,13 @@ function TaskListContent({
       }
     });
 
+    console.log('[TaskList][DisplayCompute]', {
+      sanitizedCount: sanitizedTaskIds.length,
+      activeCount: Object.keys(priorityState.statuses).length,
+      metadataCount: Object.keys(taskLookup).length,
+      hasScores: Boolean(strategicScores),
+    });
+
     return snapshot;
   }, [
     baseNodeMap,
@@ -2061,6 +2130,125 @@ function TaskListContent({
     onActiveIdsChange(displayedActiveTaskIds);
   }, [onActiveIdsChange, displayedActiveTaskIds]);
 
+  // Ensure manual tasks have a default badge state
+  useEffect(() => {
+    const manualIds = displayedActiveTasks.filter(task => task.isManual).map(task => task.id);
+    if (manualIds.length === 0) {
+      return;
+    }
+    setManualStatuses(prev => {
+      const next = { ...prev };
+      let changed = false;
+      manualIds.forEach(id => {
+        if (!next[id]) {
+          const isAnalyzing = Boolean(prioritizingTasks[id]);
+          next[id] = isAnalyzing ? 'analyzing' : 'manual';
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [displayedActiveTasks, prioritizingTasks]);
+
+  // Poll manual task statuses while analyzing
+  useEffect(() => {
+    const idsToPoll = displayedActiveTasks
+      .filter(task => task.isManual)
+      .map(task => task.id)
+      .filter(id => (manualStatuses[id] ?? 'analyzing') === 'analyzing');
+
+    if (idsToPoll.length === 0) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const interval = setInterval(async () => {
+      await Promise.all(
+        idsToPoll.map(async taskId => {
+          const attempts = manualStatusAttemptsRef.current[taskId] ?? 0;
+          if (attempts >= 20) {
+            setManualStatuses(prev => ({ ...prev, [taskId]: 'error' }));
+            setManualStatusDetails(prev => ({
+              ...prev,
+              [taskId]: 'Analysis taking longer than expected',
+            }));
+            if (!manualTimeoutNotifiedRef.current.has(taskId)) {
+              const title = taskLookup[taskId]?.title ?? taskId;
+              toast.warning(`Analysis taking longer than expected for "${title}"`);
+              manualTimeoutNotifiedRef.current.add(taskId);
+            }
+            return;
+          }
+          manualStatusAttemptsRef.current[taskId] = attempts + 1;
+
+          try {
+            const response = await fetch(`/api/tasks/manual/${taskId}/status`, {
+              signal: controller.signal,
+            });
+            if (!response.ok) {
+              throw new Error(`Status request failed: ${response.status}`);
+            }
+            const payload = await response.json();
+            const nextStatus = payload?.status as string;
+            if (nextStatus === 'prioritized') {
+              setManualStatuses(prev => ({ ...prev, [taskId]: 'manual' }));
+              setManualStatusDetails(prev => ({ ...prev, [taskId]: payload.placement_reason }));
+              manualStatusAttemptsRef.current[taskId] = 0;
+              manualTimeoutNotifiedRef.current.delete(taskId);
+            } else if (nextStatus === 'not_relevant') {
+              setManualStatuses(prev => ({ ...prev, [taskId]: 'error' }));
+              setManualStatusDetails(prev => ({ ...prev, [taskId]: payload.exclusion_reason }));
+              manualStatusAttemptsRef.current[taskId] = 0;
+              manualTimeoutNotifiedRef.current.delete(taskId);
+            } else if (nextStatus === 'conflict') {
+              setManualStatuses(prev => ({ ...prev, [taskId]: 'conflict' }));
+              setManualStatusDetails(prev => ({
+                ...prev,
+                [taskId]:
+                  payload.exclusion_reason ||
+                  payload.placement_reason ||
+                  'Potential duplicate detected',
+              }));
+              manualStatusAttemptsRef.current[taskId] = 0;
+              manualTimeoutNotifiedRef.current.delete(taskId);
+            }
+          } catch (error) {
+            setManualStatuses(prev => ({ ...prev, [taskId]: 'error' }));
+            setManualStatusDetails(prev => ({
+              ...prev,
+              [taskId]: error instanceof Error ? error.message : 'Failed to fetch status',
+            }));
+          }
+        })
+      );
+    }, 1000);
+
+    return () => {
+      controller.abort();
+      clearInterval(interval);
+    };
+  }, [displayedActiveTasks, manualStatuses]);
+
+  // Notify when manual tasks drop significantly after reprioritization
+  useEffect(() => {
+    Object.entries(movementMap).forEach(([taskId, movement]) => {
+      if (!movement || movement.type !== 'down') {
+        return;
+      }
+      const delta = Math.abs(movement.delta ?? 0);
+      const isManual = taskLookup[taskId]?.isManual ?? metadataRef.current[taskId]?.isManual;
+      if (!isManual || delta <= 5) {
+        return;
+      }
+      if (manualDropNotifiedRef.current.has(taskId)) {
+        return;
+      }
+      const title = taskLookup[taskId]?.title ?? metadataRef.current[taskId]?.title ?? taskId;
+      toast.info(`Manual task dropped ${delta} spots: ${title}`);
+      manualDropNotifiedRef.current.add(taskId);
+    });
+  }, [movementMap, taskLookup]);
+
   const [virtualRowHeight, setVirtualRowHeight] = useState(VIRTUALIZATION_ROW_HEIGHT);
   const virtualRowHeightRef = useRef(VIRTUALIZATION_ROW_HEIGHT);
   const virtualListRef = useRef<HTMLDivElement | null>(null);
@@ -2078,6 +2266,16 @@ function TaskListContent({
     : displayedActiveTasks.length;
   const maxStartIndex = Math.max(displayedActiveTasks.length - virtualVisibleCount, 0);
   const clampedStartIndex = virtualizationEnabled ? Math.min(virtualStartIndex, maxStartIndex) : 0;
+
+  if (displayedActiveTasks.length === 0) {
+    console.warn('[TaskList][EmptyAfterSort]', {
+      strategy: sortingStrategy,
+      sanitizedCount: sanitizedTaskIds.length,
+      activeStatuses: priorityState.statuses,
+      scoresSample: Object.keys(strategicScores ?? {}).slice(0, 5),
+      metadataCount: Object.keys(taskLookup).length,
+    });
+  }
   const totalVirtualHeight = displayedActiveTasks.length * safeRowHeight;
   const paddingTop = virtualizationEnabled ? clampedStartIndex * safeRowHeight : 0;
   const visibleTasks = virtualizationEnabled
@@ -2257,6 +2455,8 @@ function TaskListContent({
       checked={task.checked}
       isAiGenerated={task.isAiGenerated}
       isManual={task.isManual}
+      manualStatus={task.isManual ? manualStatuses[task.id] : undefined}
+      manualStatusDetail={task.isManual ? manualStatusDetails[task.id] : undefined}
       isPrioritizing={task.isPrioritizing}
       retryStatus={task.retryStatus ?? undefined}
       isSelected={selectedTaskId === task.id && isDrawerOpen}
@@ -2271,9 +2471,19 @@ function TaskListContent({
       hasManualOverride={task.hasManualOverride ?? false}
       manualOverride={task.manualOverride ?? null}
       baselineScore={task.baselineScore ?? null}
-  onManualOverrideChange={override => applyManualOverride(task.id, override)}
-  inclusionReason={task.inclusionReason}
-  reflectionEffects={task.reflectionEffects}
+      onManualOverrideChange={override => applyManualOverride(task.id, override)}
+      inclusionReason={task.inclusionReason}
+      reflectionEffects={task.reflectionEffects}
+      onEditManual={
+        task.isManual
+          ? () => {
+              setManualEditTask({ id: task.id, title: task.title });
+              setIsManualTaskModalOpen(true);
+            }
+          : undefined
+      }
+      onMarkManualDone={task.isManual ? () => handleMarkManualDone(task.id) : undefined}
+      onDeleteManual={task.isManual ? () => handleDeleteManualTask(task.id) : undefined}
 />
   );
 
@@ -2350,6 +2560,7 @@ function TaskListContent({
         : '';
     return [primarySentence.trim(), themeSentence].filter(Boolean).join(' ');
   }, [normalizedOutcome, plan.synthesis_summary, priorityFocusAreas]);
+  const showPlanNarrative = false;
 
   const completedTasks = useMemo(
     () =>
@@ -2389,6 +2600,15 @@ function TaskListContent({
       recentlyDiscarded,
     ]
   );
+
+  useEffect(() => {
+    console.log('[TaskList][DisplayCompute]', {
+      sanitizedCount: sanitizedTaskIds.length,
+      activeCount: Object.keys(priorityState.statuses).length,
+      metadataCount: Object.keys(taskLookup).length,
+      hasScores: Boolean(strategicScores),
+    });
+  }, [sanitizedTaskIds.length, priorityState.statuses, taskLookup, strategicScores]);
 
   const handleToggleCompleted = useCallback(
     (taskId: string, nextChecked: boolean) => {
@@ -2452,6 +2672,122 @@ function TaskListContent({
       persistDismissedDiscards,
     ]
   );
+
+  const handleDiscardTask = useCallback(
+    (taskId: string) => {
+      updatePriorityState(prev => {
+        if (prev.statuses[taskId] === 'discarded') {
+          return prev;
+        }
+        const next: PriorityState = {
+          statuses: { ...prev.statuses, [taskId]: 'discarded' },
+          reasons: { ...prev.reasons },
+          ranks: { ...prev.ranks },
+        };
+        if (next.reasons[taskId]) {
+          delete next.reasons[taskId];
+        }
+        if (next.ranks[taskId]) {
+          delete next.ranks[taskId];
+        }
+        return next;
+      });
+      setDiscardCandidates(current => current.filter(candidate => candidate.taskId !== taskId));
+      setShowDiscardReview(false);
+      rejectedDiscardIdsRef.current.delete(taskId);
+      persistDismissedDiscards(rejectedDiscardIdsRef.current);
+    },
+    [updatePriorityState, persistDismissedDiscards]
+  );
+
+  useEffect(() => {
+    if (!discardActionsRef) {
+      return;
+    }
+    discardActionsRef.current = {
+      overrideDiscard: handleReturnToActive,
+      confirmDiscard: handleDiscardTask,
+    };
+    return () => {
+      discardActionsRef.current = null;
+    };
+  }, [discardActionsRef, handleReturnToActive, handleDiscardTask]);
+
+  const handleMarkManualDone = useCallback(
+    async (taskId: string) => {
+      console.log('[TaskList][Handlers] handleMarkManualDone invoked', {
+        hasHandleToggleCompleted: typeof handleToggleCompleted,
+      });
+      try {
+        const response = await fetch(`/api/tasks/manual/${taskId}/mark-done`, { method: 'PATCH' });
+        const payload = (await response.json().catch(() => null)) as
+          | { already_marked?: boolean }
+          | null;
+        if (!response.ok && response.status !== 404) {
+          throw new Error(`Failed to mark done (${response.status})`);
+        }
+        handleToggleCompleted(taskId, true);
+        toast.success(
+          payload?.already_marked || response.status === 404
+            ? 'Task already marked done'
+            : 'Task marked as done'
+        );
+      } catch (error) {
+        console.error('[TaskList] Failed to mark manual task done', error);
+        toast.error('Could not mark task as done');
+      }
+    },
+    [handleToggleCompleted]
+  );
+
+  const handleDeleteManualTask = useCallback(async (taskId: string) => {
+    console.log('[TaskList][Handlers] handleDeleteManualTask invoked', {
+      hasUpdatePriorityState: typeof updatePriorityState,
+    });
+    try {
+      const response = await fetch(`/api/tasks/manual/${taskId}/delete`, { method: 'DELETE' });
+      const payload = (await response.json().catch(() => null)) as
+        | { already_removed?: boolean }
+        | null;
+      if (!response.ok && response.status !== 404) {
+        throw new Error(`Failed to delete task (${response.status})`);
+      }
+      updatePriorityState(prev => {
+        const next: PriorityState = {
+          statuses: { ...prev.statuses },
+          reasons: { ...prev.reasons },
+          ranks: { ...prev.ranks },
+        };
+        delete next.statuses[taskId];
+        delete next.reasons[taskId];
+        delete next.ranks[taskId];
+        return next;
+      });
+      setTaskLookup(prev => {
+        const next = { ...prev };
+        delete next[taskId];
+        return next;
+      });
+      setManualStatuses(prev => {
+        const next = { ...prev };
+        delete next[taskId];
+        return next;
+      });
+      setManualStatusDetails(prev => {
+        const next = { ...prev };
+        delete next[taskId];
+        return next;
+      });
+      toast.success(
+        payload?.already_removed || response.status === 404
+          ? 'Task already removed; cleared from list'
+          : 'Task deleted (recoverable for 30 days)'
+      );
+    } catch (error) {
+      console.error('[TaskList] Failed to delete manual task', error);
+      toast.error('Could not delete task');
+    }
+  }, [updatePriorityState, setTaskLookup]);
 
   const handleToggleLock = useCallback(
     (taskId: string, order: number) => {
@@ -2520,7 +2856,7 @@ function TaskListContent({
           </div>
         </div>
 
-        {planNarrative && (
+        {showPlanNarrative && planNarrative && (
           <div className="rounded-lg border border-border/70 bg-bg-layer-3/70 p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Why these tasks are on top
@@ -2678,21 +3014,24 @@ function TaskListContent({
           }
           handleReturnToActive(selectedTaskId);
         }}
-        onNavigateToTask={scrollToTask}
-        getTaskTitle={getTaskTitle}
-        outcomeStatement={outcomeStatement ?? null}
-        isLocked={selectedIsLocked}
-        onRemoveDependency={handleRemoveDependency}
+      onNavigateToTask={scrollToTask}
+      getTaskTitle={getTaskTitle}
+      outcomeStatement={outcomeStatement ?? null}
+      isLocked={selectedIsLocked}
+      onRemoveDependency={handleRemoveDependency}
       onAddDependency={handleAddDependency}
       taskOptions={taskOptions}
       />
 
       <ManualTaskModal
         open={isManualTaskModalOpen}
-        onOpenChange={setIsManualTaskModalOpen}
+        onOpenChange={handleManualModalOpenChange}
         outcomeId={outcomeId}
         onTaskCreated={handleManualTaskCreated}
         onDuplicateTaskFound={handleDuplicateTaskFound}
+        initialTaskId={manualEditTask?.id}
+        initialTaskText={manualEditTask?.title}
+        onTaskUpdated={payload => handleManualTaskUpdated(payload.taskId, payload.taskText)}
       />
 
       <DiscardReviewModal
@@ -2869,7 +3208,7 @@ class TaskListErrorBoundary extends Component<TaskListErrorBoundaryProps, TaskLi
   }
 
   componentDidCatch(error: unknown, errorInfo: unknown) {
-    console.error('[TaskList] Error caught by boundary', error, errorInfo);
+    console.error('[TaskList][Boundary] Error caught by boundary', error, errorInfo);
     toast.error('Task list failed to render. Please refresh or rerun prioritization.');
   }
 

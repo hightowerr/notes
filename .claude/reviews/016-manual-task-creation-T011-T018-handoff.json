@@ -1,0 +1,63 @@
+{
+  "review_file": ".claude/reviews/016-manual-task-creation-T011-T018-discard-pile-review.md",
+  "status": "partial_pass",
+  "critical_issues": 2,
+  "high_issues": 4,
+  "medium_issues": 4,
+  "low_issues": 3,
+  "proceed_to": "conditional",
+  "conditions": [
+    "Create integration test: __tests__/integration/discard-override-flow.test.ts",
+    "Create integration test: __tests__/integration/discard-pile-ui.test.tsx",
+    "Implement status polling in priorities page (T010 from Phase 2)",
+    "Fix outcome_id filter in discard-pile endpoint (move to SQL query)"
+  ],
+  "fixes_required": [
+    "CRITICAL: Create integration test for discard override flow (validates end-to-end user journey)",
+    "CRITICAL: Create integration test for discard pile UI (verifies component rendering and state)",
+    "HIGH: Implement status polling in priorities page for overridden tasks",
+    "HIGH: Clarify DiscardPileSection integration location (TaskList.tsx vs page.tsx)",
+    "HIGH: Fix outcome_id filter in discard-pile endpoint (client-side to SQL)",
+    "MEDIUM: Fix user justification storage (use dedicated field or metadata JSON)",
+    "MEDIUM: Remove or implement confirm-discard endpoint (Phase 8 scope conflict)"
+  ],
+  "completion_percentage": 75,
+  "vertical_slice_complete": false,
+  "tasks_status": {
+    "T011": "pass",
+    "T012": "pass",
+    "T013": "pass",
+    "T014": "partial",
+    "T015": "pass",
+    "T016": "partial",
+    "T017": "unclear",
+    "T018": "partial"
+  },
+  "strengths": [
+    "Clean service layer with well-structured error classes",
+    "Comprehensive contract tests for both endpoints",
+    "Proper error handling with custom error types",
+    "Design system compliance (no borders, shadows, accessible)",
+    "Optimistic UI implementation in component",
+    "Type safety throughout codebase"
+  ],
+  "next_steps": {
+    "immediate": [
+      "Fix outcome_id filter in discard-pile endpoint (5 min)",
+      "Create discard-override-flow integration test (30 min)",
+      "Create discard-pile-ui integration test (30 min)"
+    ],
+    "before_complete": [
+      "Implement status polling in priorities page (20 min from T010)",
+      "Clarify integration location and update docs accordingly",
+      "Fix user justification storage conflict"
+    ],
+    "optional": [
+      "Replace window.confirm with Dialog component",
+      "Implement confirm-discard endpoint if keeping functionality"
+    ]
+  },
+  "estimated_fix_time": "2 hours",
+  "test_runner_ready": false,
+  "reason": "Integration tests missing, vertical slice incomplete due to missing polling logic"
+}

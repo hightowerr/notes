@@ -1,0 +1,55 @@
+{
+  "review_file": ".claude/reviews/016-manual-task-creation-T001-T003-task-definition-review.md",
+  "status": "needs_revision",
+  "critical_issues": 0,
+  "high_issues": 1,
+  "medium_issues": 2,
+  "low_issues": 1,
+  "blocking_issue": "T001 violates vertical slice principle (infrastructure-only task)",
+  "recommended_action": "Merge T001 into T002-T003 as implicit prerequisite setup",
+  "proceed_to": "task_restructuring_required",
+  "estimated_fix_time": "15-30 minutes (documentation updates only)",
+  "issues_summary": {
+    "high": [
+      {
+        "task": "T001",
+        "issue": "Violates vertical slice principle - pure infrastructure setup",
+        "fix": "Merge into T002-T003 as prerequisite, not standalone task"
+      }
+    ],
+    "medium": [
+      {
+        "task": "T002-T003",
+        "issue": "TDD workflow not explicitly enforced with RED phase checkpoints",
+        "fix": "Add explicit workflow steps: Write → Run → Verify RED → Mark complete"
+      },
+      {
+        "task": "T003",
+        "issue": "Integration test implementation details ambiguous (polling, mocking, cleanup)",
+        "fix": "Specify polling pattern, mock strategy, test isolation requirements"
+      }
+    ],
+    "low": [
+      {
+        "task": "T002",
+        "issue": "Contract reference lacks HTTP method and schema details",
+        "fix": "Expand to: 'GET /api/tasks/manual/{id}/status - ManualTaskStatusResponse schema'"
+      }
+    ]
+  },
+  "strengths": [
+    "Clear phase separation (Database → Tests → Implementation)",
+    "TDD approach with tests before implementation",
+    "Comprehensive test coverage planned",
+    "Schema perfectly aligned with data-model.md",
+    "Contract references provided for validation",
+    "User story mapping ([US1]) clear"
+  ],
+  "next_actions": [
+    "1. Restructure T001 as implicit prerequisite (not standalone task)",
+    "2. Add TDD workflow enforcement steps to T002-T003",
+    "3. Specify integration test implementation details in T003",
+    "4. Update dependency declarations (T002-T003 depend on T001)",
+    "5. Add explicit completion criteria to each task"
+  ]
+}

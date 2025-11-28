@@ -93,6 +93,7 @@ const validateFileBeforeUpload = (file: File): { valid: boolean; error?: string 
 export default function Home() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const showReflections = false;
   const hasHandledOpenRef = useRef(false);
   const [files, setFiles] = useState<UploadedFileInfo[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -135,7 +136,9 @@ export default function Home() {
   }, [router, searchParams]);
 
   // Reflection panel keyboard shortcut (Cmd+R / Ctrl+R)
-  useReflectionShortcut(() => setReflectionPanelOpen(prev => !prev));
+  if (showReflections) {
+    useReflectionShortcut(() => setReflectionPanelOpen(prev => !prev));
+  }
 
   // Status polling effect
   useEffect(() => {
@@ -491,15 +494,17 @@ export default function Home() {
         actions={
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
             <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={() => setReflectionPanelOpen(true)}
-                className="gap-2 h-11 sm:h-9 flex-1 sm:flex-initial"
-                title="Reflections (Cmd+Shift+R / Ctrl+Shift+R)"
-              >
-                <MessageSquare className="h-4 w-4" />
-                <span className="text-sm">Reflections</span>
-              </Button>
+              {showReflections && (
+                <Button
+                  variant="outline"
+                  onClick={() => setReflectionPanelOpen(true)}
+                  className="gap-2 h-11 sm:h-9 flex-1 sm:flex-initial"
+                  title="Reflections (Cmd+Shift+R / Ctrl+Shift+R)"
+                >
+                  <MessageSquare className="h-4 w-4" />
+                  <span className="text-sm">Reflections</span>
+                </Button>
+              )}
               <Button
                 variant="outline"
                 onClick={() => setOutcomeModalOpen(true)}
@@ -691,24 +696,26 @@ export default function Home() {
       </footer>
 
       {/* Reflection Panel (keyboard shortcut: Cmd+Shift+R / Ctrl+Shift+R) */}
-      <ReflectionPanel
-        isOpen={reflectionPanelOpen}
-        onOpenChange={setReflectionPanelOpen}
-        onReflectionAdded={(result: ReflectionAddedResult) => {
-          const reflectionId = result?.reflection?.id;
-          toast.success('Saved! View effect in Priorities →', {
-            action: {
-              label: 'Open Priorities',
-              onClick: () => {
-                const url = reflectionId
-                  ? `/priorities?highlight_reflection=${encodeURIComponent(reflectionId)}`
-                  : '/priorities';
-                window.location.href = url;
+      {showReflections && (
+        <ReflectionPanel
+          isOpen={reflectionPanelOpen}
+          onOpenChange={setReflectionPanelOpen}
+          onReflectionAdded={(result: ReflectionAddedResult) => {
+            const reflectionId = result?.reflection?.id;
+            toast.success('Saved! View effect in Priorities →', {
+              action: {
+                label: 'Open Priorities',
+                onClick: () => {
+                  const url = reflectionId
+                    ? `/priorities?highlight_reflection=${encodeURIComponent(reflectionId)}`
+                    : '/priorities';
+                  window.location.href = url;
+                },
               },
-            },
-          });
-        }}
-      />
+            });
+          }}
+        />
+      )}
       </div>
     </>
   );

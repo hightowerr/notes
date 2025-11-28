@@ -45,7 +45,7 @@ Build a **Manual Task Creation** system that:
 3. **Places** task in priority list OR discard pile based on agent analysis
 4. **Distinguishes** manual tasks visually from document-derived tasks
 5. **Respects** goal changes (auto-invalidate manual tasks when goal changes)
-6. **Persists** manual tasks through reprioritization cycles
+6. **Persists** manual tcasks through reprioritization cycles
 
 ### Key Innovation: Agent-Driven Placement
 

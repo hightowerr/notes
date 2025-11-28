@@ -55,6 +55,10 @@ pnpm test:run __tests__/integration/     # Integration tests
 npx tsx scripts/test-mastra.ts           # Validate Mastra tool registry
 npx tsx scripts/check-database-tasks.ts  # Verify task embeddings
 
+# Manual Task Testing
+npx tsx scripts/test-manual-task-placement.ts  # Test manual task placement logic
+npx tsx scripts/verify-duplicate-detection.ts  # Verify embedding similarity for duplicates
+
 # Feature workflow (slash commands)
 /specify "feature description"  # Create specification
 /plan                           # Generate implementation plan
@@ -126,17 +130,26 @@ Google Drive
 - `services/resultParser.ts` - Validates agent JSON, repairs partial traces
 - `tools/` - semanticSearch, detectDependencies, clusterBySimilarity, suggestBridgingTasks
 
+**Manual Task APIs** (`app/api/tasks/manual/`):
+- `POST /api/tasks/manual` - Create manual task with duplicate detection
+- `PUT /api/tasks/manual/[id]` - Edit manual task (triggers re-analysis)
+- `DELETE /api/tasks/manual/[id]` - Soft delete with 30-day recovery
+- `POST /api/tasks/manual/[id]/mark-done` - Move to completed tasks
+- `GET /api/tasks/discard-pile` - Fetch discarded tasks for review
+- `POST /api/tasks/discard-pile/override` - Override discard decision
+
 **Main Pages:**
 - `app/page.tsx` - Upload UI with drag-and-drop
 - `app/dashboard/page.tsx` - Document grid, filtering, export
-- `app/priorities/page.tsx` - Agent-prioritized tasks with reasoning and source document management
+- `app/priorities/page.tsx` - Agent-prioritized tasks with reasoning, source management, **manual task creation** **[UPDATED]**
 
 **UI Library:** shadcn/ui (`npx shadcn@latest add <component>`)
 
 **Current Development Phase:**
-- **Status**: Phase 2 - Mastra Tool Registry & Agent Orchestration
-- **Focus**: Vector embeddings, agent tools, task prioritization
-- **Active Specs**: See `specs/` directories and `IMPLEMENTATION_STATUS.md` for details
+- **Status**: Phase 18 - Manual Task Creation (Branch: 016-manual-task-creation)
+- **Focus**: User-created tasks with agent-driven placement, discard pile, duplicate detection
+- **Active Specs**: `specs/016-manual-task-creation/` - Manual task workflow with semantic search integration
+- **Previous Phases**: Mastra tool registry (complete), vector embeddings (complete), reflection intelligence (complete)
 
 ## Database
 
@@ -149,6 +162,7 @@ Google Drive
 - `agent_sessions` - Agent execution traces, baseline_document_ids for change tracking
 - `task_relationships` - Dependency graph (prerequisite/blocks/related) (migration 010)
 - `reflection_intents` - Reflection interpretation and sentiment (migration 027)
+- **`manual_tasks`** - User-created tasks with agent placement, status tracking (migration 029) **[NEW]**
 
 **Storage:** `notes/` bucket (original files, hash-based naming)
 **Migrations:** `supabase/migrations/`
@@ -191,6 +205,21 @@ Google Drive
 **pdf-parse errors after fresh install**
 - Run `pnpm install` to trigger postinstall patch
 - Verify `node_modules/.pnpm/pdf-parse@1.1.1/node_modules/pdf-parse/index.js` line 6 has `isDebugMode = false`
+
+**Manual task creation blocked**
+- Check `OPENAI_API_KEY` is set for embedding generation
+- Verify embeddings service operational: `npx tsx scripts/check-database-tasks.ts`
+- Check agent_sessions table for placement analysis errors
+
+**Duplicate detection not working**
+- Verify task_embeddings table has manual task embeddings
+- Check similarity threshold (default 0.85) in `lib/services/manualTaskService.ts`
+- Run: `SELECT COUNT(*) FROM task_embeddings WHERE task_id LIKE 'manual-%'`
+
+**Tasks stuck in "Analyzing..." state**
+- Check agent prioritization endpoint: `POST /api/agent/prioritize`
+- Review agent_sessions for failed placement analysis
+- Verify outcome is active: `SELECT * FROM user_outcomes WHERE is_active = true`
 
 ## Configuration
 
@@ -249,6 +278,12 @@ setTimeout(() => { const values = form.getValues(); saveDraft(values); }, 0);
 ```
 
 **Full patterns:** `.claude/standards.md` (Common Development Patterns section)
+
+**Manual Task Testing Pattern**
+- **Contract tests**: Validate API schema, status codes, error handling
+- **Integration tests**: Test full workflow (create → analyze → place → manage)
+- **Manual verification**: Test UI flows in `specs/016-manual-task-creation/quickstart.md`
+- **Duplicate detection**: Requires real embeddings, tested via integration suite
 
 ## Performance Targets
 

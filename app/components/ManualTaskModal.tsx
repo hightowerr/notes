@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { ConflictWarningModal } from './ConflictWarningModal';
 
 const DRAFT_STORAGE_KEY = 'manual-task-draft';
 const AUTOSAVE_DELAY_MS = 500;
@@ -36,6 +37,9 @@ export type ManualTaskModalProps = {
   outcomeId?: string | null;
   onTaskCreated?: (task: ManualTaskCreatedPayload) => void;
   onDuplicateTaskFound?: (taskId: string) => void; // Added for T010
+  initialTaskId?: string;
+  initialTaskText?: string;
+  onTaskUpdated?: (task: ManualTaskCreatedPayload) => void;
 };
 
 export function ManualTaskModal({
@@ -44,12 +48,16 @@ export function ManualTaskModal({
   outcomeId,
   onTaskCreated,
   onDuplicateTaskFound,
+  initialTaskId,
+  initialTaskText,
+  onTaskUpdated,
 }: ManualTaskModalProps) {
   const [taskText, setTaskText] = useState('');
   const [estimatedHours, setEstimatedHours] = useState<number>(DEFAULT_HOURS);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [duplicateTaskInfo, setDuplicateTaskInfo] = useState<DuplicateTaskInfo | null>(null); // Added for T010
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showConflictModal, setShowConflictModal] = useState(false);
 
   const trimmedText = taskText.trim();
   const characterCount = trimmedText.length;
@@ -78,11 +86,11 @@ export function ManualTaskModal({
     (nextOpen: boolean) => {
       if (!nextOpen) {
         setIsSubmitting(false);
-        setErrorMessage(null);
-      }
-      onOpenChange(nextOpen);
-    },
-    [onOpenChange]
+      setErrorMessage(null);
+    }
+    onOpenChange(nextOpen);
+  },
+  [onOpenChange]
   );
 
   const handleSubmit = useCallback(async () => {
@@ -94,8 +102,12 @@ export function ManualTaskModal({
       setIsSubmitting(true);
       setErrorMessage(null);
 
-      const response = await fetch('/api/tasks/manual', {
-        method: 'POST',
+      const isEditing = Boolean(initialTaskId);
+      const url = isEditing ? `/api/tasks/${initialTaskId}` : '/api/tasks/manual';
+      const method = isEditing ? 'PATCH' : 'POST';
+
+      const response = await fetch(url, {
+        method,
         headers: {
           'Content-Type': 'application/json',
         },
@@ -110,16 +122,18 @@ export function ManualTaskModal({
 
       if (!response.ok) {
         if (payload?.code === 'DUPLICATE_TASK' && payload?.existing_task) {
-          // Fallback priority: task_text → task_id → generic message
           const existingTitle =
             payload.existing_task.task_text ?? payload.existing_task.task_id ?? 'that task';
-          setErrorMessage(`Similar task already exists: ${existingTitle} (similarity: ${(payload.existing_task.similarity * 100).toFixed(0)}%)`);
           setDuplicateTaskInfo({
             taskId: payload.existing_task.task_id,
             taskText: existingTitle,
             similarity: payload.existing_task.similarity || 0,
           });
-        } else if (payload?.error) {
+          setShowConflictModal(true);
+          setIsSubmitting(false);
+          return;
+        }
+        if (payload?.error) {
           setErrorMessage(payload.error);
         } else {
           setErrorMessage('Unable to add task. Please try again.');
@@ -128,15 +142,25 @@ export function ManualTaskModal({
         return;
       }
 
-      toast.success('Task added successfully');
       const prioritizationTriggered = Boolean(payload?.prioritization_triggered);
-      clearDraft();
-      onTaskCreated?.({
-        taskId: payload.task_id,
-        taskText: trimmedText,
-        estimatedHours,
-        prioritizationTriggered,
-      });
+      if (isEditing) {
+        toast.success('Task updated');
+        onTaskUpdated?.({
+          taskId: initialTaskId!,
+          taskText: trimmedText,
+          estimatedHours,
+          prioritizationTriggered,
+        });
+      } else {
+        toast.success('Task added successfully');
+        clearDraft();
+        onTaskCreated?.({
+          taskId: payload.task_id,
+          taskText: trimmedText,
+          estimatedHours,
+          prioritizationTriggered,
+        });
+      }
       resetForm();
       handleClose(false);
     } catch (error) {
@@ -161,16 +185,15 @@ export function ManualTaskModal({
     }
 
     const timer = window.setTimeout(() => {
-      const hasContent =
-        trimmedText.length > 0 || estimatedHours !== DEFAULT_HOURS;
-      if (hasContent) {
+      const hasContent = trimmedText.length > 0 || estimatedHours !== DEFAULT_HOURS;
+      if (hasContent && !initialTaskId) {
         const snapshot = {
           taskText,
           estimatedHours,
           timestamp: Date.now(),
         };
         window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(snapshot));
-      } else {
+      } else if (!initialTaskId) {
         window.localStorage.removeItem(DRAFT_STORAGE_KEY);
       }
     }, AUTOSAVE_DELAY_MS);
@@ -178,10 +201,15 @@ export function ManualTaskModal({
     return () => {
       window.clearTimeout(timer);
     };
-  }, [estimatedHours, taskText, trimmedText]);
+  }, [estimatedHours, initialTaskId, taskText, trimmedText]);
 
   useEffect(() => {
     if (!open || typeof window === 'undefined') {
+      return;
+    }
+
+    if (initialTaskId && initialTaskText) {
+      setTaskText(initialTaskText);
       return;
     }
 
@@ -205,13 +233,13 @@ export function ManualTaskModal({
       console.warn('[ManualTaskModal] Failed to restore draft', error);
       window.localStorage.removeItem(DRAFT_STORAGE_KEY);
     }
-  }, [open]);
+  }, [initialTaskId, initialTaskText, open]);
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-lg space-y-6 sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Add Task</DialogTitle>
+          <DialogTitle>{initialTaskId ? 'Edit Task' : 'Add Task'}</DialogTitle>
         </DialogHeader>
 
         <div className="flex flex-col gap-5">
@@ -281,6 +309,55 @@ export function ManualTaskModal({
           </Button>
         </div>
       </DialogContent>
+
+      <ConflictWarningModal
+        open={showConflictModal}
+        onClose={() => {
+          setShowConflictModal(false);
+          setErrorMessage(null);
+        }}
+        existingTaskText={duplicateTaskInfo?.taskText ?? 'Existing task'}
+        similarity={duplicateTaskInfo?.similarity ?? 0.85}
+        onEditDescription={() => {
+          setShowConflictModal(false);
+        }}
+        onForceCreate={async () => {
+          try {
+            setIsSubmitting(true);
+            setShowConflictModal(false);
+            const url = new URL('/api/tasks/manual', window.location.origin);
+            url.searchParams.set('force_create', 'true');
+            const response = await fetch(url.toString(), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                task_text: taskText.trim(),
+                estimated_hours: estimatedHours,
+                outcome_id: outcomeId ?? undefined,
+              }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              throw new Error(payload?.error || 'Failed to create task');
+            }
+            toast.success('Task added successfully');
+            const prioritizationTriggered = Boolean(payload?.prioritization_triggered);
+            onTaskCreated?.({
+              taskId: payload.task_id,
+              taskText: taskText.trim(),
+              estimatedHours,
+              prioritizationTriggered,
+            });
+            resetForm();
+            handleClose(false);
+          } catch (error) {
+            console.error('[ManualTaskModal] Force create failed', error);
+            toast.error(error instanceof Error ? error.message : 'Failed to create task');
+          } finally {
+            setIsSubmitting(false);
+          }
+        }}
+      />
     </Dialog>
   );
 }

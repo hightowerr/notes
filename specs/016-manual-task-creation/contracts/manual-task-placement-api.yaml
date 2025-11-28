@@ -1,0 +1,294 @@
+openapi: 3.0.0
+info:
+  title: Manual Task Placement API
+  description: Agent-driven placement and discard pile management for manual tasks
+  version: 1.0.0
+
+paths:
+  /api/tasks/manual/{id}/status:
+    get:
+      summary: Get manual task analysis status
+      description: Poll for agent placement analysis results
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Task ID (from manual_tasks.task_id)
+      responses:
+        '200':
+          description: Current analysis status
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/AnalyzingStatus'
+                  - $ref: '#/components/schemas/PrioritizedStatus'
+                  - $ref: '#/components/schemas/NotRelevantStatus'
+                  - $ref: '#/components/schemas/ConflictStatus'
+              examples:
+                analyzing:
+                  value:
+                    status: "analyzing"
+                    message: "Agent analysis in progress"
+                prioritized:
+                  value:
+                    status: "prioritized"
+                    agent_rank: 2
+                    placement_reason: "Directly enables payment feature work"
+                not_relevant:
+                  value:
+                    status: "not_relevant"
+                    exclusion_reason: "No impact on payment conversion metric"
+                conflict:
+                  value:
+                    status: "conflict"
+                    duplicate_task_id: "task-abc-123"
+                    similarity_score: 0.92
+                    existing_task_text: "Follow up with Sarah about Q4 budget allocation"
+        '404':
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/tasks/manual/{id}/override:
+    post:
+      summary: Override discard decision
+      description: Re-analyze a discarded manual task (user disagrees with agent)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_justification:
+                  type: string
+                  description: Optional reason why user disagrees
+                  maxLength: 500
+            example:
+              user_justification: "This is critical for Q4 planning"
+      responses:
+        '200':
+          description: Override accepted, re-analysis started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [analyzing]
+                  message:
+                    type: string
+              example:
+                status: "analyzing"
+                message: "Task sent back for re-analysis"
+        '400':
+          description: Task not in discard pile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Task is not in discard pile"
+                code: "INVALID_STATE"
+        '404':
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/tasks/discard-pile:
+    get:
+      summary: Get all discarded manual tasks
+      description: Fetch tasks marked "not relevant" by agent
+      parameters:
+        - name: outcome_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Filter by specific outcome (optional)
+      responses:
+        '200':
+          description: List of discarded tasks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DiscardPileTask'
+              example:
+                tasks:
+                  - task_id: "task-123"
+                    task_text: "Reorganize Notion workspace"
+                    exclusion_reason: "No impact on payment conversion metric"
+                    created_at: "2025-01-26T10:30:00Z"
+                    is_manual: true
+                  - task_id: "task-456"
+                    task_text: "Update team wiki documentation"
+                    exclusion_reason: "Administrative overhead"
+                    created_at: "2025-01-26T09:15:00Z"
+                    is_manual: true
+
+  /api/tasks/manual/{id}/confirm-discard:
+    post:
+      summary: Permanently discard manual task
+      description: Soft delete a manual task from discard pile (user agrees with agent)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Task soft-deleted (30-day recovery window)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  deleted_at:
+                    type: string
+                    format: date-time
+              example:
+                success: true
+                message: "Task discarded (recoverable for 30 days)"
+                deleted_at: "2025-01-26T11:45:00Z"
+        '404':
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/outcomes/{id}/invalidate-manual-tasks:
+    post:
+      summary: Invalidate manual tasks on goal change
+      description: Move all manual tasks to discard pile when outcome changes
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Outcome ID being updated
+      responses:
+        '200':
+          description: Manual tasks invalidated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  invalidated_count:
+                    type: integer
+                  message:
+                    type: string
+              example:
+                invalidated_count: 3
+                message: "3 manual tasks moved to discard pile"
+        '404':
+          description: Outcome not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+    AnalyzingStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [analyzing]
+        message:
+          type: string
+
+    PrioritizedStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [prioritized]
+        agent_rank:
+          type: integer
+          minimum: 1
+          description: 1-indexed position in priority list
+        placement_reason:
+          type: string
+          description: Why agent included this task
+
+    NotRelevantStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [not_relevant]
+        exclusion_reason:
+          type: string
+          description: Why agent rejected this task
+
+    ConflictStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [conflict]
+        duplicate_task_id:
+          type: string
+          description: ID of similar existing task
+        similarity_score:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: Cosine similarity (>0.85 = duplicate)
+        existing_task_text:
+          type: string
+          description: Text of duplicate task for user review
+
+    DiscardPileTask:
+      type: object
+      properties:
+        task_id:
+          type: string
+        task_text:
+          type: string
+        exclusion_reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        is_manual:
+          type: boolean
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        code:
+          type: string

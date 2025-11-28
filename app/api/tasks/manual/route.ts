@@ -7,6 +7,7 @@ import {
   DuplicateManualTaskError,
   ManualTaskServiceError,
 } from '@/lib/services/manualTaskService';
+import { analyzeManualTask } from '@/lib/services/manualTaskPlacement';
 
 export async function POST(request: Request) {
   try {
@@ -55,7 +56,25 @@ export async function POST(request: Request) {
       }
     }
 
-    const result = await createManualTask(parsed.data);
+    const forceCreate =
+      typeof payload?.force_create === 'string'
+        ? payload.force_create === 'true'
+        : payload?.force_create === true;
+
+    const result = await createManualTask({ ...parsed.data, force_create: forceCreate });
+
+    if (hasActiveOutcome && (result.outcomeId ?? outcome_id)) {
+      console.info('[ManualTask API] Triggering background analysis', {
+        taskId: result.taskId,
+        outcomeId: result.outcomeId ?? outcome_id,
+        hasActiveOutcome,
+      });
+      triggerBackgroundAnalysis({
+        taskId: result.taskId,
+        taskText: parsed.data.task_text,
+        outcomeId: result.outcomeId ?? outcome_id,
+      });
+    }
 
     return NextResponse.json(
       {
@@ -98,4 +117,26 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
+}
+
+async function triggerBackgroundAnalysis(params: {
+  taskId: string;
+  taskText: string;
+  outcomeId?: string;
+}) {
+  if (!params.outcomeId) {
+    console.warn('[ManualTask API] Skipping background analysis, missing outcomeId', {
+      taskId: params.taskId,
+    });
+    return;
+  }
+
+  // Fire-and-forget background analysis
+  void analyzeManualTask({
+    taskId: params.taskId,
+    taskText: params.taskText,
+    outcomeId: params.outcomeId,
+  }).catch(err => {
+    console.error('[ManualTask API] Background analysis failed', err);
+  });
 }

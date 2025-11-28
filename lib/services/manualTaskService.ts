@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+
 import type { ManualTaskInput, TaskEditInput } from '@/lib/schemas/manualTaskSchemas';
 import { manualTaskInputSchema, taskEditInputSchema } from '@/lib/schemas/manualTaskSchemas';
 import { generateEmbedding, generateTaskId } from '@/lib/services/embeddingService';
@@ -9,7 +11,7 @@ import embeddingCache from '@/lib/services/embeddingCache';
 const supabase = getSupabaseAdminClient();
 
 const DEFAULT_USER_ID = 'default-user';
-const DUPLICATE_THRESHOLD = 0.9;
+const DUPLICATE_THRESHOLD = 0.85;
 const EMBEDDING_DIFF_THRESHOLD = 0.1;
 
 export class ManualTaskServiceError extends Error {
@@ -49,6 +51,7 @@ export class ManualTaskPermissionError extends ManualTaskServiceError {
 
 type CreateManualTaskParams = ManualTaskInput & {
   created_by?: string;
+  force_create?: boolean;
 };
 
 type ManualTaskInsertResult = {
@@ -56,6 +59,7 @@ type ManualTaskInsertResult = {
   prioritizationTriggered: boolean;
   estimatedHours: number;
   taskText: string;
+  outcomeId?: string;
 };
 
 type UploadedFileRow = {
@@ -86,6 +90,17 @@ type TaskUpdateResult = {
   updatedAt: string;
   embeddingRegenerated: boolean;
 };
+
+function buildFallbackEmbedding(taskText: string): number[] {
+  // Deterministic pseudo-embedding to preserve shape when OpenAI is unavailable.
+  const seed = crypto.createHash('sha256').update(taskText).digest();
+  const values: number[] = new Array(1536);
+  for (let i = 0; i < 1536; i += 1) {
+    const byte = seed[i % seed.length];
+    values[i] = (byte / 255) * 2 - 1; // Normalize to [-1, 1]
+  }
+  return values;
+}
 
 async function ensureManualFile(userId: string): Promise<{ fileId: string; slug: string }> {
   const slug = `manual-tasks-${userId}`;
@@ -201,17 +216,60 @@ export async function createManualTask(params: CreateManualTaskParams): Promise<
   const hours = estimated_hours ?? 40;
 
   const documentId = await ensureManualDocument(createdBy);
-  const embedding = await generateEmbedding(task_text);
-
-  const similarTasks = await searchSimilarTasks(embedding, DUPLICATE_THRESHOLD, 5);
-  const duplicate = detectDuplicate(similarTasks);
-  if (duplicate) {
-    throw new DuplicateManualTaskError(duplicate);
-  }
-
   const taskId = generateTaskId(task_text, documentId);
 
-  const { error: insertError } = await supabase.from('task_embeddings').insert({
+  // Hard guard against duplicate task_id collisions (even when embeddings fallback is used)
+  const { data: existingEmbedding, error: existingEmbeddingError } = await supabase
+    .from('task_embeddings')
+    .select('task_id, task_text, document_id')
+    .eq('task_id', taskId)
+    .maybeSingle();
+
+  if (existingEmbeddingError) {
+    throw new ManualTaskServiceError(
+      existingEmbeddingError.message ?? 'Failed to check manual task uniqueness'
+    );
+  }
+
+  if (existingEmbedding && !params.force_create) {
+    throw new DuplicateManualTaskError({
+      task_id: existingEmbedding.task_id,
+      task_text: existingEmbedding.task_text,
+      document_id: existingEmbedding.document_id,
+      similarity: 1,
+    });
+  }
+
+  let embedding: number[];
+  let usingFallbackEmbedding = false;
+  try {
+    embedding = await generateEmbedding(task_text);
+  } catch (error) {
+    usingFallbackEmbedding = true;
+    const message = error instanceof Error ? error.message : 'Unknown embedding error';
+    console.warn('[ManualTaskService] Falling back to deterministic embedding', { message });
+    embedding = buildFallbackEmbedding(task_text);
+  }
+
+  if (!usingFallbackEmbedding) {
+    const similarTasks = await searchSimilarTasks(embedding, DUPLICATE_THRESHOLD, 5);
+    const duplicate = detectDuplicate(similarTasks);
+    if (duplicate && !params.force_create) {
+      // Record conflict in manual_tasks for visibility
+      const conflictPayload = {
+        task_id: taskId,
+        status: 'conflict',
+        duplicate_task_id: duplicate.task_id,
+        similarity_score: duplicate.similarity,
+        exclusion_reason: 'Potential duplicate task',
+      };
+      await supabase.from('manual_tasks').upsert(conflictPayload, { onConflict: 'task_id' });
+
+      throw new DuplicateManualTaskError(duplicate);
+    }
+  }
+
+  const { error: insertError } = await supabase.from('task_embeddings').upsert({
     task_id: taskId,
     task_text,
     document_id: documentId,
@@ -228,11 +286,24 @@ export async function createManualTask(params: CreateManualTaskParams): Promise<
     );
   }
 
+  const { error: manualTaskInsertError } = await supabase.from('manual_tasks').insert({
+    task_id: taskId,
+    outcome_id: outcome_id ?? null,
+    status: 'analyzing',
+  });
+
+  if (manualTaskInsertError) {
+    throw new ManualTaskServiceError(
+      manualTaskInsertError.message ?? 'Failed to initialize manual task status'
+    );
+  }
+
   return {
     taskId,
     prioritizationTriggered: Boolean(outcome_id),
     estimatedHours: hours,
     taskText: task_text,
+    outcomeId: outcome_id,
   };
 }
 
@@ -314,6 +385,33 @@ export async function updateTask(params: UpdateTaskParams): Promise<TaskUpdateRe
 
   if (updateError || !updated) {
     throw new ManualTaskServiceError(updateError?.message ?? 'Failed to update task');
+  }
+
+  // If this is a manual task, reset manual_tasks status and trigger re-analysis
+  if (isManualTask) {
+    await supabase
+      .from('manual_tasks')
+      .update({
+        status: 'analyzing',
+        agent_rank: null,
+        placement_reason: null,
+        exclusion_reason: null,
+      })
+      .eq('task_id', taskId);
+
+    // Fire-and-forget background analysis; outcomeId may be null if not set
+    void (async () => {
+      try {
+        const outcomeId = params.outcomeId ?? null;
+        await (await import('@/lib/services/manualTaskPlacement')).analyzeManualTask({
+          taskId,
+          taskText: nextText,
+          outcomeId: outcomeId ?? '',
+        });
+      } catch (error) {
+        console.error('[ManualTaskService] Failed to trigger re-analysis after edit', error);
+      }
+    })();
   }
 
   return {

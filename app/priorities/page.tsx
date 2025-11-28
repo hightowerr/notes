@@ -68,6 +68,7 @@ import { OutcomeCard } from '@/app/priorities/components/OutcomeCard';
 import { SourceDocuments } from '@/app/priorities/components/SourceDocuments';
 import { useDocumentStatus } from '@/lib/hooks/useDocumentStatus';
 import { useDocumentExclusions } from '@/lib/hooks/useDocumentExclusions';
+import { DiscardPileSection } from '@/app/priorities/components/DiscardPileSection';
 
 const DEFAULT_USER_ID = 'default-user';
 const POLL_INTERVAL_MS = 2000;
@@ -184,6 +185,7 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
     activeOutcome?.id ?? null,
     { validDocumentIds: documentIdsForExclusions }
   );
+  const showContextCard = false;
   const {
     progressPct: prioritizationProgress,
     connectionState: streamConnectionState,
@@ -503,6 +505,11 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
   const adjustmentControllerRef = useRef<AbortController | null>(null);
   const preloadedSuggestionsRef = useRef<Record<string, GapSuggestionState> | null>(null);
   const preloadedGenerationInfoRef = useRef<{ completed: number; durationMs: number } | null>(null);
+  const discardActionsRef = useRef<{
+    overrideDiscard: (taskId: string) => void;
+    confirmDiscard: (taskId: string) => void;
+  } | null>(null);
+  const [overriddenManualTasks, setOverriddenManualTasks] = useState<Set<string>>(new Set());
 
   // Check localStorage for dismissal and fetch active outcome on mount
   useEffect(() => {
@@ -525,11 +532,17 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
         }
 
         if (!response.ok) {
-          throw new Error('Failed to fetch active outcome');
+          const body = await response.text().catch(() => 'Unknown error');
+          console.warn('[Task Priorities] Active outcome request failed', {
+            status: response.status,
+            body,
+          });
+          setActiveOutcome(null);
+          setFetchError('Unable to load active outcome. Please try again.');
+        } else {
+          const data = await response.json();
+          setActiveOutcome(data.outcome);
         }
-
-        const data = await response.json();
-        setActiveOutcome(data.outcome);
       } catch (error) {
         console.error('[Task Priorities] Failed to load outcome:', error);
         setFetchError('Unable to load active outcome. Please try again.');
@@ -656,12 +669,20 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
       const response = await fetch('/api/reflections?limit=5&within_days=30');
 
       if (!response.ok) {
+        // Gracefully handle missing/disabled reflections API (e.g., offline or 404)
+        if (response.status === 404) {
+          reflectionsFetchRef.current.hasFetched = true;
+          setReflections([]);
+          return;
+        }
         const text = await response.text().catch(() => 'Unknown error');
-        console.error('[Task Priorities] Reflections request failed', {
+        console.warn('[Task Priorities] Reflections request failed', {
           status: response.status,
           body: text,
         });
-        throw new Error('Failed to load reflections');
+        setReflections([]);
+        reflectionsFetchRef.current.hasFetched = true;
+        return;
       }
 
       const payload = await response.json();
@@ -697,6 +718,29 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
   useEffect(() => {
     fetchReflections();
   }, [fetchReflections]);
+
+  useEffect(() => {
+    if (showContextCard) {
+      return;
+    }
+    const nextActive = Array.from(
+      new Set(
+        reflections
+          .filter(reflection => reflection.is_active_for_prioritization)
+          .map(reflection => reflection.id)
+          .filter(id => UUID_PATTERN.test(id))
+      )
+    );
+    setActiveReflectionIds(prev => {
+      if (
+        prev.length === nextActive.length &&
+        prev.every((id, index) => id === nextActive[index])
+      ) {
+        return prev;
+      }
+      return nextActive;
+    });
+  }, [reflections, showContextCard]);
 
   // Refresh reflections after the panel closes (user may have added context)
   const previousPanelState = useRef(false);
@@ -898,6 +942,50 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
       setSessionStreamConnected(false);
     };
   }, [currentSessionId, applySessionResults]);
+
+  useEffect(() => {
+    if (overriddenManualTasks.size === 0) {
+      return;
+    }
+
+    const attempts = new Map<string, number>();
+    const interval = setInterval(async () => {
+      const ids = Array.from(overriddenManualTasks);
+      await Promise.all(
+        ids.map(async taskId => {
+          const count = attempts.get(taskId) ?? 0;
+          if (count >= 20) {
+            setOverriddenManualTasks(prev => {
+              const next = new Set(prev);
+              next.delete(taskId);
+              return next;
+            });
+            toast.warning(`Analysis taking longer than expected for "${taskId}"`);
+            return;
+          }
+          attempts.set(taskId, count + 1);
+          try {
+            const response = await fetch(`/api/tasks/manual/${taskId}/status`);
+            if (!response.ok) {
+              return;
+            }
+            const payload = await response.json();
+            if (payload?.status && payload.status !== 'analyzing') {
+              setOverriddenManualTasks(prev => {
+                const next = new Set(prev);
+                next.delete(taskId);
+                return next;
+              });
+            }
+          } catch {
+            // ignore transient errors; will retry
+          }
+        })
+      );
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [overriddenManualTasks]);
 
   const baselineAgeInfo = useMemo(() => {
     if (!baselineCreatedAt) {
@@ -2387,24 +2475,26 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
           />
         )}
 
-        <ContextCard
-          reflections={reflections}
-          isLoading={reflectionsLoading}
-          error={reflectionsError}
-          onAddContext={() => setReflectionPanelOpen(true)}
-          onActiveReflectionsChange={handleActiveReflectionsChange}
-          togglesDisabled={disableContextToggles}
-          toggleDisabledLabel="Baseline plan too old (>7 days). Run a full analysis to adjust context."
-          baselineAgeLabel={baselineAgeLabel}
-          isBaselineStale={isBaselineStale}
-          isBaselineExpired={isBaselineExpired}
-          onRecalculate={handleAnalyzeTasks}
-          disableRecalculate={disableRecalculate}
-          pendingDocumentCount={documentStatusBadgeLabel ? pendingDocumentCount : null}
-          hasBaselineDocuments={hasDocumentBaseline}
-          completionTime={completionTime}
-          qualityCheckPassed={evaluationWasTriggered}
-        />
+        {showContextCard && (
+          <ContextCard
+            reflections={reflections}
+            isLoading={reflectionsLoading}
+            error={reflectionsError}
+            onAddContext={() => setReflectionPanelOpen(true)}
+            onActiveReflectionsChange={handleActiveReflectionsChange}
+            togglesDisabled={disableContextToggles}
+            toggleDisabledLabel="Baseline plan too old (>7 days). Run a full analysis to adjust context."
+            baselineAgeLabel={baselineAgeLabel}
+            isBaselineStale={isBaselineStale}
+            isBaselineExpired={isBaselineExpired}
+            onRecalculate={handleAnalyzeTasks}
+            disableRecalculate={disableRecalculate}
+            pendingDocumentCount={documentStatusBadgeLabel ? pendingDocumentCount : null}
+            hasBaselineDocuments={hasDocumentBaseline}
+            completionTime={completionTime}
+            qualityCheckPassed={evaluationWasTriggered}
+          />
+        )}
 
         {/* Banner for when no active outcome exists - T012 requirement */}
         {!activeOutcome && !outcomeLoading && showOutcomePrompt && (
@@ -2730,12 +2820,28 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
               metadataRefreshKey={reflectionEffectsRefreshKey}
               activeReflectionIds={activeReflectionIds}
               excludedDocumentIds={excludedIds}
+              discardActionsRef={discardActionsRef}
             />
+            <div className="mt-6">
+              <DiscardPileSection
+                outcomeId={activeOutcome?.id ?? null}
+                onOverride={taskId => {
+                  console.log('[Priorities][DiscardOverride]', taskId);
+                  discardActionsRef.current?.overrideDiscard(taskId);
+                  setOverriddenManualTasks(prev => {
+                    const next = new Set(prev);
+                    next.add(taskId);
+                    return next;
+                  });
+                }}
+                onConfirmDiscard={taskId => discardActionsRef.current?.confirmDiscard(taskId)}
+              />
+            </div>
             {prioritizedPlan.excluded_tasks && prioritizedPlan.excluded_tasks.length > 0 && (
               <ExcludedTasksSection excludedTasks={prioritizedPlan.excluded_tasks} />
             )}
             {quadrantTasks.length > 0 && (
-              <section className="mt-8 rounded-xl border border-border/70 bg-bg-layer-3/40 p-4">
+              <section className="mt-8 hidden rounded-xl border border-border/70 bg-bg-layer-3/40 p-4 md:block">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <h3 className="text-base font-semibold text-foreground">Impact/Effort Quadrant</h3>

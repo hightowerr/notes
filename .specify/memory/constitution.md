@@ -2,27 +2,34 @@
 ============================================================================
 SYNC IMPACT REPORT
 ============================================================================
-Version Change: 1.0.0 → 1.0.1
-Modified Principles: None
-Added Sections: None
+Version Change: 1.0.1 → 1.1.0
+Modified Principles:
+  - Principle I (Vertical Slice Development): Added explicit infrastructure handling guidance
+Added Sections:
+  - "Infrastructure Integration Rules" subsection under Principle I
+  - "Task Structure Validation" subsection under Development Workflow
 Removed Sections: None
 
 Templates Requiring Updates:
+  ✅ tasks-template.md - Must update Phase 1/2 pattern to show database setup as implicit prerequisite within test tasks, not standalone [SETUP] tasks
   ✅ plan-template.md - Constitution Check references remain valid
   ✅ spec-template.md - User story format aligns with vertical slice mandate
-  ✅ tasks-template.md - Task structure supports vertical slice delivery
 
 Documentation Updates:
-  ✅ CLAUDE.md - Enhanced with current phase context, Google Drive setup, slash commands
-  ✅ README.md - Reorganized resources section, added development workflow clarity
+  ⚠️ PENDING: tasks-template.md requires restructuring of Phase 1/2 examples
+  ✅ SYSTEM_RULES.md - Already aligned, no changes needed
 
-Follow-up TODOs: None
+Follow-up TODOs:
+  - Update tasks-template.md to remove [SETUP] task category
+  - Add examples of implicit prerequisites within test tasks
+  - Validate existing feature tasks.md files for compliance
 
-Rationale for Version 1.0.1 (PATCH):
-  - Documentation clarity improvements to CLAUDE.md and README.md
-  - Enhanced runtime guidance section to reflect reorganized documentation structure
-  - No principle changes, no governance changes, no breaking changes
-  - Pure clarification and navigation improvements
+Rationale for Version 1.1.0 (MINOR):
+  - Material expansion of Principle I with new "Infrastructure Integration Rules" guidance
+  - Added prescriptive rules for handling database migrations, test fixtures, and build configuration
+  - This is a new architectural constraint that changes how tasks must be structured
+  - Not backward-incompatible (doesn't remove principles) but adds significant new guidance
+  - Clarifies ambiguous area that led to [SETUP] task violations
 ============================================================================
 -->
 
@@ -41,6 +48,49 @@ Every code change MUST deliver complete user value through three observable elem
 **Rationale**: Infrastructure or backend-only work that cannot be user-tested creates technical debt and delays value delivery. Every slice must be demonstrable to non-technical stakeholders.
 
 **Enforcement**: Tasks lacking UI entry point, user action, or visible outcome MUST be rejected and restructured before implementation begins.
+
+#### Infrastructure Integration Rules
+
+Infrastructure work (database migrations, test fixtures, build configuration) is NEVER a standalone slice. Instead:
+
+**Database Migrations**:
+- Create migration file as implicit prerequisite within first test task that requires the schema
+- Test task validates table exists in setup phase
+- Example: "T001 [SLICE] [US1] Contract test for status endpoint" includes prerequisite note: "Migration 029 must be applied before test execution"
+
+**Test Infrastructure**:
+- Test fixtures, mocks, and utilities are part of the test task itself
+- If shared across multiple tests, create as first step of earliest test task
+- Mark with comment: `// Prerequisite: Test database setup (not a user slice)`
+
+**Build Configuration**:
+- Package dependencies, linting rules, CI configuration added within tasks that need them
+- Never create "Setup development environment" as standalone task
+- Example: Test task includes "Install vitest if not present" as setup step
+
+**Validation Rule**:
+- Ask: "Can a non-technical person test this task's output?"
+- If NO → It's infrastructure and must be absorbed into a user-testable slice
+- If YES → It's a valid slice
+
+**Migration Pattern Example**:
+```markdown
+## Phase 1: User Story 1 - Task Creation (MVP)
+
+**Prerequisite**: Database migration 029 (manual_tasks table) must be applied before test execution.
+- File: supabase/migrations/029_create_manual_tasks.sql
+- Validation: Tests verify table exists in setup phase
+- NOTE: This is infrastructure validated BY tests, not a standalone slice
+
+### Tests for User Story 1
+
+- [ ] T001 [SLICE] [US1] Contract test for manual task creation
+  - **SEE**: Test suite passes with green output
+  - **DO**: Run `pnpm test:run __tests__/contract/manual-task-creation.test.ts`
+  - **VERIFY**: All test cases pass, migration applied successfully
+  - **Prerequisites**: Migration 029 applied (test validates in setup)
+  - **Test cases**: Create task, validate schema, check constraints
+```
 
 ### II. Test-First Development (NON-NEGOTIABLE)
 
@@ -135,6 +185,40 @@ All system operations MUST emit structured telemetry:
 3. Identify backend endpoint processing the action
 4. Confirm: Can user test this when complete? (YES required to proceed)
 
+### Task Structure Validation
+
+Before creating tasks, apply these checks:
+
+**[SLICE] Task Requirements** (User-testable vertical slices):
+- ✅ Has UI entry point (button, form, page)
+- ✅ Has backend processing (API endpoint, service)
+- ✅ Has data layer (database write/read)
+- ✅ Has visible outcome (UI update, toast, navigation)
+- ✅ Can be demoed to non-technical person
+
+**[POLISH] Task Requirements** (Enhancements to working slices):
+- ✅ Improves existing working feature
+- ✅ Does not break existing user workflows
+- ✅ Has measurable improvement (performance, UX, accessibility)
+
+**FORBIDDEN: [SETUP] Tasks** (Pure infrastructure):
+- ❌ Database migrations without user-testable feature
+- ❌ "Configure linting" without feature using it
+- ❌ "Setup authentication framework" without login flow
+- ❌ Any task where answer to "Can user test this?" is NO
+
+**Correct Infrastructure Pattern**:
+```markdown
+- [ ] T001 [SLICE] [US1] User login with Google OAuth
+  - **Prerequisites** (implicit, not standalone tasks):
+    - Migration 003: users table created
+    - OAuth config: GOOGLE_CLIENT_ID set in .env.local
+    - NextAuth setup: lib/auth.ts configured
+  - **SEE**: Login button on homepage
+  - **DO**: Click "Sign in with Google", authorize
+  - **VERIFY**: Redirected to dashboard, user name displayed
+```
+
 ### Spec-Driven Workflow
 
 This project uses a structured feature development workflow with slash commands:
@@ -175,6 +259,8 @@ NEVER:
 - ❌ Skip the failing test phase
 - ❌ Implement features that cannot be user-tested
 - ❌ Deliver "infrastructure" or "setup" as a standalone slice
+- ❌ Create [SETUP] tasks in tasks.md files
+- ❌ Separate database migrations from feature tasks
 
 ## Governance
 
@@ -200,6 +286,7 @@ All code reviews MUST verify:
 - Tests written before implementation
 - Agent selection protocol followed
 - Completion criteria checklist passed
+- No [SETUP] or infrastructure-only tasks present
 
 ### Complexity Justification
 
@@ -236,4 +323,4 @@ For implementation patterns, standards, and troubleshooting, developers MUST con
 - `MOBILE_RESPONSIVENESS_REPORT.md` - Mobile QA baselines
 - `VISUAL_COMPARISON.md` - Visual regression tracking
 
-**Version**: 1.0.1 | **Ratified**: 2025-01-13 | **Last Amended**: 2025-01-25
+**Version**: 1.1.0 | **Ratified**: 2025-01-13 | **Last Amended**: 2025-01-27
