@@ -356,6 +356,7 @@ function buildGeneratorContext(input: GeneratorContextInput): PrioritizationCont
         id: task.task_id,
         text: task.task_text,
         source: task.source ?? 'embedding',
+        is_manual: Boolean(task.manual_override || task.previous_state === 'manual_override'),
       })
     )
     .join('\n');

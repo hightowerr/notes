@@ -1,0 +1,44 @@
+{
+  "review_file": ".claude/reviews/016-manual-task-creation-T002-T010-comprehensive-review.md",
+  "status": "fail",
+  "critical_issues": 2,
+  "high_issues": 3,
+  "medium_issues": 3,
+  "low_issues": 2,
+  "return_to": "frontend-ui-builder",
+  "fixes_required": [
+    "Implement status polling logic in priorities page (T010) - Poll GET /api/tasks/manual/[id]/status every 1s for tasks with status='analyzing', max 20 attempts, update badge on status change, show toast on timeout",
+    "Fix integration test mock setup (T003) - Remove manual_tasks insertions from test cases (lines 296-302, 349-354, 383-388), let service or createManualTask() handle row creation",
+    "Add test case to verify 1.2x priority boost for manual tasks (FR-015) - Verify agent applies multiplier documented in prioritizationGenerator.ts line 56"
+  ],
+  "completion_percentage": 85,
+  "estimated_effort_hours": 3.5,
+  "vertical_slice_complete": false,
+  "tasks_status": {
+    "T001": "complete",
+    "T002": "complete",
+    "T003": "failing - critical mock issue",
+    "T004": "complete - with high priority issues",
+    "T005": "complete - missing unit test (low priority)",
+    "T006": "complete - minor response format issue (medium priority)",
+    "T007": "complete",
+    "T008": "complete - design system compliance issue (medium priority)",
+    "T009": "complete",
+    "T010": "not implemented - critical blocker"
+  },
+  "strengths": [
+    "Clean separation of concerns (service, API, UI layers)",
+    "Comprehensive database constraints prevent invalid states",
+    "Error classes well-defined and used consistently",
+    "Contract test passing (GREEN) with good coverage",
+    "TypeScript strict mode clean throughout",
+    "Zod schemas properly defined with type inference"
+  ],
+  "next_steps": [
+    "Implement polling logic in priorities page with useEffect hook",
+    "Fix integration test by removing manual_tasks insertions",
+    "Add integration test for 1.2x boost verification",
+    "Re-run all tests to verify GREEN state",
+    "Manually test vertical slice (create → analyze → badge update → placement)"
+  ]
+}

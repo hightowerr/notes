@@ -10,6 +10,13 @@ vi.mock('@/components/ui/badge', () => ({
 vi.mock('@/components/ui/checkbox', () => ({
   Checkbox: () => <input type="checkbox" />,
 }));
+vi.mock('@/components/ui/button', () => ({
+  Button: ({ children, ...props }: { children: React.ReactNode }) => (
+    <button type="button" {...props}>
+      {children}
+    </button>
+  ),
+}));
 vi.mock('@/components/ui/tooltip', () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   TooltipContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -31,6 +38,9 @@ vi.mock('@/app/priorities/components/ScoreBreakdownModal', () => ({
 }));
 vi.mock('@/app/priorities/components/ManualOverrideControls', () => ({
   ManualOverrideControls: () => <div>ManualOverrideControls</div>,
+}));
+vi.mock('@/app/priorities/components/ManualTaskBadge', () => ({
+  ManualTaskBadge: () => <div>ManualTaskBadge</div>,
 }));
 
 describe('TaskRow', () => {
@@ -137,5 +147,23 @@ describe('TaskRow', () => {
   it('does not render inclusion reason badge when absent', () => {
     render(<TaskRow {...defaultProps} />);
     expect(screen.queryByText('This task is critical for the MVP.')).not.toBeInTheDocument();
+  });
+
+  it('renders manual edit and mark done buttons when manual', () => {
+    const onEditManual = vi.fn();
+    const onMarkManualDone = vi.fn();
+    const onDeleteManual = vi.fn();
+    render(
+      <TaskRow
+        {...defaultProps}
+        isManual
+        onEditManual={onEditManual}
+        onMarkManualDone={onMarkManualDone}
+        onDeleteManual={onDeleteManual}
+      />
+    );
+    expect(screen.getByText('Edit')).toBeInTheDocument();
+    expect(screen.getByText('Mark done')).toBeInTheDocument();
+    expect(screen.getByText('Delete')).toBeInTheDocument();
   });
 });

@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { MovementBadge, type MovementInfo } from '@/app/priorities/components/MovementBadge';
 import { QUADRANT_CONFIGS, getQuadrant, type Quadrant } from '@/lib/schemas/quadrant';
@@ -16,6 +17,10 @@ import type { StrategicScore, TaskWithScores } from '@/lib/schemas/strategicScor
 import type { RetryStatusEntry } from '@/lib/schemas/retryStatus';
 import type { ReflectionEffect } from '@/lib/services/reflectionAdjuster';
 import { ReflectionAttributionBadge } from '@/app/priorities/components/ReflectionAttributionBadge';
+import {
+  ManualTaskBadge,
+  type ManualTaskBadgeStatus,
+} from '@/app/priorities/components/ManualTaskBadge';
 
 type EditMode = 'idle' | 'editing' | 'saving' | 'error';
 
@@ -53,6 +58,8 @@ type TaskRowProps = {
   checked: boolean;
   isAiGenerated: boolean;
   isManual?: boolean;
+  manualStatus?: ManualTaskBadgeStatus;
+  manualStatusDetail?: string | null;
   isPrioritizing?: boolean;
   retryStatus?: RetryStatusEntry | null;
   isSelected: boolean;
@@ -70,6 +77,9 @@ type TaskRowProps = {
   onManualOverrideChange?: (override: ManualOverrideState | null) => void;
   inclusionReason?: string | null;
   reflectionEffects?: ReflectionEffect[];
+  onEditManual?: () => void;
+  onMarkManualDone?: () => void;
+  onDeleteManual?: () => void;
 };
 
 function MobileFieldLabel({ children }: { children: string }) {
@@ -96,6 +106,8 @@ export function TaskRow({
   checked,
   isAiGenerated,
   isManual = false,
+  manualStatus,
+  manualStatusDetail = null,
   isPrioritizing = false,
   retryStatus = null,
   isSelected,
@@ -113,6 +125,9 @@ export function TaskRow({
   onManualOverrideChange,
   inclusionReason,
   reflectionEffects = [],
+  onEditManual,
+  onMarkManualDone,
+  onDeleteManual,
 }: TaskRowProps) {
   const categoryLabel = category
     ? category === 'leverage'
@@ -773,19 +788,40 @@ export function TaskRow({
                 </Badge>
               )}
               {isManual && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Badge
-                      variant="outline"
-                      className="shrink-0 border-purple-500/20 bg-purple-500/20 rounded-md px-2 py-0.5 text-xs font-medium text-purple-700 dark:text-purple-300 cursor-help"
-                    >
-                      MANUAL
-                    </Badge>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>This task was manually added by you</p>
-                  </TooltipContent>
-                </Tooltip>
+                <ManualTaskBadge
+                  status={manualStatus ?? (isPrioritizing ? 'analyzing' : 'manual')}
+                  detail={manualStatusDetail ?? undefined}
+                />
+              )}
+              {isManual && onEditManual && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs font-semibold"
+                  onClick={onEditManual}
+                >
+                  Edit
+                </Button>
+              )}
+              {isManual && onMarkManualDone && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs font-semibold text-emerald-700"
+                  onClick={onMarkManualDone}
+                >
+                  Mark done
+                </Button>
+              )}
+              {isManual && onDeleteManual && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs font-semibold text-destructive"
+                  onClick={onDeleteManual}
+                >
+                  Delete
+                </Button>
               )}
               {hasManualOverride && (
                 <Badge className="shrink-0 bg-emerald-500/10 text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-100">
