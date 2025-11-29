@@ -2,12 +2,27 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Lock, Unlock } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { MovementBadge, type MovementInfo } from '@/app/priorities/components/MovementBadge';
+import { ManualTaskBadge, type ManualTaskBadgeStatus } from '@/app/priorities/components/ManualTaskBadge';
+import { ScoreBreakdownModal } from '@/app/priorities/components/ScoreBreakdownModal';
+import { QuadrantViz, type QuadrantVizTask } from '@/app/priorities/components/QuadrantViz';
+import { ManualOverrideControls } from '@/app/priorities/components/ManualOverrideControls';
+import { QUADRANT_CONFIGS, getQuadrant, type Quadrant } from '@/lib/schemas/quadrant';
+import type { TaskWithScores, StrategicScore } from '@/lib/schemas/strategicScore';
+import type { ManualOverrideState } from '@/lib/schemas/manualOverride';
 import type { TaskDependency } from '@/lib/types/agent';
 import { cn } from '@/lib/utils';
+
+type StrategicScoreData = {
+  impact: number;
+  effort: number;
+  confidence: number;
+  priority: number;
+} | null;
 
 type TaskStatus = 'active' | 'completed' | 'discarded';
 
@@ -76,12 +91,16 @@ type TaskSummary = {
   outcomeRationale?: string | null;
   sourceText?: string | null;
   sourceDocumentTitle?: string | null;
+  isManual?: boolean;
+  manualStatus?: ManualTaskBadgeStatus;
+  manualStatusDetail?: string | null;
 };
 
 type TaskDetailsDrawerProps = {
   open: boolean;
   onClose: () => void;
   task: TaskSummary | null;
+  strategicScore?: StrategicScoreData;
   status: TaskStatus;
   removalReason?: string;
   onMarkDone: () => void;
@@ -104,6 +123,7 @@ export function TaskDetailsDrawer({
   open,
   onClose,
   task,
+  strategicScore,
   status,
   removalReason,
   onMarkDone,
@@ -190,10 +210,14 @@ export function TaskDetailsDrawer({
   const [newDependencyId, setNewDependencyId] = useState('');
   const [newRelationship, setNewRelationship] =
     useState<TaskDependency['relationship_type']>('prerequisite');
+  const [isScoreModalOpen, setIsScoreModalOpen] = useState(false);
+  const [isManualOverrideOpen, setIsManualOverrideOpen] = useState(false);
 
   useEffect(() => {
     setIsEditingDependencies(false);
     setNewDependencyId('');
+    setIsScoreModalOpen(false);
+    setIsManualOverrideOpen(false);
   }, [task?.id, open]);
 
   const availableDependencyOptions = useMemo(() => {
@@ -262,6 +286,12 @@ export function TaskDetailsDrawer({
                     <Badge variant="outline" className="bg-slate-600/10 text-slate-700">
                       Manual override
                     </Badge>
+                  )}
+                  {task?.isManual && task.manualStatus && (
+                    <ManualTaskBadge 
+                      status={task.manualStatus} 
+                      detail={task.manualStatusDetail || undefined}
+                    />
                   )}
                   {isLocked && (
                     <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700">
@@ -530,6 +560,135 @@ export function TaskDetailsDrawer({
                   })}
                 </div>
               )}
+            </section>
+
+            <Separator />
+
+            {/* Strategic Scores Section - T017 Enhancement */}
+            {strategicScore && (
+              <section className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-foreground">Strategic Scores</h3>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setIsScoreModalOpen(true)}
+                    className="text-xs"
+                  >
+                    View breakdown →
+                  </Button>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-md border border-border/60 bg-background/60 px-3 py-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Impact
+                      </span>
+                      <span className="text-lg font-bold text-foreground">
+                        {strategicScore.impact.toFixed(1)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="rounded-md border border-border/60 bg-background/60 px-3 py-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Effort
+                      </span>
+                      <span className="text-lg font-bold text-foreground">
+                        {strategicScore.effort.toFixed(1)}h
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {/* Quadrant Visualization Section - T017 Enhancement */}
+            {strategicScore && (
+              <section className="space-y-3">
+                <h3 className="text-sm font-semibold text-foreground">Position</h3>
+                <div className="rounded-md border border-border/60 bg-background/60 p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-2xl">{getQuadrant(strategicScore.impact, strategicScore.effort) === 'high_impact_low_effort' ? '🌟' : getQuadrant(strategicScore.impact, strategicScore.effort) === 'high_impact_high_effort' ? '🚀' : getQuadrant(strategicScore.impact, strategicScore.effort) === 'low_impact_low_effort' ? '⚡' : '⚠️'}</span>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{QUADRANT_CONFIGS[getQuadrant(strategicScore.impact, strategicScore.effort)].label}</p>
+                        <p className="text-xs text-muted-foreground">{QUADRANT_CONFIGS[getQuadrant(strategicScore.impact, strategicScore.effort)].description}</p>
+                      </div>
+                    </div>
+                    <Badge variant="secondary" className="text-xs">
+                      Priority #{task?.rank || '—'}
+                    </Badge>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {/* Manual Override Controls Section - T017 Enhancement */}
+            <section className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-foreground">Manual Override</h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsManualOverrideOpen(true)}
+                  className="text-xs"
+                >
+                  Adjust scores →
+                </Button>
+              </div>
+              <div className="rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2">
+                <p className="text-xs text-amber-700">
+                  Use manual controls to adjust AI estimates based on your latest understanding.
+                </p>
+              </div>
+            </section>
+
+            {/* Task Source Metadata - T017 Enhancement */}
+            <section className="space-y-2">
+              <h3 className="text-sm font-semibold text-foreground">Source & Metadata</h3>
+              <div className="space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Source:</span>
+                  <span className="text-foreground">
+                    {task.isManual ? 'Manual Task' : 'AI Generated'}
+                  </span>
+                </div>
+                {task.movement && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Movement:</span>
+                    <MovementBadge movement={task.movement} />
+                  </div>
+                )}
+                {task.lnoCategory && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Category:</span>
+                    <Badge variant="outline" className="text-xs">
+                      {task.lnoCategory === 'leverage' ? 'Leverage' : 
+                       task.lnoCategory === 'neutral' ? 'Neutral' : 'Overhead'}
+                    </Badge>
+                  </div>
+                )}
+              </div>
+            </section>
+
+            {/* Lock/Unlock Controls - T017 Enhancement */}
+            <section className="space-y-2">
+              <h3 className="text-sm font-semibold text-foreground">Task Controls</h3>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {/* TODO: Add lock/unlock handler */}}
+                  className="flex items-center gap-2 text-xs"
+                >
+                  <Lock className="h-3 w-3" />
+                  Lock Task
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  Prevent automatic reordering
+                </span>
+              </div>
             </section>
 
             <Separator />

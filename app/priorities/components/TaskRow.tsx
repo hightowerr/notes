@@ -82,14 +82,6 @@ type TaskRowProps = {
   onDeleteManual?: () => void;
 };
 
-function MobileFieldLabel({ children }: { children: string }) {
-  return (
-    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground lg:hidden">
-      {children}
-    </span>
-  );
-}
-
 export function TaskRow({
   taskId,
   order,
@@ -136,22 +128,7 @@ export function TaskRow({
         ? 'Neutral'
         : 'Overhead'
     : null;
-  const dependencyBadges = dependencyLinks.length ? (
-    <div className="flex flex-wrap gap-1">
-      {dependencyLinks.map(link => (
-        <span
-          key={`${taskId}-dep-${link.taskId}`}
-          className="inline-flex items-center gap-1 rounded-full bg-bg-layer-2 px-2 py-1 text-xs text-muted-foreground"
-        >
-          <span className="font-semibold">{link.rank ? `#${link.rank}` : '—'}</span>
-          <span className="text-muted-foreground/70">•</span>
-          <span className="max-w-[160px] truncate">{link.label}</span>
-        </span>
-      ))}
-    </div>
-  ) : (
-    <span className="text-sm text-muted-foreground">None</span>
-  );
+
   const retryState = retryStatus?.status;
   const maxRetryAttempts = retryStatus?.max_attempts ?? 3;
   const retryAttempts = retryStatus?.attempts ?? 0;
@@ -159,12 +136,12 @@ export function TaskRow({
   const isRetryFailed = retryState === 'failed';
   const scoringAttemptNumber = isScoring
     ? Math.min(
-        maxRetryAttempts,
-        Math.max(
-          1,
-          retryState === 'pending' ? retryAttempts + 1 : retryAttempts === 0 ? 1 : retryAttempts
-        )
+      maxRetryAttempts,
+      Math.max(
+        1,
+        retryState === 'pending' ? retryAttempts + 1 : retryAttempts === 0 ? 1 : retryAttempts
       )
+    )
     : null;
 
   const [editState, setEditState] = useState<EditState>({
@@ -275,7 +252,7 @@ export function TaskRow({
         setShowSuccess(true);
         setRecentlyEdited(true);
         clearSuccessTimer();
-        successTimeoutRef.current = window.setTimeout(() => {
+        successTimeoutRef.current = setTimeout(() => {
           setShowSuccess(false);
           successTimeoutRef.current = null;
         }, SUCCESS_INDICATOR_MS);
@@ -294,10 +271,10 @@ export function TaskRow({
           errorMessage,
         }));
         setShowSuccess(false);
-        
+
         // Auto-exit error mode after 3 seconds
         clearErrorTimer();
-        errorTimeoutRef.current = window.setTimeout(() => {
+        errorTimeoutRef.current = setTimeout(() => {
           setEditState(prev => ({
             ...prev,
             mode: 'idle',
@@ -307,7 +284,7 @@ export function TaskRow({
         }, 3000);
       }
     },
-    [clearEditHighlightTimer, clearSuccessTimer, onEditSuccess, onTaskTitleChange, outcomeId, taskId]
+    [clearEditHighlightTimer, clearSuccessTimer, clearErrorTimer, onEditSuccess, onTaskTitleChange, outcomeId, taskId]
   );
 
   const scheduleSave = useCallback(
@@ -487,7 +464,6 @@ export function TaskRow({
         <X
           className="h-4 w-4 text-destructive cursor-pointer"
           aria-label="Failed to save task"
-          title={editState.errorMessage ?? 'Failed to save task'}
           onClick={() => {
             // Clear error mode when clicked
             setEditState(prev => ({
@@ -501,7 +477,7 @@ export function TaskRow({
       );
     }
     return null;
-  }, [editState.mode, editState.errorMessage, showSuccess]);
+  }, [editState.mode, editState.errorMessage, showSuccess, clearErrorTimer]);
 
   const quadrant = useMemo(() => {
     if (typeof impact === 'number' && typeof effort === 'number') {
@@ -555,376 +531,439 @@ export function TaskRow({
     strategicDetails ??
     (impact !== null && effort !== null && confidence !== null && priority !== null
       ? {
-          id: taskId,
-          title,
-          content: title,
-          impact,
-          effort,
-          confidence,
-          priority,
-          hasManualOverride,
-          quadrant: quadrant ?? 'high_impact_low_effort',
-          confidenceBreakdown: null,
-        }
+        id: taskId,
+        title,
+        content: title,
+        impact,
+        effort,
+        confidence,
+        priority,
+        hasManualOverride,
+        quadrant: quadrant ?? 'high_impact_low_effort',
+        confidenceBreakdown: null,
+      }
       : null);
 
   return (
     <TooltipProvider delayDuration={200}>
-    <div
-      data-task-id={taskId}
-      role="button"
-      tabIndex={0}
-      className={cn(
-        'group/task grid w-full grid-cols-1 gap-3 rounded-lg border border-border/60 px-3 py-3 text-sm transition-colors',
-        'lg:grid-cols-[48px_minmax(0,1fr)_120px_96px_48px] lg:items-center lg:gap-2 lg:rounded-none lg:border-0 lg:border-b lg:border-border/60 lg:px-3 lg:py-2 lg:last:border-b-0',
-        isSelected && 'bg-primary/5',
-        isHighlighted &&
+      <div
+        data-task-id={taskId}
+        role="button"
+        tabIndex={0}
+        className={cn(
+          // Mobile-first: Compact card layout
+          'group/task flex flex-col w-full gap-3 rounded-lg p-4 text-sm transition-all',
+          'shadow-2layer-sm tap-highlight-light dark:tap-highlight-dark',
+          'border border-border/40',
+          // Desktop: Even more compact
+          'lg:gap-2.5 lg:p-3',
+          // States
+          isSelected && 'bg-primary/5 ring-2 ring-primary/20',
+          isHighlighted &&
           (isAiGenerated
             ? 'bg-emerald-100/60 dark:bg-emerald-500/10'
             : 'bg-amber-100/40 dark:bg-amber-500/10'),
-        recentlyEdited && 'bg-amber-50/80 ring-amber-300/60 dark:bg-amber-500/10',
-        isLocked && 'border-emerald-500/40 ring-1 ring-emerald-500/30',
-        'hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-      )}
-      onClick={() => onSelect(taskId)}
-      onKeyDown={event => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          onSelect(taskId);
-        }
-      }}
-    >
-      <div className="flex items-center justify-between lg:block">
-        <MobileFieldLabel>Rank</MobileFieldLabel>
-        {isPrioritizing ? (
-          <span className="inline-flex items-center gap-2 text-sm font-medium text-amber-600">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Prioritizing…
-          </span>
-        ) : (
-          <span className="text-sm font-medium text-muted-foreground">{order}</span>
+          recentlyEdited && 'bg-amber-50/80 ring-2 ring-amber-300/60 dark:bg-amber-500/10',
+          isLocked && 'border-emerald-500/40 ring-1 ring-emerald-500/30',
+          'hover:bg-muted/40 hover:shadow-2layer-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
         )}
-      </div>
-
-      <div className="flex flex-col gap-1 text-left">
-        <MobileFieldLabel>Task</MobileFieldLabel>
-        <div className="flex flex-col gap-1">
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:gap-3">
-            <button
-              type="button"
-              onClick={event => {
-                event.stopPropagation();
-                onToggleLock(taskId);
-              }}
-              className={cn(
-                'inline-flex h-6 w-6 items-center justify-center rounded-full border',
-                isLocked
-                  ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-700'
-                  : 'border-border/70 text-muted-foreground hover:bg-muted/40'
-              )}
-              aria-label={isLocked ? 'Unlock task' : 'Lock task in place'}
-            >
-              {isLocked ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
-            </button>
-            <div className="flex flex-1 flex-col gap-1">
+        onClick={() => onSelect(taskId)}
+        onKeyDown={event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onSelect(taskId);
+          }
+        }}
+      >
+        {/* Task Title with Integrated Rank */}
+        <div className="flex items-start gap-3">
+          <div
+            className="flex-1 min-w-0"
+            onClick={event => {
+              event.stopPropagation();
+            }}
+          >
+            {editState.mode === 'editing' || editState.mode === 'saving' ? (
               <div
-                className="flex flex-col gap-2"
+                className={cn(
+                  'flex min-h-[48px] w-full items-center rounded-md border-2 border-border bg-background px-3 py-2 lg:min-h-[44px]',
+                  isEditLocked && 'pointer-events-none opacity-75'
+                )}
+              >
+                <span className="mr-2 shrink-0 text-sm font-bold text-muted-foreground lg:text-xs">
+                  {isPrioritizing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    `#${order}`
+                  )}
+                </span>
+                <div
+                  ref={editorRef}
+                  role="textbox"
+                  aria-label="Edit task"
+                  aria-disabled={isEditLocked}
+                  contentEditable={!isEditLocked}
+                  suppressContentEditableWarning
+                  className={cn(
+                    'min-h-[24px] w-full text-[15px] font-semibold text-foreground leading-relaxed focus-visible:outline-none lg:text-sm',
+                    isEditLocked && 'cursor-not-allowed text-muted-foreground'
+                  )}
+                  onInput={handleEditorInput}
+                  onBlur={handleEditorBlur}
+                  onKeyDown={handleEditorKeyDown}
+                />
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="flex w-full items-start gap-2 cursor-text text-left focus-visible:outline-none"
                 onClick={event => {
-                  event.stopPropagation();
+                  handleStartEditing(event);
                 }}
               >
-                {editState.mode === 'editing' || editState.mode === 'saving' ? (
-                  <div
-                    className={cn(
-                      'flex min-h-[40px] w-full items-center rounded-md border border-border bg-background px-2 py-1',
-                      isEditLocked && 'pointer-events-none opacity-75'
-                    )}
-                  >
-                    <div
-                      ref={editorRef}
-                      role="textbox"
-                      aria-label="Edit task"
-                      aria-disabled={isEditLocked}
-                      contentEditable={!isEditLocked}
-                      suppressContentEditableWarning
-                      className={cn(
-                        'min-h-[24px] w-full text-sm font-medium text-foreground focus-visible:outline-none',
-                        isEditLocked && 'cursor-not-allowed text-muted-foreground'
-                      )}
-                      onInput={handleEditorInput}
-                      onBlur={handleEditorBlur}
-                      onKeyDown={handleEditorKeyDown}
-                    />
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    className="flex w-full cursor-text items-start text-left focus-visible:outline-none"
-                    onClick={event => {
-                      handleStartEditing(event);
-                    }}
-                  >
-                    <span className="w-full truncate text-sm font-medium text-foreground">
-                      {editState.originalText}
-                    </span>
-                  </button>
-                )}
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleStartEditing}
-                    disabled={isEditLocked}
-                    className={cn(
-                      'inline-flex h-6 w-6 items-center justify-center rounded-full border border-border/70 text-muted-foreground transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                      isEditLocked && 'cursor-not-allowed opacity-50',
-                      'lg:opacity-0 lg:group-hover/task:opacity-100'
-                    )}
-                    aria-label="Edit task"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                  {statusIndicator && <span className="inline-flex items-center">{statusIndicator}</span>}
-                </div>
-              </div>
-              {isEditingDisabled && (
-                <span className="text-xs text-muted-foreground">
-                  Editing disabled during prioritization
+                <span className="shrink-0 mt-0.5 text-sm font-bold text-muted-foreground lg:text-xs">
+                  {isPrioritizing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    `#${order}`
+                  )}
                 </span>
+                <span className="flex-1 break-words whitespace-normal text-[15px] font-semibold text-foreground leading-relaxed lg:text-sm">
+                  {editState.originalText}
+                </span>
+              </button>
+            )}
+
+            {/* Editing feedback */}
+            {isEditingDisabled && (
+              <span className="mt-1 block text-xs text-muted-foreground">
+                Editing disabled during prioritization
+              </span>
+            )}
+            {editState.mode === 'error' && editState.errorMessage && (
+              <span className="mt-1 block text-xs text-destructive">{editState.errorMessage}</span>
+            )}
+          </div>
+
+          {/* Action buttons - Edit and Status */}
+          <div className="flex-shrink-0 flex items-center gap-2">
+            {statusIndicator && <span className="inline-flex items-center">{statusIndicator}</span>}
+            <button
+              type="button"
+              onClick={handleStartEditing}
+              disabled={isEditLocked}
+              className={cn(
+                'inline-flex h-11 w-11 items-center justify-center rounded-full border-2 border-border/70 text-muted-foreground transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                'hover:bg-muted/50 hover:border-border active:scale-95',
+                isEditLocked && 'cursor-not-allowed opacity-50',
+                'lg:h-9 lg:w-9 lg:opacity-0 lg:group-hover/task:opacity-100'
               )}
-              {editState.mode === 'error' && editState.errorMessage && (
-                <span className="text-xs text-destructive">{editState.errorMessage}</span>
-              )}
-                    {strategicSummary && (
-                <div className="flex flex-col gap-1">
-                  <MobileFieldLabel>Strategic Scores</MobileFieldLabel>
-                  <div
-                    className="flex flex-wrap items-center gap-2 rounded-md bg-bg-layer-2/80 px-3 py-2 text-xs text-muted-foreground shadow-sm"
-                    onClick={event => event.stopPropagation()}
-                    onKeyDown={event => event.stopPropagation()}
-                  >
-                    {quadrantBadge}
-                    <span className="font-medium text-foreground">{strategicSummary}</span>
-                    {modalTask && (
-                      <button
-                        type="button"
-                        className="text-xs font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        onClick={() => setIsScoreModalOpen(true)}
-                      >
-                        Why this score?
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-muted-foreground underline-offset-2 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      onClick={event => {
-                        event.stopPropagation();
-                        setIsManualOverrideOpen(true);
-                      }}
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                      Edit scores
-                    </button>
-                  </div>
-                  {strategicDetails?.reflection_influence && (
-                    <div 
-                      className="mt-1 flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400"
-                      role="status"
-                      aria-label={`Reflection influence: ${strategicDetails.reflection_influence}`}
-                    >
-                      <Lightbulb className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-                      <span className="font-medium">
-                        Reflection: {strategicDetails.reflection_influence}
-                      </span>
-                    </div>
-                  )}
-                  {reflectionEffects.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-2" aria-label="Reflection effects">
-                      {reflectionEffects
-                        .filter(effect => effect.effect !== 'unchanged')
-                        .map(effect => (
-                          <ReflectionAttributionBadge
-                            key={`${taskId}-${effect.reflection_id}-${effect.effect}`}
-                            effect={effect.effect === 'blocked' ? 'blocked' : effect.effect === 'demoted' ? 'demoted' : 'boosted'}
-                            reason={effect.reason}
-                            reflectionId={effect.reflection_id}
-                          />
-                        ))}
-                    </div>
-                  )}
-                  {inclusionReason && (
-                    <div className="mt-1">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Badge 
-                            variant="outline" 
-                            className="inline-flex items-center gap-1 border-emerald-500/30 bg-emerald-500/5 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400 cursor-help"
-                          >
-                            <Check className="h-3 w-3" />
-                            <span className="max-w-[200px] truncate">{inclusionReason}</span>
-                          </Badge>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>{inclusionReason}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {category && categoryLabel && (
-                <Badge
-                  variant="outline"
-                  className={cn(
-                    'shrink-0 text-[11px] font-semibold uppercase tracking-wide',
-                    category === 'leverage' &&
-                      'border-emerald-500/50 bg-emerald-500/10 text-emerald-700',
-                    category === 'neutral' && 'border-sky-500/50 bg-sky-500/10 text-sky-700',
-                    category === 'overhead' && 'border-amber-500/50 bg-amber-500/10 text-amber-700'
-                  )}
-                >
-                  {categoryLabel}
-                </Badge>
-              )}
-              {isManual && (
-                <ManualTaskBadge
-                  status={manualStatus ?? (isPrioritizing ? 'analyzing' : 'manual')}
-                  detail={manualStatusDetail ?? undefined}
-                />
-              )}
-              {isManual && onEditManual && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs font-semibold"
-                  onClick={onEditManual}
-                >
-                  Edit
-                </Button>
-              )}
-              {isManual && onMarkManualDone && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs font-semibold text-emerald-700"
-                  onClick={onMarkManualDone}
-                >
-                  Mark done
-                </Button>
-              )}
-              {isManual && onDeleteManual && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs font-semibold text-destructive"
-                  onClick={onDeleteManual}
-                >
-                  Delete
-                </Button>
-              )}
-              {hasManualOverride && (
-                <Badge className="shrink-0 bg-emerald-500/10 text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-100">
-                  Manual override
-                </Badge>
-              )}
-              {isScoring && (
-                <Badge className="shrink-0 bg-amber-500/10 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-500/20 dark:text-amber-100">
-                  Scoring…
-                  {typeof scoringAttemptNumber === 'number' && maxRetryAttempts > 0 && (
-                    <span className="ml-1 normal-case">
-                      (Attempt {scoringAttemptNumber}/{maxRetryAttempts})
-                    </span>
-                  )}
-                </Badge>
-              )}
-              {isRetryFailed && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Badge className="shrink-0 border-destructive/40 bg-destructive/10 text-[11px] font-semibold uppercase tracking-wide text-destructive" variant="outline">
-                      Scores unavailable
-                    </Badge>
-                  </TooltipTrigger>
-                  {retryStatus?.last_error && (
-                    <TooltipContent>
-                      <p>{retryStatus.last_error}</p>
-                    </TooltipContent>
-                  )}
-                </Tooltip>
-              )}
-              {isPrioritizing && (
-                <Badge className="shrink-0 bg-amber-500/10 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-500/20 dark:text-amber-100">
-                  Prioritizing…
-                </Badge>
-              )}
-              {isAiGenerated && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Badge
-                      variant="outline"
-                      className="shrink-0 border-blue-500/20 bg-blue-500/20 rounded-md px-2 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-300 cursor-help"
-                    >
-                      AI
-                    </Badge>
-                  </TooltipTrigger>
+              aria-label="Edit task"
+            >
+              <Pencil className="h-5 w-5 lg:h-4 lg:w-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Badges Row */}
+        {(category || isManual || hasManualOverride || isScoring || isRetryFailed || isPrioritizing || isAiGenerated || isLocked) && (
+          <div className="flex flex-wrap items-center gap-2">
+            {category && categoryLabel && (
+              <Badge
+                variant="outline"
+                className={cn(
+                  'shrink-0 text-[10px] font-semibold uppercase tracking-wide',
+                  category === 'leverage' &&
+                  'border-emerald-500/50 bg-emerald-500/10 text-emerald-700',
+                  category === 'neutral' && 'border-sky-500/50 bg-sky-500/10 text-sky-700',
+                  category === 'overhead' && 'border-amber-500/50 bg-amber-500/10 text-amber-700'
+                )}
+              >
+                {categoryLabel}
+              </Badge>
+            )}
+            {isManual && (
+              <ManualTaskBadge
+                status={manualStatus ?? (isPrioritizing ? 'analyzing' : 'manual')}
+                detail={manualStatusDetail ?? undefined}
+              />
+            )}
+            {hasManualOverride && (
+              <Badge className="shrink-0 bg-emerald-500/10 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-100">
+                Manual override
+              </Badge>
+            )}
+            {isScoring && (
+              <Badge className="shrink-0 bg-amber-500/10 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-500/20 dark:text-amber-100">
+                Scoring…
+                {typeof scoringAttemptNumber === 'number' && maxRetryAttempts > 0 && (
+                  <span className="ml-1 normal-case">
+                    (Attempt {scoringAttemptNumber}/{maxRetryAttempts})
+                  </span>
+                )}
+              </Badge>
+            )}
+            {isRetryFailed && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge className="shrink-0 border-destructive/40 bg-destructive/10 text-[10px] font-semibold uppercase tracking-wide text-destructive" variant="outline">
+                    Scores unavailable
+                  </Badge>
+                </TooltipTrigger>
+                {retryStatus?.last_error && (
                   <TooltipContent>
-                    <p>This task was extracted from a document</p>
+                    <p>{retryStatus.last_error}</p>
                   </TooltipContent>
-                </Tooltip>
+                )}
+              </Tooltip>
+            )}
+            {isPrioritizing && (
+              <Badge className="shrink-0 bg-amber-500/10 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-500/20 dark:text-amber-100">
+                Prioritizing…
+              </Badge>
+            )}
+            {isAiGenerated && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge
+                    variant="outline"
+                    className="shrink-0 border-blue-500/20 bg-blue-500/20 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-300 cursor-help"
+                  >
+                    AI
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>This task was extracted from a document</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {isLocked && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={event => {
+                      event.stopPropagation();
+                      onToggleLock(taskId);
+                    }}
+                    className={cn(
+                      'inline-flex h-11 w-11 items-center justify-center rounded-full border-2 transition active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:h-9 lg:w-9',
+                      'border-emerald-500/50 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20'
+                    )}
+                    aria-label="Unlock task"
+                  >
+                    <Lock className="h-5 w-5 lg:h-4 lg:w-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Task is locked in place. Click to unlock.</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {!isLocked && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={event => {
+                      event.stopPropagation();
+                      onToggleLock(taskId);
+                    }}
+                    className={cn(
+                      'inline-flex h-11 w-11 items-center justify-center rounded-full border-2 border-border/70 text-muted-foreground transition hover:bg-muted/40 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:h-9 lg:w-9 lg:opacity-0 lg:group-hover/task:opacity-100'
+                    )}
+                    aria-label="Lock task in place"
+                  >
+                    <Unlock className="h-5 w-5 lg:h-4 lg:w-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Lock task in place to prevent reordering</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+        )}
+
+        {/* Manual Task Actions */}
+        {isManual && (onEditManual || onMarkManualDone || onDeleteManual) && (
+          <div className="flex flex-wrap items-center gap-2">
+            {onEditManual && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-9 px-3 text-xs font-semibold"
+                onClick={onEditManual}
+              >
+                Edit
+              </Button>
+            )}
+            {onMarkManualDone && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-9 px-3 text-xs font-semibold text-emerald-700"
+                onClick={onMarkManualDone}
+              >
+                Mark done
+              </Button>
+            )}
+            {onDeleteManual && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-9 px-3 text-xs font-semibold text-destructive"
+                onClick={onDeleteManual}
+              >
+                Delete
+              </Button>
+            )}
+          </div>
+        )}
+
+        {/* Strategic Scores */}
+        {strategicSummary && (
+          <div className="flex flex-col gap-2">
+            <div
+              className="flex flex-wrap items-center gap-2 rounded-md bg-bg-layer-2/60 px-3 py-2 text-xs"
+              onClick={event => event.stopPropagation()}
+              onKeyDown={event => event.stopPropagation()}
+            >
+              {quadrantBadge}
+              <span className="font-medium text-foreground">{strategicSummary}</span>
+              {modalTask && (
+                <button
+                  type="button"
+                  className="text-xs font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => setIsScoreModalOpen(true)}
+                >
+                  Details
+                </button>
               )}
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-xs font-semibold text-muted-foreground underline-offset-2 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={event => {
+                  event.stopPropagation();
+                  setIsManualOverrideOpen(true);
+                }}
+              >
+                <Pencil className="h-3 w-3" />
+                Edit
+              </button>
             </div>
+
+            {strategicDetails?.reflection_influence && (
+              <div
+                className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400"
+                role="status"
+                aria-label={`Reflection influence: ${strategicDetails.reflection_influence}`}
+              >
+                <Lightbulb className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+                <span className="font-medium">
+                  Reflection: {strategicDetails.reflection_influence}
+                </span>
+              </div>
+            )}
+
+            {reflectionEffects.length > 0 && (
+              <div className="flex flex-wrap gap-2" aria-label="Reflection effects">
+                {reflectionEffects
+                  .filter(effect => effect.effect !== 'unchanged')
+                  .map(effect => (
+                    <ReflectionAttributionBadge
+                      key={`${taskId}-${effect.reflection_id}-${effect.effect}`}
+                      effect={effect.effect === 'blocked' ? 'blocked' : effect.effect === 'demoted' ? 'demoted' : 'boosted'}
+                      reason={effect.reason}
+                      reflectionId={effect.reflection_id}
+                    />
+                  ))}
+              </div>
+            )}
+
+            {inclusionReason && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge
+                    variant="outline"
+                    className="inline-flex items-center gap-1 border-emerald-500/30 bg-emerald-500/5 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400 cursor-help self-start"
+                  >
+                    <Check className="h-3 w-3" />
+                    <span className="max-w-[200px] truncate">{inclusionReason}</span>
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{inclusionReason}</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+        )}
+
+        {/* Dependencies (only show if exists) */}
+        {dependencyLinks.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Depends on:</span>
+            {dependencyLinks.map(link => (
+              <span
+                key={`${taskId}-dep-${link.taskId}`}
+                className="inline-flex items-center gap-1 rounded-full bg-bg-layer-2 px-2 py-0.5 text-xs text-muted-foreground"
+              >
+                <span className="font-semibold">{link.rank ? `#${link.rank}` : '—'}</span>
+                <span className="max-w-[120px] truncate lg:max-w-[160px]">{link.label}</span>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Bottom Row: Movement and Checkbox */}
+        <div className="flex items-center justify-between gap-3 pt-1 border-t border-border/30">
+          {/* Movement (only show if exists) */}
+          {movement && (
+            <div className="flex items-center gap-1.5">
+              <MovementBadge movement={movement} />
+            </div>
+          )}
+
+          {/* Spacer */}
+          {!movement && <div />}
+
+          {/* Checkbox with larger touch target */}
+          <div
+            className="inline-flex h-12 w-12 items-center justify-center rounded-lg lg:h-10 lg:w-10"
+            onClick={event => {
+              event.stopPropagation();
+            }}
+          >
+            <Checkbox
+              id={`task-complete-${taskId}`}
+              checked={checked}
+              onCheckedChange={value => onToggleCompleted(taskId, value === true)}
+              className="h-6 w-6 transition-transform hover:scale-110 active:scale-95"
+              aria-label={checked ? 'Mark as not done' : 'Mark as done'}
+            />
           </div>
         </div>
       </div>
 
-      <div className="flex flex-col gap-1">
-        <MobileFieldLabel>Depends</MobileFieldLabel>
-        {dependencyBadges}
-      </div>
-
-      <div className="flex items-center justify-between lg:flex-col lg:items-end lg:gap-1">
-        <MobileFieldLabel>Movement</MobileFieldLabel>
-        <span className="flex justify-end text-xs text-muted-foreground">
-          <MovementBadge movement={movement} />
-        </span>
-      </div>
-
-      <div
-        className="flex items-center justify-between lg:justify-end"
-        onClick={event => {
-          event.stopPropagation();
-        }}
-        onKeyDown={event => {
-          event.stopPropagation();
-        }}
-      >
-        <MobileFieldLabel>Done</MobileFieldLabel>
-        <Checkbox
-          id={`task-complete-${taskId}`}
-          checked={checked}
-          onCheckedChange={value => onToggleCompleted(taskId, value === true)}
-          aria-label="Mark as done"
-        />
-      </div>
-    </div>
-    <ScoreBreakdownModal task={modalTask} open={isScoreModalOpen} onOpenChange={setIsScoreModalOpen} />
-    <Dialog open={isManualOverrideOpen} onOpenChange={setIsManualOverrideOpen}>
-      <DialogContent className="sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Edit impact & effort</DialogTitle>
-          <DialogDescription>Adjust the AI estimates to reflect your latest understanding.</DialogDescription>
-        </DialogHeader>
-        <ManualOverrideControls
-          taskId={taskId}
-          open={isManualOverrideOpen}
-          manualOverride={manualOverride}
-          aiScore={baselineScore}
-          onManualOverrideChange={onManualOverrideChange}
-        />
-      </DialogContent>
-    </Dialog>
-  </TooltipProvider>
-);
+      <ScoreBreakdownModal task={modalTask} open={isScoreModalOpen} onOpenChange={setIsScoreModalOpen} />
+      <Dialog open={isManualOverrideOpen} onOpenChange={setIsManualOverrideOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Edit impact & effort</DialogTitle>
+            <DialogDescription>Adjust the AI estimates to reflect your latest understanding.</DialogDescription>
+          </DialogHeader>
+          <ManualOverrideControls
+            taskId={taskId}
+            open={isManualOverrideOpen}
+            manualOverride={manualOverride}
+            aiScore={baselineScore}
+            onManualOverrideChange={onManualOverrideChange}
+          />
+        </DialogContent>
+      </Dialog>
+    </TooltipProvider>
+  );
 }
 
 function formatDecimal(value: number, digits: number) {

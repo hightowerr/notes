@@ -1,6 +1,6 @@
-# AI Note Synthesiser
+# Pacenotes
 
-An autonomous document intelligence workspace that ingests meeting notes and research files, distils them into actionable insights, and prioritises the next best tasks with an outcome-driven agent running on Mastra.
+An autonomous document intelligence workspace that helps users get to their destination by distilling meeting notes and research files into actionable insights and prioritising the next best tasks.
 
 ## Contents
 - [Highlights](#highlights)

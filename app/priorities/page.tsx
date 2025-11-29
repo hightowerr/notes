@@ -32,7 +32,11 @@ import type { ExecutionMetadata, PrioritizedTaskPlan } from '@/lib/types/agent';
 import { adjustedPlanSchema, type AdjustedPlan } from '@/lib/types/adjustment';
 import type { Reflection, ReflectionWithWeight } from '@/lib/schemas/reflectionSchema';
 import { StrategicScoresMapSchema, type StrategicScoresMap } from '@/lib/schemas/strategicScore';
-import type { SortingStrategy } from '@/lib/schemas/sortingStrategy';
+import {
+  classifyStrategyScores,
+  type SortingStrategy,
+} from '@/lib/schemas/sortingStrategy';
+import { loadFilterPreference, saveFilterPreference } from '@/lib/services/filterPersistence';
 import type { RetryStatusEntry } from '@/lib/schemas/retryStatus';
 import { useScrollToTask } from '@/app/priorities/components/useScrollToTask';
 import { formatTaskId } from '@/app/priorities/utils/formatTaskId';
@@ -160,7 +164,7 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
   const [prioritizationRetryCount, setPrioritizationRetryCount] = useState(0);
   const [strategicScores, setStrategicScores] = useState<StrategicScoresMap | null>(null);
   const [retryStatuses, setRetryStatuses] = useState<Record<string, RetryStatusEntry>>({});
-  const [sortingStrategy, setSortingStrategy] = useState<SortingStrategy>('balanced');
+  const [sortingStrategy, setSortingStrategy] = useState<SortingStrategy>('focus_mode');
   const [taskMetadata, setTaskMetadata] = useState<Record<string, { title: string }>>({});
   const [planStatusMessage, setPlanStatusMessage] = useState<string | null>(null);
   const [isSessionStreamConnected, setSessionStreamConnected] = useState(false);
@@ -181,6 +185,7 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
   const [documentIdsForExclusions, setDocumentIdsForExclusions] = useState<string[] | undefined>(undefined);
   const [documentOffset, setDocumentOffset] = useState(0);
   const [documentStatus, setDocumentStatus] = useState<DocumentStatusResponse | null>(null);
+  const [discardPileRefreshKey, setDiscardPileRefreshKey] = useState(0);
   const { excludedIds, toggleExclusion, setExcludedIds } = useDocumentExclusions(
     activeOutcome?.id ?? null,
     { validDocumentIds: documentIdsForExclusions }
@@ -323,6 +328,13 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
     }
     lastSessionStatusRef.current = sessionStatus;
   }, [getSurveyState, persistSurveyState, sessionStatus]);
+
+  useEffect(() => {
+    if (sessionStatus === 'completed') {
+      setDiscardPileRefreshKey(prev => prev + 1);
+    }
+  }, [sessionStatus]);
+
   useEffect(() => {
     scorePollingHaltedRef.current = false;
     const shouldPoll =
@@ -453,6 +465,18 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
       .filter((task): task is QuadrantVizTask => Boolean(task));
     return tasks;
   }, [strategicScores, prioritizedPlan, taskMetadata, activeTaskIds]);
+
+  const focusCounts = useMemo(() => {
+    if (sortingStrategy !== 'focus_mode' || !activeTaskIds || activeTaskIds.length === 0) {
+      return null;
+    }
+
+    // Focus mode now simply shows top 3 tasks
+    const focused = Math.min(3, activeTaskIds.length);
+    const hidden = Math.max(0, activeTaskIds.length - 3);
+
+    return { focused, hidden };
+  }, [sortingStrategy, activeTaskIds]);
   const handleQuadrantTaskClick = useCallback(
     (taskId: string) => {
       if (!taskId) {
@@ -519,6 +543,10 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
       setShowOutcomePrompt(!isDismissed);
     }
 
+    // Load filter preference from localStorage with focus_mode as default
+    const storedStrategy = loadFilterPreference();
+    setSortingStrategy(storedStrategy);
+
     const fetchOutcome = async () => {
       try {
         setOutcomeLoading(true);
@@ -564,6 +592,11 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
       }
     };
   }, []);
+
+  // Save filter preference whenever it changes
+  useEffect(() => {
+    saveFilterPreference(sortingStrategy);
+  }, [sortingStrategy]);
 
   const stopPolling = () => {
     if (pollRef.current) {
@@ -2800,6 +2833,11 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
                 debugMode={debugMode}
               />
             )}
+            {sortingStrategy === 'focus_mode' && focusCounts && (
+              <div className="mb-4 text-sm text-muted-foreground">
+                Showing {focusCounts.focused} focused tasks ({focusCounts.hidden} hidden)
+              </div>
+            )}
             <TaskList
               plan={prioritizedPlan}
               executionMetadata={executionMetadata ?? undefined}
@@ -2824,6 +2862,7 @@ const [evaluationMetadata, setEvaluationMetadata] = useState<HybridLoopMetadata 
             />
             <div className="mt-6">
               <DiscardPileSection
+                key={`${activeOutcome?.id ?? 'global'}-${discardPileRefreshKey}`}
                 outcomeId={activeOutcome?.id ?? null}
                 onOverride={taskId => {
                   console.log('[Priorities][DiscardOverride]', taskId);

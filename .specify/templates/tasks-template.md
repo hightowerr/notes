@@ -12,17 +12,11 @@ description: "Task list template for feature implementation"
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
-## Format: `[ID] [P?] [SLICE/POLISH] [Story] Description`
+## Format: `[ID] [P?] [Story] Description`
 
 - **[P]**: Can run in parallel (different files, no dependencies)
-- **[SLICE]**: Complete vertical slice (UI + Backend + Data + Feedback)
-- **[POLISH]**: Enhancement to existing working slice
 - **[Story]**: Which user story this task belongs to (e.g., US1, US2, US3)
 - Include exact file paths in descriptions
-
-**FORBIDDEN TAGS**:
-- ❌ **[SETUP]**: Infrastructure-only tasks violate vertical slice principle
-- ❌ Database migrations as standalone tasks - must be implicit prerequisites
 
 ## Path Conventions
 
@@ -50,15 +44,36 @@ description: "Task list template for feature implementation"
   ============================================================================
 -->
 
-## Phase 1: User Story 1 - [Title] (Priority: P1) 🎯 MVP
+## Phase 1: Setup (Shared Infrastructure)
 
-**Prerequisites** (implicit, not standalone tasks):
-- Database migrations required (if applicable): `migrations/###_feature_name.sql`
-- Environment variables (if applicable): Add to `.env.local`
-- Dependencies (if applicable): Run `[package manager] install` if new deps needed
-- **Validation**: Tests verify all prerequisites in setup phase
+**Purpose**: Project initialization and basic structure
 
-**Note**: Infrastructure is validated BY vertical slices, not delivered AS slices
+- [ ] T001 Create project structure per implementation plan
+- [ ] T002 Initialize [language] project with [framework] dependencies
+- [ ] T003 [P] Configure linting and formatting tools
+
+---
+
+## Phase 2: Foundational (Blocking Prerequisites)
+
+**Purpose**: Core infrastructure that MUST be complete before ANY user story can be implemented
+
+**⚠️ CRITICAL**: No user story work can begin until this phase is complete
+
+Examples of foundational tasks (adjust based on your project):
+
+- [ ] T004 Setup database schema and migrations framework
+- [ ] T005 [P] Implement authentication/authorization framework
+- [ ] T006 [P] Setup API routing and middleware structure
+- [ ] T007 Create base models/entities that all stories depend on
+- [ ] T008 Configure error handling and logging infrastructure
+- [ ] T009 Setup environment configuration management
+
+**Checkpoint**: Foundation ready - user story implementation can now begin in parallel
+
+---
+
+## Phase 3: User Story 1 - [Title] (Priority: P1) 🎯 MVP
 
 **Goal**: [Brief description of what this story delivers]
 
@@ -68,56 +83,23 @@ description: "Task list template for feature implementation"
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T001 [P] [SLICE] [US1] Contract test for [endpoint] in tests/contract/test_[name].py
-  - **SEE**: Test suite passes with green output
-  - **DO**: Run `[test command] tests/contract/test_[name].py`
-  - **VERIFY**: Test fails initially (RED), passes after implementation (GREEN)
-  - **Prerequisites** (validated in test setup):
-    - Migration ###: [table name] created
-    - Environment: [required vars] set
-  - **Test cases**: [List specific test scenarios]
-
-- [ ] T002 [P] [SLICE] [US1] Integration test for [user journey] in tests/integration/test_[name].py
-  - **SEE**: Test suite validates complete user flow
-  - **DO**: Run `[test command] tests/integration/test_[name].py`
-  - **VERIFY**: End-to-end journey completes successfully
-  - **Prerequisites** (validated in test setup):
-    - All migrations applied
-    - Test fixtures loaded
-  - **Test scenarios**: [List user journey steps]
+- [ ] T010 [P] [US1] Contract test for [endpoint] in tests/contract/test_[name].py
+- [ ] T011 [P] [US1] Integration test for [user journey] in tests/integration/test_[name].py
 
 ### Implementation for User Story 1
 
-- [ ] T003 [P] [SLICE] [US1] Create [Entity1] model in src/models/[entity1].py
-  - **SEE**: Entity file created with TypeScript types
-  - **DO**: Implement [Entity1] with properties, validations
-  - **VERIFY**: Unit tests pass for entity operations
-  - **Dependencies**: Requires T001-T002 tests in RED state
-
-- [ ] T004 [P] [SLICE] [US1] Create [Entity2] model in src/models/[entity2].py
-  - **SEE**: Entity file created with TypeScript types
-  - **DO**: Implement [Entity2] with properties, validations
-  - **VERIFY**: Unit tests pass for entity operations
-  - **Dependencies**: Requires T001-T002 tests in RED state
-
-- [ ] T005 [SLICE] [US1] Implement [Service] in src/services/[service].py
-  - **SEE**: Service exports functions for business logic
-  - **DO**: Implement service methods using entities
-  - **VERIFY**: Service tests pass, contract tests pass
-  - **Dependencies**: Requires T003, T004 (entities)
-
-- [ ] T006 [SLICE] [US1] Implement [UI Component + API Endpoint]
-  - **SEE**: [Button/Form/Page] visible in UI at [/path]
-  - **DO**: User clicks [action] → API endpoint processes → Database updated
-  - **VERIFY**: User sees [outcome], integration tests pass
-  - **Complete vertical slice**: UI → Backend → Data → Feedback
-  - **Dependencies**: Requires T005 (service layer)
+- [ ] T012 [P] [US1] Create [Entity1] model in src/models/[entity1].py
+- [ ] T013 [P] [US1] Create [Entity2] model in src/models/[entity2].py
+- [ ] T014 [US1] Implement [Service] in src/services/[service].py (depends on T012, T013)
+- [ ] T015 [US1] Implement [endpoint/feature] in src/[location]/[file].py
+- [ ] T016 [US1] Add validation and error handling
+- [ ] T017 [US1] Add logging for user story 1 operations
 
 **Checkpoint**: At this point, User Story 1 should be fully functional and testable independently
 
 ---
 
-## Phase 2: User Story 2 - [Title] (Priority: P2)
+## Phase 4: User Story 2 - [Title] (Priority: P2)
 
 **Goal**: [Brief description of what this story delivers]
 
@@ -125,33 +107,38 @@ description: "Task list template for feature implementation"
 
 ### Tests for User Story 2 (OPTIONAL - only if tests requested) ⚠️
 
-- [ ] T007 [P] [SLICE] [US2] Contract test for [endpoint] in tests/contract/test_[name].py
-  - **SEE**: Test suite validates API contract
-  - **DO**: Run tests for US2 endpoints
-  - **VERIFY**: Tests fail initially (RED)
-  - **Prerequisites**: Migration if required
-
-- [ ] T008 [P] [SLICE] [US2] Integration test for [user journey] in tests/integration/test_[name].py
-  - **SEE**: End-to-end test validates user journey
-  - **DO**: Run complete flow test
-  - **VERIFY**: Journey test fails initially (RED)
+- [ ] T018 [P] [US2] Contract test for [endpoint] in tests/contract/test_[name].py
+- [ ] T019 [P] [US2] Integration test for [user journey] in tests/integration/test_[name].py
 
 ### Implementation for User Story 2
 
-- [ ] T009 [SLICE] [US2] Implement [Entity/Service/UI] for User Story 2
-  - **SEE**: [UI element] visible at [location]
-  - **DO**: User performs [action]
-  - **VERIFY**: [Outcome] displayed, tests pass (GREEN)
-  - **Complete vertical slice**: UI → Backend → Data → Feedback
-  - **Dependencies**: Independent of US1 (can run in parallel)
+- [ ] T020 [P] [US2] Create [Entity] model in src/models/[entity].py
+- [ ] T021 [US2] Implement [Service] in src/services/[service].py
+- [ ] T022 [US2] Implement [endpoint/feature] in src/[location]/[file].py
+- [ ] T023 [US2] Integrate with User Story 1 components (if needed)
 
 **Checkpoint**: At this point, User Stories 1 AND 2 should both work independently
 
 ---
 
-## Phase 3: User Story 3 - [Title] (Priority: P3)
+## Phase 5: User Story 3 - [Title] (Priority: P3)
 
-[Follow same pattern as US1/US2 - Tests with prerequisites, then vertical slice implementation]
+**Goal**: [Brief description of what this story delivers]
+
+**Independent Test**: [How to verify this story works on its own]
+
+### Tests for User Story 3 (OPTIONAL - only if tests requested) ⚠️
+
+- [ ] T024 [P] [US3] Contract test for [endpoint] in tests/contract/test_[name].py
+- [ ] T025 [P] [US3] Integration test for [user journey] in tests/integration/test_[name].py
+
+### Implementation for User Story 3
+
+- [ ] T026 [P] [US3] Create [Entity] model in src/models/[entity].py
+- [ ] T027 [US3] Implement [Service] in src/services/[service].py
+- [ ] T028 [US3] Implement [endpoint/feature] in src/[location]/[file].py
+
+**Checkpoint**: All user stories should now be independently functional
 
 ---
 
@@ -161,22 +148,14 @@ description: "Task list template for feature implementation"
 
 ## Phase N: Polish & Cross-Cutting Concerns
 
-**Purpose**: Enhancements to existing working features
+**Purpose**: Improvements that affect multiple user stories
 
-- [ ] TXXX [POLISH] Performance optimization across all stories
-  - **SEE**: Faster response times, metrics dashboard
-  - **DO**: Implement caching, query optimization
-  - **VERIFY**: Latency reduced by X%, benchmarks pass
-
-- [ ] TXXX [POLISH] Accessibility improvements
-  - **SEE**: Screen reader support, keyboard navigation
-  - **DO**: Add ARIA labels, focus management
-  - **VERIFY**: A11y audit passes, manual testing successful
-
-- [ ] TXXX [POLISH] Documentation updates
-  - **SEE**: Updated guides in docs/
-  - **DO**: Document new features, update quickstart
-  - **VERIFY**: QA team validates instructions work
+- [ ] TXXX [P] Documentation updates in docs/
+- [ ] TXXX Code cleanup and refactoring
+- [ ] TXXX Performance optimization across all stories
+- [ ] TXXX [P] Additional unit tests (if requested) in tests/unit/
+- [ ] TXXX Security hardening
+- [ ] TXXX Run quickstart.md validation
 
 ---
 
@@ -184,41 +163,49 @@ description: "Task list template for feature implementation"
 
 ### Phase Dependencies
 
-- **User Story 1 (Phase 1)**: No dependencies - start immediately 🎯 MVP
-  - Prerequisites (migrations, env) handled implicitly within tasks
-  - Tests validate all prerequisites in setup phase
-- **User Story 2 (Phase 2)**: Independent of US1 - can run in parallel
-  - Or sequential after US1 if team capacity limited
-- **User Story 3 (Phase 3)**: Independent of US1/US2 - can run in parallel
-- **Polish (Final Phase)**: Depends on core user stories being operational
+- **Setup (Phase 1)**: No dependencies - can start immediately
+- **Foundational (Phase 2)**: Depends on Setup completion - BLOCKS all user stories
+- **User Stories (Phase 3+)**: All depend on Foundational phase completion
+  - User stories can then proceed in parallel (if staffed)
+  - Or sequentially in priority order (P1 → P2 → P3)
+- **Polish (Final Phase)**: Depends on all desired user stories being complete
 
-### Task-Level Dependencies
+### User Story Dependencies
 
-- **Tests FIRST**: All test tasks (T001-T002) MUST fail (RED) before implementation
-- **Vertical Slices**: Each [SLICE] task delivers complete user value
-- **Prerequisites**: Database migrations, env vars validated by tests (not standalone tasks)
-- **Parallel [P]**: Tasks marked [P] can run concurrently (different files)
+- **User Story 1 (P1)**: Can start after Foundational (Phase 2) - No dependencies on other stories
+- **User Story 2 (P2)**: Can start after Foundational (Phase 2) - May integrate with US1 but should be independently testable
+- **User Story 3 (P3)**: Can start after Foundational (Phase 2) - May integrate with US1/US2 but should be independently testable
 
-### Execution Patterns
+### Within Each User Story
 
-**Sequential (TDD):**
-```
-T001 (Test) → RED → T003 (Entity) → T005 (Service) → T006 (UI+API) → GREEN
-```
-
-**Parallel (Team):**
-```
-Developer A: User Story 1 (T001-T006)
-Developer B: User Story 2 (T007-T009) ← runs simultaneously
-Developer C: User Story 3 (T010-T012) ← runs simultaneously
-```
+- Tests (if included) MUST be written and FAIL before implementation
+- Models before services
+- Services before endpoints
+- Core implementation before integration
+- Story complete before moving to next priority
 
 ### Parallel Opportunities
 
-- All test tasks marked [P] within same user story
-- All entity/model tasks marked [P] within same story
-- Different user stories (US1, US2, US3) can be developed in parallel
-- Infrastructure (migrations) applied once, shared by all stories
+- All Setup tasks marked [P] can run in parallel
+- All Foundational tasks marked [P] can run in parallel (within Phase 2)
+- Once Foundational phase completes, all user stories can start in parallel (if team capacity allows)
+- All tests for a user story marked [P] can run in parallel
+- Models within a story marked [P] can run in parallel
+- Different user stories can be worked on in parallel by different team members
+
+---
+
+## Parallel Example: User Story 1
+
+```bash
+# Launch all tests for User Story 1 together (if tests requested):
+Task: "Contract test for [endpoint] in tests/contract/test_[name].py"
+Task: "Integration test for [user journey] in tests/integration/test_[name].py"
+
+# Launch all models for User Story 1 together:
+Task: "Create [Entity1] model in src/models/[entity1].py"
+Task: "Create [Entity2] model in src/models/[entity2].py"
+```
 
 ---
 
@@ -226,50 +213,39 @@ Developer C: User Story 3 (T010-T012) ← runs simultaneously
 
 ### MVP First (User Story 1 Only)
 
-1. **Apply prerequisites** (migrations, env vars) manually or via setup script
-2. **Write tests** (T001-T002) and confirm RED state
-3. **Implement** entities, services, UI+API (T003-T006)
-4. **Validate GREEN**: All tests pass, user can test feature
-5. **Deploy/demo** if ready - complete vertical slice delivered
+1. Complete Phase 1: Setup
+2. Complete Phase 2: Foundational (CRITICAL - blocks all stories)
+3. Complete Phase 3: User Story 1
+4. **STOP and VALIDATE**: Test User Story 1 independently
+5. Deploy/demo if ready
 
 ### Incremental Delivery
 
-1. **Phase 1**: User Story 1 → Test independently → Deploy/Demo (MVP!) 🎯
-2. **Phase 2**: User Story 2 → Test independently → Deploy/Demo
-3. **Phase 3**: User Story 3 → Test independently → Deploy/Demo
-4. **Each story adds value** without breaking previous stories
+1. Complete Setup + Foundational → Foundation ready
+2. Add User Story 1 → Test independently → Deploy/Demo (MVP!)
+3. Add User Story 2 → Test independently → Deploy/Demo
+4. Add User Story 3 → Test independently → Deploy/Demo
+5. Each story adds value without breaking previous stories
 
 ### Parallel Team Strategy
 
 With multiple developers:
 
-1. **Apply shared infrastructure**: Migrations, environment setup (one-time)
-2. **Parallel development**:
-   - Developer A: User Story 1 (T001-T006)
-   - Developer B: User Story 2 (T007-T009)
-   - Developer C: User Story 3 (T010-T012)
-3. **Independent validation**: Each story testable without others
-4. **Integration**: Stories compose naturally (no breaking changes)
+1. Team completes Setup + Foundational together
+2. Once Foundational is done:
+   - Developer A: User Story 1
+   - Developer B: User Story 2
+   - Developer C: User Story 3
+3. Stories complete and integrate independently
 
 ---
 
 ## Notes
 
-- **[P]** = Parallel execution possible (different files, no dependencies)
-- **[SLICE]** = Vertical slice delivering complete user value (UI + Backend + Data + Feedback)
-- **[POLISH]** = Enhancement to existing working feature
-- **[Story]** = Maps to user story (US1, US2, US3) for traceability
-- **Prerequisites** = Infrastructure validated BY tests, not delivered AS tasks
-- **TDD** = Tests MUST fail (RED) before implementation starts
-- **Demo-ready** = Every slice can be shown to non-technical person
-
-**Forbidden Patterns:**
-- ❌ [SETUP] tasks (infrastructure-only)
-- ❌ Backend without UI
-- ❌ UI without backend
-- ❌ Tasks without SEE-DO-VERIFY
-- ❌ Database migrations as standalone tasks
-
-**Commit Strategy:**
-- Commit after each GREEN (test passes)
+- [P] tasks = different files, no dependencies
+- [Story] label maps task to specific user story for traceability
+- Each user story should be independently completable and testable
+- Verify tests fail before implementing
+- Commit after each task or logical group
 - Stop at any checkpoint to validate story independently
+- Avoid: vague tasks, same file conflicts, cross-story dependencies that break independence

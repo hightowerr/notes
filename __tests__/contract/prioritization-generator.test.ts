@@ -81,6 +81,7 @@ describe('prioritizationGenerator agent (T005)', () => {
           effort: 24,
           confidence: 0.86,
           reasoning: 'Checkout speedups unblock the stated outcome and require one squad-week.',
+          brief_reasoning: 'Unblocks checkout to lift conversion',
         },
         [applePayTaskId]: {
           task_id: applePayTaskId,
@@ -88,6 +89,7 @@ describe('prioritizationGenerator agent (T005)', () => {
           effort: 32,
           confidence: 0.81,
           reasoning: 'Apple Pay v6 unlocks mobile conversion with moderate engineering lift.',
+          brief_reasoning: 'Enables Apple Pay to raise conversions',
         },
       },
       confidence: 0.82,

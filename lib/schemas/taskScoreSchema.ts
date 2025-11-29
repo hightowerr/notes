@@ -1,5 +1,23 @@
 import { z } from 'zod';
 
+const GENERIC_BRIEF_REASON_PATTERNS = [
+  /^(important|critical|high priority)$/i,
+  /^this is (important|critical|urgent)$/i,
+];
+
+export const BriefReasoningSchema = z
+  .string()
+  .min(5, 'Brief reasoning must be at least 5 characters')
+  .max(150, 'Brief reasoning must be at most 150 characters')
+  .refine(
+    value => value.trim().split(/\s+/).length <= 20,
+    'Brief reasoning must be at most 20 words'
+  )
+  .refine(
+    value => !GENERIC_BRIEF_REASON_PATTERNS.some(pattern => pattern.test(value.trim())),
+    'Brief reasoning must be specific, not generic phrases like "important"'
+  );
+
 // Allow structured reasoning payloads for richer UI (impact keywords, effort hints, etc.)
 const reasoningDetailSchema = z
   .object({
@@ -36,6 +54,7 @@ export const taskScoreSchema = z.object({
     .min(0, 'Confidence must be at least 0')
     .max(1, 'Confidence cannot exceed 1'),
   reasoning: reasoningSchema,
+  brief_reasoning: BriefReasoningSchema,
   dependencies: z.array(z.string().min(1)).optional(),
   reflection_influence: z
     .string()
@@ -44,3 +63,4 @@ export const taskScoreSchema = z.object({
 });
 
 export type TaskScore = z.infer<typeof taskScoreSchema>;
+export type BriefReasoning = z.infer<typeof BriefReasoningSchema>;

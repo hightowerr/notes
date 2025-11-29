@@ -106,7 +106,6 @@ type ActiveTaskEntry = {
   id: string;
   title: string;
   category: 'leverage' | 'neutral' | 'overhead' | null;
-  isLocked: boolean;
   movement: MovementInfo | undefined;
   dependencyLinks: ReturnType<typeof buildDependencyLinks>;
   planOrder: number;
@@ -122,10 +121,6 @@ type ActiveTaskEntry = {
   baselineScore?: StrategicScore | null;
   inclusionReason?: string | null;
   reflectionEffects?: ReflectionEffect[];
-};
-
-type LockedTaskState = {
-  order: number;
 };
 
 type TaskOption = {
@@ -526,7 +521,6 @@ function TaskListContent({
   const [recentlyDiscarded, setRecentlyDiscarded] = useState<Set<string>>(new Set());
   const [discardCandidates, setDiscardCandidates] = useState<DiscardCandidate[]>([]);
   const [showDiscardReview, setShowDiscardReview] = useState(false);
-  const [lockStore, setLockStore] = useLocalStorage<Record<string, Record<string, LockedTaskState>>>('locked-tasks', {});
   const [dependencyStore, setDependencyStore] = useLocalStorage<DependencyOverrideStore>(DEPENDENCY_OVERRIDE_STORAGE_KEY, {});
   const [dismissedDiscardStore, setDismissedDiscardStore] = useLocalStorage<Record<string, string[]>>(
     'dismissed-discard-ids',
@@ -552,14 +546,6 @@ function TaskListContent({
     });
   }, [sortingStrategy, sanitizedTaskIds.length, strategicScores]);
   const outcomeKey = outcomeId ?? 'global';
-  const safeLockStore = useMemo(
-    () => ensureRecord<Record<string, LockedTaskState>>(lockStore),
-    [lockStore]
-  );
-  const lockedTasks = useMemo(
-    () => ensureRecord<LockedTaskState>(safeLockStore[outcomeKey]),
-    [safeLockStore, outcomeKey]
-  );
   const safeDependencyStore = useMemo(
     () => ensureRecord<DependencyOverrideEntry>(dependencyStore),
     [dependencyStore]
@@ -578,20 +564,7 @@ function TaskListContent({
   }, [dismissedIds]);
   const previousPlanVersionRef = useRef(planVersion);
 
-  const updateLockedTasks = useCallback(
-    (updater: (current: Record<string, LockedTaskState>) => Record<string, LockedTaskState>) => {
-      setLockStore(prev => {
-        const safePrev = ensureRecord<Record<string, LockedTaskState>>(prev);
-        const current = ensureRecord<LockedTaskState>(safePrev[outcomeKey]);
-        const nextOutcomeEntry = updater(current);
-        return {
-          ...safePrev,
-          [outcomeKey]: nextOutcomeEntry,
-        };
-      });
-    },
-    [outcomeKey, setLockStore]
-  );
+
 
   const updateDependencyOverrides = useCallback(
     (
@@ -1295,19 +1268,6 @@ function TaskListContent({
       }
     });
 
-    Object.entries(lockedTasks).forEach(([taskId, lockState]) => {
-      if (nextState.statuses[taskId] !== 'completed' && nextState.statuses[taskId] !== 'discarded') {
-        if (nextState.statuses[taskId] !== 'active') {
-          nextState.statuses[taskId] = 'active';
-          stateChanged = true;
-        }
-      }
-      if (typeof lockState.order === 'number' && nextState.ranks[taskId] !== lockState.order) {
-        nextState.ranks[taskId] = lockState.order;
-        ranksChanged = true;
-      }
-    });
-
     if (stateChanged || ranksChanged) {
       updatePriorityState(() => nextState);
     }
@@ -1408,7 +1368,6 @@ function TaskListContent({
     annotationById,
     removalById,
     removedTasksFromPlan,
-    lockedTasks,
     manualTaskIds,
     taskLookup,
     hasLoadedStoredState,
@@ -1555,29 +1514,6 @@ function TaskListContent({
         });
 
         const fetchedIds = new Set((payload.tasks ?? []).map(task => task.task_id));
-        const missingLocked = Object.keys(lockedTasks).filter(taskId => !fetchedIds.has(taskId));
-        if (missingLocked.length > 0) {
-          updateLockedTasks(current => {
-            const next = { ...current };
-            missingLocked.forEach(taskId => {
-              delete next[taskId];
-            });
-            return next;
-          });
-          updatePriorityState(prev => {
-            const next: PriorityState = {
-              statuses: { ...prev.statuses },
-              reasons: { ...prev.reasons },
-              ranks: { ...prev.ranks },
-            };
-            missingLocked.forEach(taskId => {
-              delete next.statuses[taskId];
-              delete next.reasons[taskId];
-              delete next.ranks[taskId];
-            });
-            return next;
-          });
-        }
       } catch (error) {
         if (didUnmountRef.current) {
           return;
@@ -1860,35 +1796,22 @@ function TaskListContent({
   }, [priorityState.statuses, priorityState.ranks, sanitizedTaskIds]);
 
   const orderedActiveIds = useMemo(() => {
-    const combinedIds = new Set<string>([
+    const combinedIds = new Set([
       ...activeIdsFromPlan,
       ...manuallyRestoredIds,
-      ...Object.keys(lockedTasks),
     ]);
 
     const sortable = Array.from(combinedIds).map(taskId => {
-      const lockOrder = lockedTasks[taskId]?.order ?? null;
       const planIndex = sanitizedTaskIds.indexOf(taskId);
       const fallbackRank =
         planIndex >= 0 ? planIndex + 1 : priorityState.ranks[taskId] ?? Number.MAX_SAFE_INTEGER;
       return {
         taskId,
-        lockOrder,
         fallbackRank,
       };
     });
 
     sortable.sort((a, b) => {
-      if (a.lockOrder !== null && b.lockOrder !== null) {
-        if (a.lockOrder !== b.lockOrder) {
-          return a.lockOrder - b.lockOrder;
-        }
-      } else if (a.lockOrder !== null) {
-        return -1;
-      } else if (b.lockOrder !== null) {
-        return 1;
-      }
-
       if (a.fallbackRank !== b.fallbackRank) {
         return a.fallbackRank - b.fallbackRank;
       }
@@ -1897,35 +1820,17 @@ function TaskListContent({
     });
 
     return sortable.map(entry => entry.taskId);
-  }, [activeIdsFromPlan, manuallyRestoredIds, lockedTasks, sanitizedTaskIds, priorityState.ranks]);
+  }, [activeIdsFromPlan, manuallyRestoredIds, sanitizedTaskIds, priorityState.ranks]);
 
-  useEffect(() => {
-    if (Object.keys(lockedTasks).length === 0) {
-      return;
-    }
-    const updated: Record<string, LockedTaskState> = {};
-    let changed = false;
-    orderedActiveIds.forEach((taskId, index) => {
-      if (lockedTasks[taskId]) {
-        const nextOrder = index + 1;
-        updated[taskId] = { order: nextOrder };
-        if (lockedTasks[taskId].order !== nextOrder) {
-          changed = true;
-        }
-      }
-    });
-    if (changed) {
-      updateLockedTasks(() => updated);
-    }
-  }, [lockedTasks, orderedActiveIds, updateLockedTasks]);
+
 
   const taskOptions = useMemo<TaskOption[]>(() => {
-    const ids = Array.from(new Set([...sanitizedTaskIds, ...manuallyRestoredIds, ...Object.keys(lockedTasks)]));
+    const ids = Array.from(new Set([...sanitizedTaskIds, ...manuallyRestoredIds]));
     return ids.map(id => ({
       id,
       title: getTaskTitle(id),
     }));
-  }, [sanitizedTaskIds, manuallyRestoredIds, lockedTasks, getTaskTitle]);
+  }, [sanitizedTaskIds, manuallyRestoredIds, getTaskTitle]);
 
   // Collect blocked tasks for display in BlockedTasksSection
   // Only show blocked tasks when there are active reflections
@@ -2057,7 +1962,7 @@ function TaskListContent({
         id: taskId,
         title: node.title,
         category: node.category ?? null,
-        isLocked: Boolean(lockedTasks[taskId]),
+
         movement,
         dependencyLinks: buildDependencyLinks(node.dependencies, priorityState.ranks, getTaskTitle),
         planOrder: index + 1,
@@ -2105,7 +2010,11 @@ function TaskListContent({
     const sorted = [...filtered].sort((a, b) =>
       compareTasksByStrategy(a, b, sortingStrategy, strategyScoreCache)
     );
-    return sorted.map((task, index) => ({
+    
+    // Apply focus mode limit: show only top 3 tasks
+    const limited = sortingStrategy === 'focus_mode' ? sorted.slice(0, 3) : sorted;
+
+    return limited.map((task, index) => ({
       ...task,
       displayOrder: index + 1,
     }));
@@ -2449,7 +2358,6 @@ function TaskListContent({
       strategicDetails={task.strategicDetails ?? undefined}
       title={task.title}
       category={task.category}
-      isLocked={task.isLocked}
       dependencyLinks={task.dependencyLinks}
       movement={task.movement}
       checked={task.checked}
@@ -2463,7 +2371,6 @@ function TaskListContent({
       isHighlighted={highlightedIds.has(task.id)}
       onSelect={handleSelectTask}
       onToggleCompleted={handleToggleCompleted}
-      onToggleLock={() => handleToggleLock(task.id, task.planOrder)}
       isEditingDisabled={sessionStatus === 'running'}
       onTaskTitleChange={handleTaskTitleChange}
       outcomeId={outcomeId}
@@ -2489,15 +2396,28 @@ function TaskListContent({
 
   const renderTaskRows = (tasksToRender: ActiveTaskEntry[], options?: { virtualized?: boolean }) => (
     <div className="flex flex-col gap-4 lg:gap-0 lg:divide-y lg:divide-border/60">
-      {tasksToRender.map(task => (
-        <div
-          key={`active-${task.id}`}
-          data-virtual-row={options?.virtualized ? 'true' : undefined}
-          style={options?.virtualized ? { minHeight: safeRowHeight } : undefined}
-        >
-          {renderTaskRowContent(task)}
+      {tasksToRender.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-12 text-center">
+          <p className="text-muted-foreground">No tasks match the current filter.</p>
+          <Button
+            variant="link"
+            onClick={() => onStrategyChange('balanced')}
+            className="mt-2"
+          >
+            Clear filter
+          </Button>
         </div>
-      ))}
+      ) : (
+        tasksToRender.map(task => (
+          <div
+            key={`active-${task.id}`}
+            data-virtual-row={options?.virtualized ? 'true' : undefined}
+            style={options?.virtualized ? { minHeight: safeRowHeight } : undefined}
+          >
+            {renderTaskRowContent(task)}
+          </div>
+        ))
+      )}
     </div>
   );
 
@@ -2515,7 +2435,6 @@ function TaskListContent({
           value={sortingStrategy}
           onChange={onStrategyChange}
           compact
-          disabled={displayedTaskCount === 0}
         />
       </div>
     </div>
@@ -2622,7 +2541,7 @@ function TaskListContent({
           reasons: { ...prev.reasons },
           ranks: { ...prev.ranks },
         };
-        if (nextStatus !== 'discarded' && next.reasons[taskId]) {
+        if (next.reasons[taskId]) {
           delete next.reasons[taskId];
         }
         if (!next.ranks[taskId]) {
@@ -2789,34 +2708,7 @@ function TaskListContent({
     }
   }, [updatePriorityState, setTaskLookup]);
 
-  const handleToggleLock = useCallback(
-    (taskId: string, order: number) => {
-      updateLockedTasks(current => {
-        const next = { ...current };
-        if (next[taskId]) {
-          delete next[taskId];
-        } else {
-          next[taskId] = { order };
-        }
-        return next;
-      });
-      updatePriorityState(prev => {
-        const next: PriorityState = {
-          statuses: { ...prev.statuses },
-          reasons: { ...prev.reasons },
-          ranks: { ...prev.ranks },
-        };
-        if (!next.statuses[taskId]) {
-          next.statuses[taskId] = 'active';
-        }
-        if (!lockedTasks[taskId]) {
-          next.ranks[taskId] = order;
-        }
-        return next;
-      });
-    },
-    [lockedTasks, updateLockedTasks, updatePriorityState]
-  );
+
 
   const handleSelectTask = useCallback((taskId: string) => {
     setSelectedTaskId(taskId);
@@ -2831,7 +2723,6 @@ function TaskListContent({
   const selectedConfidence = selectedNode?.confidence ?? null;
   const selectedMovement: MovementInfo | undefined =
     selectedNode?.movement ?? movementMap[selectedTaskId ?? ''];
-  const selectedIsLocked = selectedNode ? Boolean(lockedTasks[selectedNode.id]) : false;
 
   return (
     <div className="flex flex-col gap-8">
@@ -2991,9 +2882,13 @@ function TaskListContent({
                 lnoCategory: selectedNode.category ?? null,
                 outcomeRationale: selectedNode.rationale ?? null,
                 sourceText: selectedNode.sourceText ?? null,
+                isManual: Boolean(selectedNode.isManual),
+                manualStatus: selectedNode.isManual ? manualStatuses[selectedNode.id] : undefined,
+                manualStatusDetail: selectedNode.isManual ? manualStatusDetails[selectedNode.id] : undefined,
               }
             : null
         }
+        strategicScore={selectedTaskId && strategicScores ? strategicScores[selectedTaskId] ?? null : null}
         status={selectedStatus}
         removalReason={selectedNode?.removalReason ?? selectedReason}
         onMarkDone={() => {
@@ -3017,7 +2912,6 @@ function TaskListContent({
       onNavigateToTask={scrollToTask}
       getTaskTitle={getTaskTitle}
       outcomeStatement={outcomeStatement ?? null}
-      isLocked={selectedIsLocked}
       onRemoveDependency={handleRemoveDependency}
       onAddDependency={handleAddDependency}
       taskOptions={taskOptions}
@@ -3087,6 +2981,9 @@ function matchesStrategyFilters(
   }
   if (strategy === 'strategic_bets') {
     return entry.matchesStrategicBet;
+  }
+  if (strategy === 'focus_mode') {
+    return entry.matchesQuickWin || entry.matchesStrategicBet;
   }
   return true;
 }

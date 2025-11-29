@@ -7,6 +7,7 @@ const createValidScore = () => ({
   effort: 12,
   confidence: 0.77,
   reasoning: 'Increases payment conversion while staying inside the quarter scope.',
+  brief_reasoning: 'Unblocks #3 • Enables payment fix',
   dependencies: ['223e4567-e89b-12d3-a456-426614174001'],
 });
 

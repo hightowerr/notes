@@ -7,6 +7,7 @@ export const SortingStrategySchema = z.enum([
   'quick_wins',
   'strategic_bets',
   'urgent',
+  'focus_mode',
 ]);
 
 export type SortingStrategy = z.infer<typeof SortingStrategySchema>;
@@ -87,5 +88,11 @@ export const STRATEGY_CONFIGS: Record<SortingStrategy, StrategyConfig> = {
       const bMultiplier = isUrgent(b) ? 2 : 1;
       return b.priority * bMultiplier - a.priority * aMultiplier;
     },
+  },
+  focus_mode: {
+    label: 'Focus Mode (Recommended)',
+    description: 'High-leverage work only (Quick Wins + Strategic Bets)',
+    filter: task => isQuickWinTask(task) || isStrategicBetTask(task),
+    sort: (a, b) => b.priority - a.priority,
   },
 };

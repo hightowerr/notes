@@ -1,0 +1,288 @@
+# Agent Brief Reasoning Contract
+#
+# Defines the brief_reasoning field addition to agent output schema
+# and validation rules for outcome-linked reasoning format
+
+openapi: 3.0.0
+info:
+  title: Agent Brief Reasoning Contract
+  version: 1.0.0
+  description: |
+    Contract for agent-generated brief reasoning field (≤20 words) that explains
+    task priority in outcome-linked format. Part of trust-focused refactor to
+    replace generic reasoning with specific, dependency-aware explanations.
+
+paths:
+  /api/agent/prioritize:
+    post:
+      summary: Generate prioritized task list with brief reasoning
+      description: |
+        Existing endpoint extended to include brief_reasoning in per_task_scores.
+        Agent must generate outcome-linked reasoning (≤20 words) for each task.
+        Validation failures trigger up to 3 retries before fallback.
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                outcome_id:
+                  type: string
+                  format: uuid
+                tasks:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Task'
+              required:
+                - outcome_id
+                - tasks
+
+      responses:
+        '200':
+          description: Successful prioritization with brief reasoning
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrioritizationResponse'
+
+        '400':
+          description: Validation failed after 3 retries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Brief reasoning validation failed after 3 attempts"
+                  retry_count:
+                    type: integer
+                    example: 3
+                  last_error:
+                    type: string
+                    example: "Generic phrase detected: 'important task'"
+
+        '500':
+          description: Agent execution error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "Agent failed to generate output"
+
+components:
+  schemas:
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        content:
+          type: string
+        is_manual:
+          type: boolean
+      required:
+        - id
+        - title
+
+    PrioritizationResponse:
+      type: object
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [completed, running, failed]
+        strategic_scores:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/TaskScore'
+        per_task_scores:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/TaskScoreWithReasoning'
+      required:
+        - session_id
+        - status
+        - per_task_scores
+
+    TaskScore:
+      type: object
+      properties:
+        impact:
+          type: number
+          minimum: 0
+          maximum: 10
+        effort:
+          type: number
+          minimum: 0
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+      required:
+        - impact
+        - effort
+        - confidence
+
+    TaskScoreWithReasoning:
+      allOf:
+        - $ref: '#/components/schemas/TaskScore'
+        - type: object
+          properties:
+            brief_reasoning:
+              $ref: '#/components/schemas/BriefReasoning'
+            dependencies:
+              type: array
+              items:
+                type: string
+            reflection_influence:
+              type: string
+          required:
+            - brief_reasoning
+
+    BriefReasoning:
+      type: string
+      description: |
+        Outcome-linked reasoning for task priority (≤20 words).
+        Must be specific and reference outcomes, dependencies, or mechanisms.
+        Prohibited: Generic phrases like "important", "critical" without context.
+      minLength: 5
+      maxLength: 150
+      pattern: ^(?!.*(^important$|^critical$|^high priority$)).*$
+      examples:
+        - "Unblocks #3, #7 • Enables payment feature"
+        - "Addresses user complaint from reflection 'slow checkout'"
+        - "Prerequisite for Phase 2 launch milestone"
+        - "Fixes production bug affecting 30% of users"
+
+# Validation Rules (enforced in Zod schema)
+validation:
+  word_count:
+    max: 20
+    error: "Brief reasoning must be ≤20 words"
+
+  generic_patterns_rejected:
+    - pattern: /^(important|critical|high priority)$/i
+      error: "Generic phrase without specifics"
+    - pattern: /^this is (important|critical|urgent)$/i
+      error: "Generic phrase without specifics"
+    - pattern: /^(must|should|need to) (do|complete|finish) this$/i
+      error: "Generic action without outcome link"
+
+  outcome_link_required:
+    - dependency_reference: /unblocks? #\d+/i
+    - outcome_mention: /(enables?|advances?|supports?|fixes?) .+/i
+    - milestone_reference: /(phase \d+|milestone|launch|deadline)/i
+    - user_impact: /(affects?|improves?|resolves?) .+ users?/i
+
+  fallback_on_failure:
+    after_retries: 3
+    fallback_format: "Priority: {rank}"
+    example: "Priority: 1"
+
+# Retry Logic
+retry_behavior:
+  max_attempts: 3
+  failure_handling:
+    - attempt_1_failure:
+        action: "Retry with prompt hint: 'Be more specific, link to outcome or dependencies'"
+    - attempt_2_failure:
+        action: "Retry with prompt hint: 'Avoid generic phrases, reference specific tasks or goals'"
+    - attempt_3_failure:
+        action: "Use fallback brief_reasoning: 'Priority: {rank}'"
+
+  success_rate_target: "≥98% of tasks should pass validation within 3 attempts"
+
+  telemetry:
+    log_retry_attempts: true
+    log_validation_failures: true
+    track_fallback_usage: true
+
+# Performance Targets
+performance:
+  validation_time: "<50ms per task"
+  retry_overhead: "<150ms total (3 attempts × 50ms)"
+  agent_call_with_retries: "<2s including retries"
+
+# Test Coverage
+test_requirements:
+  unit_tests:
+    - name: "Brief reasoning schema validation"
+      location: "__tests__/contract/agent-brief-reasoning.test.ts"
+      assertions:
+        - "Word count ≤20"
+        - "Character length 5-150"
+        - "Generic phrases rejected"
+        - "Empty string rejected"
+
+    - name: "Retry logic"
+      location: "__tests__/contract/agent-brief-reasoning-retry.test.ts"
+      assertions:
+        - "Retry triggered on validation failure"
+        - "Max 3 retry attempts"
+        - "Fallback after 3 failures"
+        - "Success rate ≥98%"
+
+  integration_tests:
+    - name: "End-to-end prioritization with brief reasoning"
+      location: "__tests__/integration/prioritization-brief-reasoning.test.ts"
+      assertions:
+        - "Brief reasoning displayed in TaskRow"
+        - "Full reasoning accessible in drawer"
+        - "Truncation with '...' if >20 words in display"
+
+  acceptance_criteria:
+    - "Top 5 tasks have outcome-linked brief reasoning"
+    - "No generic phrases in top 10 tasks"
+    - "Fallback 'Priority: {rank}' used for <2% of tasks"
+    - "Agent retry succeeds within 3 attempts for ≥98% of tasks"
+
+# Examples
+
+examples:
+  valid_brief_reasoning:
+    - "Unblocks #3, #7 • Enables payment feature"
+    - "Fixes production bug affecting 30% of users"
+    - "Prerequisite for Phase 2 launch milestone"
+    - "Addresses user reflection 'slow checkout flow'"
+    - "Completes MVP for Q1 launch deadline"
+
+  invalid_brief_reasoning:
+    - "Important task"  # Generic, no specifics
+    - "Critical"  # Generic, no context
+    - "High priority"  # Generic, no outcome link
+    - "Need to do this"  # Generic action, no why
+    - "This is urgent and important for the project success"  # Too vague
+
+  edge_cases:
+    - task_with_no_dependencies:
+        brief_reasoning: "Advances user retention metric by 15%"
+        rationale: "Focus on outcome impact when no dependencies"
+
+    - task_blocked_by_external:
+        brief_reasoning: "Waiting on API access • Unblocks #5 when ready"
+        rationale: "Acknowledge blocker but explain downstream value"
+
+    - manual_task_from_reflection:
+        brief_reasoning: "User requested in reflection 'need dark mode'"
+        rationale: "Link to reflection for transparency"
+
+    - fallback_after_retries:
+        brief_reasoning: "Priority: 1"
+        rationale: "Agent failed validation 3 times, use rank as fallback"
+
+# References
+references:
+  feature_spec: "../spec.md"
+  data_model: "../data-model.md"
+  agent_prompt: "lib/mastra/agents/prioritizationGenerator.ts"
+  schema_file: "lib/schemas/prioritizationResultSchema.ts"

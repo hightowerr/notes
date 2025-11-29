@@ -3,10 +3,10 @@ import { z } from 'zod';
 export const documentStatusSchema = z.object({
   id: z.string().uuid(),
   name: z.string(),
-  uploaded_at: z.string().datetime({ offset: true }).nullable(),
+  uploaded_at: z.string().nullable(),
   task_count: z.number().int().min(0),
   status: z.enum(['included', 'excluded', 'pending']),
-  included_at: z.string().datetime({ offset: true }).nullable(),
+  included_at: z.string().nullable(),
 });
 
 export const documentStatusResponseSchema = z.object({

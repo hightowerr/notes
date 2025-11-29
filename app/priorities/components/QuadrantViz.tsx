@@ -159,7 +159,7 @@ export function QuadrantViz({ tasks, onTaskClick, showCountBadge = true }: Quadr
 
   return (
     <div role="group" aria-label="Impact versus effort quadrant visualization" className="h-full w-full">
-      <ResponsiveContainer width="100%" height="100%">
+      <ResponsiveContainer width="100%" height="100%" minHeight={0} minWidth={0}>
         {chart}
       </ResponsiveContainer>
     </div>

@@ -726,6 +726,9 @@ function backfillMissingPerTaskScores(payload: any): any {
     }
     const taskId = task.task_id;
     if (scores[taskId]) {
+      if (scores[taskId].brief_reasoning == null) {
+        scores[taskId].brief_reasoning = 'Fallback reasoning for prioritized task';
+      }
       return;
     }
     const alignmentScore =
@@ -738,6 +741,7 @@ function backfillMissingPerTaskScores(payload: any): any {
       effort: 8,
       confidence: confidenceFallback,
       reasoning: 'Backfilled score for missing per_task_scores entry',
+      brief_reasoning: 'Fallback reasoning for prioritized task',
       dependencies: [],
     };
   });
@@ -839,7 +843,7 @@ async function runHybridAgent(
       });
     };
 
-    const { plan, metadata: loopMetadata } = await prioritizeWithHybridLoop(
+    const { plan, metadata: loopMetadata, result: loopResult } = await prioritizeWithHybridLoop(
       {
         tasks: context.tasks,
         outcome: context.outcome.assembled_text,
@@ -881,6 +885,7 @@ async function runHybridAgent(
       metadata,
       trace,
       evaluationMetadata: loopMetadata,
+      strategicScores: loopResult.per_task_scores,
     };
   } catch (error) {
     console.error('[AgentOrchestration] Hybrid loop execution failed', error);
@@ -1070,6 +1075,7 @@ async function runLegacyAgent(
       metadata,
       trace,
       evaluationMetadata: null,
+      strategicScores: parsedResult.data.per_task_scores,
     };
   } catch (error) {
     console.error('[AgentOrchestration] Agent execution failed', error);
@@ -1349,6 +1355,7 @@ export async function orchestrateTaskPriorities(options: OrchestrateTaskOptions)
     execution_metadata: agentRun.primary.metadata,
     evaluation_metadata: agentRun.primary.evaluationMetadata ?? null,
     updated_at: updatedAt,
+    strategic_scores: agentRun.primary.status === 'completed' ? agentRun.primary.strategicScores : null,
   };
 
   const { error: updateError } = await supabase

@@ -1,6 +1,6 @@
 /**
- * Integration Test (T033): Manual task reprioritization with 1.2x boost
- * Expectation: generator instructions include manual-task boost and manual task surfaces at top of plan.
+ * Integration Test (T033): Manual task reprioritization without boost
+ * Expectation: generator instructions exclude manual-task boost and manual task ranks purely on scores.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -27,11 +27,11 @@ const docTask: TaskSummary = {
 };
 
 describe('manual task reprioritization (T033)', () => {
-  it('boosts manual task (1.2x) and places it above similar impact doc tasks', async () => {
+  it('does not boost manual task; ordering follows raw scores', async () => {
     const generatorFactory = (instructions: string) => {
-      // RED phase guard: fail if instructions do not mention manual boost
-      if (!instructions.includes('1.2') && !instructions.toLowerCase().includes('manual')) {
-        throw new Error('Manual task boost instructions missing');
+      // Guard: fail if any legacy boost guidance remains
+      if (instructions.includes('1.2') || instructions.toLowerCase().includes('manual task boost')) {
+        throw new Error('Manual task boost instructions should be absent');
       }
 
       return {
@@ -40,13 +40,13 @@ describe('manual task reprioritization (T033)', () => {
             thoughts: {
               outcome_analysis: 'Manual task aligns strongly with outcome.',
               filtering_rationale: 'Manual task prioritized after boost.',
-              prioritization_strategy: 'Boost manual tasks by 1.2x impact.',
-              self_check_notes: 'Manual boost applied correctly.',
+              prioritization_strategy: 'Rank tasks by impact/effort without manual boost.',
+              self_check_notes: 'Manual/AI parity confirmed.',
             },
             included_tasks: [
               {
                 task_id: 'manual-1',
-                inclusion_reason: 'Manual task with boosted impact',
+                inclusion_reason: 'Manual task scored identically to peers',
                 alignment_score: 9,
               },
               {
@@ -56,25 +56,27 @@ describe('manual task reprioritization (T033)', () => {
               },
             ],
             excluded_tasks: [],
-            ordered_task_ids: ['manual-1', 'doc-1'],
+            ordered_task_ids: ['doc-1', 'manual-1'],
             per_task_scores: {
               'manual-1': {
                 task_id: 'manual-1',
-                impact: 10,
+                impact: 9,
                 effort: 5,
                 confidence: 0.9,
-                reasoning: 'Boosted impact places it above similar tasks',
+                reasoning: 'Manual task scored without any boost',
+                brief_reasoning: 'Manual task scored evenly with peers',
               },
               'doc-1': {
                 task_id: 'doc-1',
-                impact: 9,
+                impact: 10,
                 effort: 5,
                 confidence: 0.8,
-                reasoning: 'Baseline impact without manual boost',
+                reasoning: 'Document task baseline impact',
+                brief_reasoning: 'Document task baseline impact',
               },
             },
             confidence: 0.9,
-            critical_path_reasoning: 'Manual task leads due to boost',
+            critical_path_reasoning: 'Ordering based purely on raw scores',
           });
         },
       };
@@ -89,10 +91,10 @@ describe('manual task reprioritization (T033)', () => {
       { createGeneratorAgent: generatorFactory }
     );
 
-    expect(result.plan.ordered_task_ids[0]).toBe('manual-1');
+    expect(result.plan.ordered_task_ids[0]).toBe('doc-1');
   });
 
-  it('applies 1.2x priority boost to manual tasks', async () => {
+  it('keeps parity: manual tasks are not boosted', async () => {
     const manualImpact = 8;
     const docImpact = 9;
     const impactById: Record<string, number> = {
@@ -114,13 +116,13 @@ describe('manual task reprioritization (T033)', () => {
 
     const generatorFactory = (instructions: string) => {
       const tasks = parseTasksFromInstructions(instructions);
-      if (!instructions.includes('1.2') || !instructions.toLowerCase().includes('manual task boost')) {
-        throw new Error('Manual task boost guidance missing from instructions');
+      if (instructions.includes('1.2') || instructions.toLowerCase().includes('manual task boost')) {
+        throw new Error('Manual task boost guidance should be removed from instructions');
       }
 
       const scored = tasks.map(task => {
         const baseImpact = impactById[task.id] ?? 0;
-        const effectiveImpact = task.is_manual ? baseImpact * 1.2 : baseImpact;
+        const effectiveImpact = baseImpact;
         const cappedImpact = Math.min(10, Number(effectiveImpact.toFixed(1)));
         return {
           ...task,
@@ -128,9 +130,7 @@ describe('manual task reprioritization (T033)', () => {
           effectiveImpact: cappedImpact,
           effort: 5,
           confidence: 0.8,
-          reasoning: task.is_manual
-            ? `Manual task received 1.2x boost: ${baseImpact} → ${cappedImpact}`
-            : 'Document task baseline impact',
+          reasoning: task.is_manual ? 'Manual task scored evenly with AI tasks' : 'Document task baseline impact',
         };
       });
 
@@ -147,8 +147,8 @@ describe('manual task reprioritization (T033)', () => {
             thoughts: {
               outcome_analysis: 'Manual boost applied per FR-015.',
               filtering_rationale: 'Both tasks align; manual boosted for visibility.',
-              prioritization_strategy: 'Apply 1.2x impact multiplier to manual tasks before ranking.',
-              self_check_notes: 'Verified boost changes ordering.',
+              prioritization_strategy: 'Rank tasks without any manual boost.',
+              self_check_notes: 'Verified parity ordering.',
             },
             included_tasks: scored.map(task => ({
               task_id: task.id,
@@ -164,11 +164,15 @@ describe('manual task reprioritization (T033)', () => {
                 effort: task.effort,
                 confidence: task.confidence,
                 reasoning: task.reasoning,
+                brief_reasoning:
+                  task.is_manual === true
+                    ? 'Manual task scored evenly'
+                    : 'Baseline impact without boost',
               };
               return acc;
             }, {}),
             confidence: 0.85,
-            critical_path_reasoning: 'Manual task edges out due to 1.2x boost.',
+            critical_path_reasoning: 'Ordering determined without any manual boost.',
           });
         },
       };
@@ -183,7 +187,7 @@ describe('manual task reprioritization (T033)', () => {
       { createGeneratorAgent: generatorFactory }
     );
 
-    expect(result.plan.ordered_task_ids[0]).toBe('manual-1');
-    expect(result.plan.ordered_task_ids[1]).toBe('doc-1');
+    expect(result.plan.ordered_task_ids[0]).toBe('doc-1');
+    expect(result.plan.ordered_task_ids[1]).toBe('manual-1');
   });
 });

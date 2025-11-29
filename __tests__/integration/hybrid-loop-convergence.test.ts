@@ -39,6 +39,7 @@ function buildResult(options: {
       effort: 10,
       confidence,
       reasoning: `Reasoning for ${taskId} ties to conversion lift and required sequencing.`,
+      brief_reasoning: `Unblocks ${taskId} for conversion gain`,
       dependencies: [],
     };
   });

@@ -28,7 +28,7 @@ export function MainNav({ actions }: MainNavProps) {
         >
           <FileText className="h-7 w-7 text-primary-2" aria-hidden="true" />
           <div className="leading-tight">
-            <span className="block text-base font-semibold">AI Note Synthesiser</span>
+            <span className="block text-base font-semibold">Pacenotes</span>
             <span className="block text-xs text-muted-foreground">
               Autonomous document intelligence
             </span>

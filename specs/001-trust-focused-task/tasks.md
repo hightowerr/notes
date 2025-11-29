@@ -450,6 +450,15 @@
     - Test edge case: Complete Quick Win → count decrements correctly
   - **Dependencies**: Independent (existing feature refinement)
 
+- [X] T024.1 [BUGFIX] Fix Quick Wins filter empty state (Missing Data)
+  - **Root Cause**: `strategic_scores` (impact/effort) were not being saved to `agent_sessions` table.
+  - **Fix**: Added `strategic_scores` column via migration 023 and updated `agentOrchestration.ts` to persist scores.
+  - **Action Required**: Run migration 023 and re-run prioritization to populate scores.
+
+- [X] T024.2 [BUGFIX] Fix Quick Wins filter freeze and "All Complete" confusion
+  - **Root Cause**: `SortingStrategySelector` was disabled when filtered count was 0, trapping the user. Empty list was misinterpreted as "all complete".
+  - **Fix**: Removed `disabled` prop from selector in `TaskList.tsx`. Added "No tasks match the current filter" empty state message.
+
 ---
 
 ## Dependencies & Execution Order

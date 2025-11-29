@@ -31,6 +31,7 @@ function createResult(options: {
       effort: 12,
       confidence,
       reasoning: `Reasoning for ${taskId} ties directly to revenue impact and engineering feasibility.`,
+      brief_reasoning: `Unblocks ${taskId} for revenue goal`,
       dependencies: [],
     };
   });

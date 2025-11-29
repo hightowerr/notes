@@ -53,7 +53,8 @@ Order INCLUDED tasks by:
 3. Dependencies (unblocking tasks get priority)
 4. User reflections (fine-tune within included set)
 5. HARD RULE: AVOID-tagged tasks (or overhead marked AVOID) belong at the bottom unless explicitly required to unblock a higher-impact task. If retained, they get the lowest priority and a clear note.
-6. **MANUAL TASK BOOST**: If \`is_manual=true\`, multiply impact score by 1.2 (20% boost) before ranking. Call this out in reasoning.
+6. For every included task, generate a **brief_reasoning** (≤20 words) that links to outcomes, dependencies, or mechanisms. Avoid generic phrases like "important", "critical", or "high priority" without specifics.
+   - Example formats: "Unblocks #3, #7 • Enables payment feature", "Prerequisite for Phase 2 launch milestone", "Fixes checkout bug affecting 30% of users".
    - If a reflection explicitly boosted or lowered this task's priority, populate \`reflection_influence\` field.
    - Example: "Reflection 'deadline is Friday' increased urgency"
 
@@ -103,6 +104,7 @@ Rate your confidence (0-1) in this prioritization:
         "effort_hint": "Similar to previous integration",
         "complexity_modifiers": ["legacy code"]
       }, 
+      "brief_reasoning": "Unblocks #3, #7 • Enables payment feature",
       "dependencies": ["task-3"],
       "reflection_influence": "User reflection 'focus on mobile' boosted priority" 
     }

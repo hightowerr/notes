@@ -176,6 +176,12 @@ function mapAgentDecision(result: Record<string, any>): ManualTaskAnalysisResult
   };
 }
 
+function removeLegacyManualBoost(instructions: string): string {
+  if (!instructions) return instructions;
+  // Guard against older prompt templates that mention a 1.2x manual task boost.
+  return instructions.replace(/\*\*MANUAL TASK BOOST\*\*:[^\n]*\n?/gi, '');
+}
+
 function isTimeoutError(error: unknown): boolean {
   const code = (error as { code?: string })?.code;
   if (code === 'ETIMEDOUT' || code === 'ETIME' || code === 'ECONNABORTED') {
@@ -222,7 +228,7 @@ export async function analyzeManualTask(params: {
     baselineSummary: 'Manual task placement request',
   };
 
-  const instructions = generatePrioritizationInstructions(context);
+  const instructions = removeLegacyManualBoost(generatePrioritizationInstructions(context));
   const agent = createPrioritizationAgent(instructions, initializeMastra());
   const start = performance.now ? performance.now() : Date.now();
 

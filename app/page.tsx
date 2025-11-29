@@ -176,17 +176,17 @@ export default function Home() {
           prev.map((f) =>
             f.id === fileId
               ? {
-                  ...f,
-                  status: statusData.status,
-                  summary: statusData.summary,
-                  confidence: statusData.confidence,
-                  processingDuration: statusData.processingDuration,
-                  error: statusData.error,
-                  filteringDecisions: (statusData as any).filteringDecisions || undefined, // T018
-                  allActions: (statusData as any).allActions || undefined, // T019: Unfiltered actions
-                  filteringApplied: (statusData as any).filteringApplied || false, // T019
-                  exclusionReasons: (statusData as any).exclusionReasons || [], // T019
-                }
+                ...f,
+                status: statusData.status,
+                summary: statusData.summary,
+                confidence: statusData.confidence,
+                processingDuration: statusData.processingDuration,
+                error: statusData.error,
+                filteringDecisions: (statusData as any).filteringDecisions || undefined, // T018
+                allActions: (statusData as any).allActions || undefined, // T019: Unfiltered actions
+                filteringApplied: (statusData as any).filteringApplied || false, // T019
+                exclusionReasons: (statusData as any).exclusionReasons || [], // T019
+              }
               : f
           )
         );
@@ -317,11 +317,11 @@ export default function Home() {
             prev.map((f) =>
               f.id === tempId
                 ? {
-                    ...f,
-                    id: result.fileId,
-                    status: result.status, // 'processing' or 'pending'
-                    queuePosition: result.queuePosition ?? undefined,
-                  }
+                  ...f,
+                  id: result.fileId,
+                  status: result.status, // 'processing' or 'pending'
+                  queuePosition: result.queuePosition ?? undefined,
+                }
                 : f
             )
           );
@@ -372,10 +372,10 @@ export default function Home() {
           prev.map((f) =>
             f.id === tempId
               ? {
-                  ...f,
-                  status: 'failed',
-                  error: error instanceof Error ? error.message : 'Network error',
-                }
+                ...f,
+                status: 'failed',
+                error: error instanceof Error ? error.message : 'Network error',
+              }
               : f
           )
         );
@@ -464,258 +464,254 @@ export default function Home() {
       <div className="min-h-screen bg-bg-layer-1">
         {/* Outcome Display Banner (shown when active outcome exists) */}
         <OutcomeDisplay onEdit={(outcome) => {
-        setEditingOutcome({
-          direction: outcome.direction,
-          object: outcome.object_text,
-          metric: outcome.metric_text,
-          clarifier: outcome.clarifier
-        });
-        setOutcomeModalOpen(true);
-      }} />
+          setEditingOutcome({
+            direction: outcome.direction,
+            object: outcome.object_text,
+            metric: outcome.metric_text,
+            clarifier: outcome.clarifier
+          });
+          setOutcomeModalOpen(true);
+        }} />
 
-      {/* Outcome Builder Modal */}
-      <OutcomeBuilder
-        open={outcomeModalOpen}
-        onOpenChange={(open) => {
-          setOutcomeModalOpen(open);
-          if (!open) {
+        {/* Outcome Builder Modal */}
+        <OutcomeBuilder
+          open={outcomeModalOpen}
+          onOpenChange={(open) => {
+            setOutcomeModalOpen(open);
+            if (!open) {
+              setEditingOutcome(null);
+            }
+          }}
+          initialValues={editingOutcome}
+          isEditMode={!!editingOutcome}
+          onSuccess={() => {
+            console.log('[Home] Outcome saved successfully');
             setEditingOutcome(null);
-          }
-        }}
-        initialValues={editingOutcome}
-        isEditMode={!!editingOutcome}
-        onSuccess={() => {
-          console.log('[Home] Outcome saved successfully');
-          setEditingOutcome(null);
-        }}
-      />
-
-      <MainNav
-        actions={
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
-            <div className="flex items-center gap-2">
-              {showReflections && (
-                <Button
-                  variant="outline"
-                  onClick={() => setReflectionPanelOpen(true)}
-                  className="gap-2 h-11 sm:h-9 flex-1 sm:flex-initial"
-                  title="Reflections (Cmd+Shift+R / Ctrl+Shift+R)"
-                >
-                  <MessageSquare className="h-4 w-4" />
-                  <span className="text-sm">Reflections</span>
-                </Button>
-              )}
-              <Button
-                variant="outline"
-                onClick={() => setOutcomeModalOpen(true)}
-                className="gap-2 h-11 sm:h-9 flex-1 sm:flex-initial"
-              >
-                <Target className="h-4 w-4" />
-                <span className="text-sm">Outcome</span>
-              </Button>
-            </div>
-            <div className="flex items-center justify-between sm:justify-start gap-2">
-              <Badge variant="secondary" className="px-3 sm:px-4 py-2 text-xs sm:text-sm whitespace-nowrap">
-                {files.length} {files.length === 1 ? 'Doc' : 'Docs'}
-              </Badge>
-              <ThemeToggle />
-            </div>
-          </div>
-        }
-      />
-
-      {/* Main Content */}
-      <main className="mx-auto max-w-7xl px-6 py-8 space-y-8">
-        {/* File Upload Section */}
-        <section>
-          <div className="mb-4 flex items-center gap-3">
-            <Upload className="h-6 w-6 text-primary-2" />
-            <h2 className="text-xl font-semibold text-text-heading">Upload Documents</h2>
-          </div>
-
-          <Card
-            onDragEnter={handleDragEnter}
-            onDragLeave={handleDragLeave}
-            onDragOver={handleDragOver}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            className={`relative overflow-hidden cursor-pointer border-2 border-dashed transition-all duration-300 hover-lift ${
-              isDragging
-                ? 'border-primary-2 bg-primary-2/10 scale-[1.02]'
-                : 'border-border-subtle hover:border-primary-2/50'
-            }`}
-          >
-            <div className={`absolute inset-0 gradient-primary-subtle opacity-0 transition-opacity duration-300 ${
-              isDragging ? 'opacity-100' : 'group-hover:opacity-50'
-            }`} />
-            <CardContent className="relative flex flex-col items-center gap-4 py-16 text-center">
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept=".pdf,.docx,.txt,.md"
-                onChange={handleFileSelect}
-                className="hidden"
-                aria-label="File input"
-              />
-              <div className={`rounded-full bg-primary-2/10 p-6 transition-transform duration-300 ${
-                isDragging ? 'scale-110' : 'scale-100'
-              }`}>
-                <Upload className={`h-12 w-12 transition-colors duration-300 ${
-                  isDragging ? 'text-primary-2' : 'text-primary-2/60'
-                }`} />
-              </div>
-              <div className="space-y-2">
-                <p className="text-xl font-semibold text-text-heading">
-                  {isDragging ? 'Drop files here' : 'Upload your documents'}
-                </p>
-                <p className="text-sm text-text-muted">
-                  Drag & drop or click to browse
-                </p>
-                <p className="text-xs text-text-muted">
-                  Accepts: PDF, DOCX, TXT, MD • Maximum: 10MB
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          {files.length === 0 ? (
-            <Card className="mt-6 border-dashed overflow-hidden relative">
-              <div className="absolute inset-0 gradient-primary-subtle opacity-20" />
-              <CardContent className="relative flex flex-col items-center justify-center py-16 text-center">
-                <div className="rounded-full bg-primary-2/10 p-8 mb-6">
-                  <FileText className="h-16 w-16 text-primary-2/60" />
-                </div>
-                <p className="text-xl font-semibold mb-2 text-text-heading">No documents uploaded yet</p>
-                <p className="text-sm text-text-muted max-w-md">
-                  Upload a file above to get started with AI-powered analysis.
-                  We&apos;ll extract topics, decisions, actions, and categorize tasks automatically.
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            <motion.div
-              className="mt-6 space-y-4"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.3 }}
-            >
-              {/* Queue Status Summary */}
-              {files.length > 0 && (
-                <div className="flex gap-2 flex-wrap">
-                  <Badge variant="outline" className="px-3 py-1.5">
-                    Processing: {files.filter(f => f.status === 'processing').length}
-                  </Badge>
-                  <Badge variant="secondary" className="px-3 py-1.5">
-                    Queued: {files.filter(f => f.status === 'pending').length}
-                  </Badge>
-                  <Badge variant="outline" className="px-3 py-1.5">
-                    Complete: {files.filter(f => f.status === 'completed' || f.status === 'review_required').length}
-                  </Badge>
-                </div>
-              )}
-
-              <AnimatePresence>
-                {files.map((file, index) => (
-                  <motion.div
-                    key={file.id}
-                    className="space-y-3"
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    transition={{ duration: 0.3, delay: index * 0.05 }}
-                  >
-                    <Card className="overflow-hidden">
-                      <CardContent className="flex items-center justify-between p-4">
-                        <div className="flex items-center gap-3">
-                          <motion.div
-                            initial={{ scale: 0 }}
-                            animate={{ scale: 1 }}
-                            transition={{ type: "spring", stiffness: 200, damping: 15 }}
-                            className="rounded-full bg-primary-2/10 p-2"
-                          >
-                            <FileText className="h-5 w-5 text-primary-2" />
-                          </motion.div>
-                          <div>
-                            <p className="font-medium text-text-body">{file.name}</p>
-                            <p className="text-sm text-text-muted">
-                              {formatFileSize(file.size)} • {formatDate(file.uploadedAt)}
-                            </p>
-                            {file.error && (
-                              <motion.p
-                                initial={{ opacity: 0, height: 0 }}
-                                animate={{ opacity: 1, height: 'auto' }}
-                                className="text-sm text-destructive mt-1"
-                              >
-                                {file.error}
-                              </motion.p>
-                            )}
-                          </div>
-                        </div>
-                        {getStatusBadge(file.status, file.queuePosition)}
-                      </CardContent>
-                    </Card>
-
-                    {/* Show SummaryPanel when processing is complete */}
-                    <AnimatePresence>
-                      {(file.status === 'completed' || file.status === 'review_required') &&
-                        file.summary && (
-                          <motion.div
-                            initial={{ opacity: 0, y: -20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -20 }}
-                            transition={{ duration: 0.4, ease: "easeOut" }}
-                          >
-                            <SummaryPanel
-                              summary={file.summary}
-                              confidence={file.confidence || 0}
-                              filename={file.name}
-                              processingDuration={file.processingDuration || 0}
-                              fileId={file.id}
-                              filteringDecisions={file.filteringDecisions}
-                              allActions={file.allActions}
-                              filteringApplied={file.filteringApplied}
-                              exclusionReasons={file.exclusionReasons}
-                            />
-                          </motion.div>
-                        )}
-                    </AnimatePresence>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            </motion.div>
-          )}
-        </section>
-      </main>
-
-      {/* Footer */}
-      <footer className="mt-16 border-t-0 bg-bg-layer-2 shadow-2layer-sm">
-        <div className="mx-auto max-w-7xl px-6 py-6 text-center text-sm text-text-muted">
-          <p>AI Note Synthesiser - Powered by Next.js 15, React 19, and TypeScript</p>
-        </div>
-      </footer>
-
-      {/* Reflection Panel (keyboard shortcut: Cmd+Shift+R / Ctrl+Shift+R) */}
-      {showReflections && (
-        <ReflectionPanel
-          isOpen={reflectionPanelOpen}
-          onOpenChange={setReflectionPanelOpen}
-          onReflectionAdded={(result: ReflectionAddedResult) => {
-            const reflectionId = result?.reflection?.id;
-            toast.success('Saved! View effect in Priorities →', {
-              action: {
-                label: 'Open Priorities',
-                onClick: () => {
-                  const url = reflectionId
-                    ? `/priorities?highlight_reflection=${encodeURIComponent(reflectionId)}`
-                    : '/priorities';
-                  window.location.href = url;
-                },
-              },
-            });
           }}
         />
-      )}
+
+        <MainNav
+          actions={
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
+              <div className="flex items-center gap-2">
+                {showReflections && (
+                  <Button
+                    variant="outline"
+                    onClick={() => setReflectionPanelOpen(true)}
+                    className="gap-2 h-11 sm:h-9 flex-1 sm:flex-initial"
+                    title="Reflections (Cmd+Shift+R / Ctrl+Shift+R)"
+                  >
+                    <MessageSquare className="h-4 w-4" />
+                    <span className="text-sm">Reflections</span>
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  onClick={() => setOutcomeModalOpen(true)}
+                  className="gap-2 h-11 sm:h-9 flex-1 sm:flex-initial"
+                >
+                  <Target className="h-4 w-4" />
+                  <span className="text-sm">Outcome</span>
+                </Button>
+              </div>
+              <div className="flex items-center justify-between sm:justify-start gap-2">
+                <Badge variant="secondary" className="px-3 sm:px-4 py-2 text-xs sm:text-sm whitespace-nowrap">
+                  {files.length} {files.length === 1 ? 'Doc' : 'Docs'}
+                </Badge>
+                <ThemeToggle />
+              </div>
+            </div>
+          }
+        />
+
+        {/* Main Content */}
+        <main className="mx-auto max-w-7xl px-6 py-8 space-y-8">
+          {/* File Upload Section */}
+          <section>
+            <div className="mb-4 flex items-center gap-3">
+              <Upload className="h-6 w-6 text-primary-2" />
+              <h2 className="text-xl font-semibold text-text-heading">Upload Documents</h2>
+            </div>
+
+            <Card
+              onDragEnter={handleDragEnter}
+              onDragLeave={handleDragLeave}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`relative overflow-hidden cursor-pointer border-2 border-dashed transition-all duration-300 hover-lift ${isDragging
+                  ? 'border-primary-2 bg-primary-2/10 scale-[1.02]'
+                  : 'border-border-subtle hover:border-primary-2/50'
+                }`}
+            >
+              <div className={`absolute inset-0 gradient-primary-subtle opacity-0 transition-opacity duration-300 ${isDragging ? 'opacity-100' : 'group-hover:opacity-50'
+                }`} />
+              <CardContent className="relative flex flex-col items-center gap-4 py-16 text-center">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.docx,.txt,.md"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                  aria-label="File input"
+                />
+                <div className={`rounded-full bg-primary-2/10 p-6 transition-transform duration-300 ${isDragging ? 'scale-110' : 'scale-100'
+                  }`}>
+                  <Upload className={`h-12 w-12 transition-colors duration-300 ${isDragging ? 'text-primary-2' : 'text-primary-2/60'
+                    }`} />
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xl font-semibold text-text-heading">
+                    {isDragging ? 'Drop files here' : 'Upload your documents'}
+                  </p>
+                  <p className="text-sm text-text-muted">
+                    Drag & drop or click to browse
+                  </p>
+                  <p className="text-xs text-text-muted">
+                    Accepts: PDF, DOCX, TXT, MD • Maximum: 10MB
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {files.length === 0 ? (
+              <Card className="mt-6 border-dashed overflow-hidden relative">
+                <div className="absolute inset-0 gradient-primary-subtle opacity-20" />
+                <CardContent className="relative flex flex-col items-center justify-center py-16 text-center">
+                  <div className="rounded-full bg-primary-2/10 p-8 mb-6">
+                    <FileText className="h-16 w-16 text-primary-2/60" />
+                  </div>
+                  <p className="text-xl font-semibold mb-2 text-text-heading">No documents uploaded yet</p>
+                  <p className="text-sm text-text-muted max-w-md">
+                    Upload a file above to get started with AI-powered analysis.
+                    We&apos;ll extract topics, decisions, actions, and categorize tasks automatically.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <motion.div
+                className="mt-6 space-y-4"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.3 }}
+              >
+                {/* Queue Status Summary */}
+                {files.length > 0 && (
+                  <div className="flex gap-2 flex-wrap">
+                    <Badge variant="outline" className="px-3 py-1.5">
+                      Processing: {files.filter(f => f.status === 'processing').length}
+                    </Badge>
+                    <Badge variant="secondary" className="px-3 py-1.5">
+                      Queued: {files.filter(f => f.status === 'pending').length}
+                    </Badge>
+                    <Badge variant="outline" className="px-3 py-1.5">
+                      Complete: {files.filter(f => f.status === 'completed' || f.status === 'review_required').length}
+                    </Badge>
+                  </div>
+                )}
+
+                <AnimatePresence>
+                  {files.map((file, index) => (
+                    <motion.div
+                      key={file.id}
+                      className="space-y-3"
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      transition={{ duration: 0.3, delay: index * 0.05 }}
+                    >
+                      <Card className="overflow-hidden">
+                        <CardContent className="flex items-center justify-between p-4">
+                          <div className="flex items-center gap-3">
+                            <motion.div
+                              initial={{ scale: 0 }}
+                              animate={{ scale: 1 }}
+                              transition={{ type: "spring", stiffness: 200, damping: 15 }}
+                              className="rounded-full bg-primary-2/10 p-2"
+                            >
+                              <FileText className="h-5 w-5 text-primary-2" />
+                            </motion.div>
+                            <div>
+                              <p className="font-medium text-text-body">{file.name}</p>
+                              <p className="text-sm text-text-muted">
+                                {formatFileSize(file.size)} • {formatDate(file.uploadedAt)}
+                              </p>
+                              {file.error && (
+                                <motion.p
+                                  initial={{ opacity: 0, height: 0 }}
+                                  animate={{ opacity: 1, height: 'auto' }}
+                                  className="text-sm text-destructive mt-1"
+                                >
+                                  {file.error}
+                                </motion.p>
+                              )}
+                            </div>
+                          </div>
+                          {getStatusBadge(file.status, file.queuePosition)}
+                        </CardContent>
+                      </Card>
+
+                      {/* Show SummaryPanel when processing is complete */}
+                      <AnimatePresence>
+                        {(file.status === 'completed' || file.status === 'review_required') &&
+                          file.summary && (
+                            <motion.div
+                              initial={{ opacity: 0, y: -20 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: -20 }}
+                              transition={{ duration: 0.4, ease: "easeOut" }}
+                            >
+                              <SummaryPanel
+                                summary={file.summary}
+                                confidence={file.confidence || 0}
+                                filename={file.name}
+                                processingDuration={file.processingDuration || 0}
+                                fileId={file.id}
+                                filteringDecisions={file.filteringDecisions}
+                                allActions={file.allActions}
+                                filteringApplied={file.filteringApplied}
+                                exclusionReasons={file.exclusionReasons}
+                              />
+                            </motion.div>
+                          )}
+                      </AnimatePresence>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </motion.div>
+            )}
+          </section>
+        </main>
+
+        {/* Footer */}
+        <footer className="mt-16 border-t-0 bg-bg-layer-2 shadow-2layer-sm">
+          <div className="mx-auto max-w-7xl px-6 py-6 text-center text-sm text-text-muted">
+            <p>Pacenotes - Powered by Next.js 15, React 19, and TypeScript</p>
+          </div>
+        </footer>
+
+        {/* Reflection Panel (keyboard shortcut: Cmd+Shift+R / Ctrl+Shift+R) */}
+        {showReflections && (
+          <ReflectionPanel
+            isOpen={reflectionPanelOpen}
+            onOpenChange={setReflectionPanelOpen}
+            onReflectionAdded={(result: ReflectionAddedResult) => {
+              const reflectionId = result?.reflection?.id;
+              toast.success('Saved! View effect in Priorities →', {
+                action: {
+                  label: 'Open Priorities',
+                  onClick: () => {
+                    const url = reflectionId
+                      ? `/priorities?highlight_reflection=${encodeURIComponent(reflectionId)}`
+                      : '/priorities';
+                    window.location.href = url;
+                  },
+                },
+              });
+            }}
+          />
+        )}
       </div>
     </>
   );

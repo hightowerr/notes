@@ -355,7 +355,7 @@
   - **Dependencies**: Requires T014 (discard-pile endpoint)
   - **Test**: Create component test in `__tests__/unit/components/DiscardPileSection.test.tsx`
 
-- [ ] T017 [SLICE] [US2] Integrate DiscardPileSection into priorities page
+- [x] T017 [SLICE] [US2] Integrate DiscardPileSection into priorities page
   - **File**: `app/priorities/page.tsx` (extend existing)
   - **SEE**: Discard pile section appears at bottom of page
   - **DO**: Add `<DiscardPileSection />` component to priorities page layout

@@ -84,9 +84,26 @@ export function DiscardPileSection({
   };
 
   const handleConfirmDiscard = async (taskId: string) => {
-    toast.info('Final discard will be available in Phase 8 (T036). For now, use Override to re-analyze or keep in discard pile.');
-    console.warn('[DiscardPileSection] Confirm discard action is not yet implemented (pending T036 endpoint)');
-    onConfirmDiscard?.(taskId);
+    if (typeof window !== 'undefined' && !window.confirm('Are you sure? This task will be recoverable for 30 days.')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/tasks/manual/${taskId}/confirm-discard`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to discard task');
+      }
+
+      setTasks(prev => prev.filter(task => task.task_id !== taskId));
+      onConfirmDiscard?.(taskId);
+      toast.info('Task discarded (recoverable for 30 days)');
+    } catch (error) {
+      console.error('[DiscardPileSection] Discard failed', error);
+      toast.error('Failed to discard task');
+    }
   };
 
   return (
@@ -160,12 +177,10 @@ export function DiscardPileSection({
                     type="button"
                     className="inline-flex items-center gap-1 text-xs font-semibold text-destructive transition hover:text-destructive/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive focus-visible:ring-offset-2"
                     onClick={() => handleConfirmDiscard(task.task_id)}
-                    aria-disabled
-                    disabled
-                    title="Final discard coming in Phase 8 (T036)"
+                    title="Permanently discard this task"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
-                    Confirm discard (coming soon)
+                    Confirm discard
                   </button>
                 </div>
               </div>

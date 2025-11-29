@@ -31,15 +31,7 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-Verify compliance with `.specify/memory/constitution.md`:
-
-- [ ] **Vertical Slice**: Feature delivers SEE → DO → VERIFY for users (Principle I)
-- [ ] **Test-First**: Tests written before implementation, coverage target ≥80% (Principle II)
-- [ ] **Autonomous Architecture**: Fits Sense → Reason → Act → Learn pattern if agent-related (Principle III)
-- [ ] **Modular Services**: New services decoupled, single-purpose, clear interfaces (Principle IV)
-- [ ] **Observable**: Telemetry planned for new operations (Principle V)
-- [ ] **Quality Standards**: TypeScript strict mode, Zod validation, security review
-- [ ] **Completion Criteria**: All 6 checkpoints (UI, backend, feedback, tests, review, demo-ready)
+[Gates determined based on constitution file]
 
 ## Project Structure
 

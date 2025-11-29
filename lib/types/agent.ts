@@ -103,6 +103,7 @@ export interface AgentRunSuccess {
   metadata: ExecutionMetadata;
   trace: ReasoningTraceRecord;
   evaluationMetadata?: HybridLoopMetadata | null;
+  strategicScores?: Record<string, any>;
 }
 
 export interface AgentRunFailure {

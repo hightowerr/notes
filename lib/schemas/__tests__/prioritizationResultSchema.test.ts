@@ -40,6 +40,7 @@ const createValidPayload = () => ({
       confidence: 0.86,
       reasoning:
         'Fixing checkout feedback loops dramatically impacts payment throughput with manageable effort.',
+      brief_reasoning: 'Unblocks checkout fix to raise conversion',
       dependencies: ['323e4567-e89b-12d3-a456-426614174002'],
     },
   },

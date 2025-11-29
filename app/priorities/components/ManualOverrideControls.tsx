@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { Check, Loader2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { Loader2, X } from 'lucide-react';
 
 import { Slider } from '@/components/ui/slider';
 import { Input } from '@/components/ui/input';
@@ -14,8 +13,6 @@ import type { ManualOverrideState } from '@/lib/schemas/manualOverride';
 import type { StrategicScore } from '@/lib/schemas/strategicScore';
 import { calculatePriority } from '@/lib/utils/strategicPriority';
 
-const SAVE_DEBOUNCE_MS = 500;
-const SUCCESS_INDICATOR_MS = 1200;
 const MAX_REASON_LENGTH = 500;
 
 type ManualOverrideControlsProps = {
@@ -24,6 +21,8 @@ type ManualOverrideControlsProps = {
   manualOverride: ManualOverrideState | null;
   aiScore: StrategicScore | null;
   onManualOverrideChange?: (override: ManualOverrideState | null) => void;
+  onApply?: (override: ManualOverrideState) => Promise<void>;
+  onCancel?: () => void;
 };
 
 function resolveInitialValue(
@@ -46,244 +45,163 @@ export function ManualOverrideControls({
   manualOverride,
   aiScore,
   onManualOverrideChange,
+  onApply,
+  onCancel,
 }: ManualOverrideControlsProps) {
-  const [impactValue, setImpactValue] = useState<number | null>(
+  // Local state for pending changes (staged until Apply is clicked)
+  const [pendingImpact, setPendingImpact] = useState<number | null>(
     resolveInitialValue(manualOverride, aiScore, 'impact')
   );
-  const [effortValue, setEffortValue] = useState<number | null>(
+  const [pendingEffort, setPendingEffort] = useState<number | null>(
     resolveInitialValue(manualOverride, aiScore, 'effort')
   );
-  const [reasonValue, setReasonValue] = useState(manualOverride?.reason ?? '');
-  const [autoSaveState, setAutoSaveState] = useState<'idle' | 'saving' | 'error'>('idle');
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'success'>('idle');
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingPayloadRef = useRef<{ impact?: number; effort?: number } | null>(null);
-  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastStableOverrideRef = useRef<ManualOverrideState | null>(manualOverride ?? null);
+  const [pendingReason, setPendingReason] = useState(manualOverride?.reason ?? '');
+  const [isApplying, setIsApplying] = useState(false);
 
-  useEffect(() => {
-    if (!manualOverride || manualOverride.optimistic) {
-      return;
-    }
-    lastStableOverrideRef.current = manualOverride;
-  }, [manualOverride]);
+  // Track original values to detect changes
+  const originalValuesRef = useRef({
+    impact: resolveInitialValue(manualOverride, aiScore, 'impact'),
+    effort: resolveInitialValue(manualOverride, aiScore, 'effort'),
+    reason: manualOverride?.reason ?? '',
+  });
 
+  // Reset pending state when drawer opens/closes or values change
   useEffect(() => {
     if (!open) {
-      setImpactValue(resolveInitialValue(manualOverride, aiScore, 'impact'));
-      setEffortValue(resolveInitialValue(manualOverride, aiScore, 'effort'));
-      setReasonValue(manualOverride?.reason ?? '');
-      setSaveState('idle');
-      setAutoSaveState('idle');
+      // Reset to original values when drawer closes
+      const originalImpact = resolveInitialValue(manualOverride, aiScore, 'impact');
+      const originalEffort = resolveInitialValue(manualOverride, aiScore, 'effort');
+      const originalReason = manualOverride?.reason ?? '';
+
+      setPendingImpact(originalImpact);
+      setPendingEffort(originalEffort);
+      setPendingReason(originalReason);
+
+      originalValuesRef.current = {
+        impact: originalImpact,
+        effort: originalEffort,
+        reason: originalReason,
+      };
     }
   }, [open, manualOverride, aiScore]);
 
+  // Update when override changes from external source (after Apply succeeds)
   useEffect(() => {
-    if (!open || manualOverride?.optimistic) {
-      return;
-    }
-    const nextImpact = resolveInitialValue(manualOverride, aiScore, 'impact');
-    if (typeof nextImpact === 'number') {
-      setImpactValue(prev => (prev !== nextImpact ? nextImpact : prev));
-    }
-    const nextEffort = resolveInitialValue(manualOverride, aiScore, 'effort');
-    if (typeof nextEffort === 'number') {
-      setEffortValue(prev => (prev !== nextEffort ? nextEffort : prev));
-    }
-    const targetReason = manualOverride?.reason ?? '';
-    setReasonValue(prev => (prev === targetReason ? prev : targetReason));
-  }, [manualOverride, aiScore, open]);
+    if (open && !isApplying) {
+      const newImpact = resolveInitialValue(manualOverride, aiScore, 'impact');
+      const newEffort = resolveInitialValue(manualOverride, aiScore, 'effort');
+      const newReason = manualOverride?.reason ?? '';
 
-  useEffect(() => {
-    return () => {
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
-      if (successTimeoutRef.current) {
-        clearTimeout(successTimeoutRef.current);
-      }
-    };
-  }, []);
+      setPendingImpact(newImpact);
+      setPendingEffort(newEffort);
+      setPendingReason(newReason);
+
+      originalValuesRef.current = {
+        impact: newImpact,
+        effort: newEffort,
+        reason: newReason,
+      };
+    }
+  }, [manualOverride, aiScore, open, isApplying]);
 
   const resolvedConfidence = typeof aiScore?.confidence === 'number' ? aiScore.confidence : null;
   const canEditScores =
-    typeof impactValue === 'number' &&
-    typeof effortValue === 'number' &&
+    typeof pendingImpact === 'number' &&
+    typeof pendingEffort === 'number' &&
     typeof resolvedConfidence === 'number';
 
   const priorityPreview = useMemo(() => {
     if (
-      typeof impactValue === 'number' &&
-      typeof effortValue === 'number' &&
+      typeof pendingImpact === 'number' &&
+      typeof pendingEffort === 'number' &&
       typeof resolvedConfidence === 'number'
     ) {
-      return calculatePriority(impactValue, effortValue, resolvedConfidence);
+      return calculatePriority(pendingImpact, pendingEffort, resolvedConfidence);
     }
     return null;
-  }, [impactValue, effortValue, resolvedConfidence]);
+  }, [pendingImpact, pendingEffort, resolvedConfidence]);
 
-  const emitOptimisticUpdate = useCallback(
-    (nextImpact: number, nextEffort: number) => {
-      if (!onManualOverrideChange) {
-        return;
-      }
-      const stable = lastStableOverrideRef.current;
-      onManualOverrideChange({
-        impact: nextImpact,
-        effort: nextEffort,
-        reason: stable?.reason,
-        timestamp: stable?.timestamp,
-        session_id: stable?.session_id,
-        optimistic: true,
-      });
-    },
-    [onManualOverrideChange]
-  );
-
-  const handleApiError = useCallback(
-    (message: string, mode: 'auto' | 'manual') => {
-      toast.error(message);
-      if (mode === 'auto') {
-        setAutoSaveState('error');
-      } else {
-        setSaveState('idle');
-      }
-      if (onManualOverrideChange) {
-        onManualOverrideChange(lastStableOverrideRef.current ?? null);
-      }
-    },
-    [onManualOverrideChange]
-  );
-
-  const submitOverride = useCallback(
-    async (
-      payload: { impact?: number; effort?: number; reason?: string },
-      options: { mode: 'auto' | 'manual' }
-    ) => {
-      const trimmedReason =
-        typeof payload.reason === 'string' && payload.reason.trim().length > 0
-          ? payload.reason.trim()
-          : undefined;
-      if (
-        typeof payload.impact !== 'number' &&
-        typeof payload.effort !== 'number' &&
-        typeof trimmedReason === 'undefined'
-      ) {
-        return;
-      }
-      if (options.mode === 'auto') {
-        setAutoSaveState('saving');
-      } else {
-        setSaveState('saving');
-      }
-      try {
-        const response = await fetch(`/api/tasks/${taskId}/override`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            impact: payload.impact,
-            effort: payload.effort,
-            reason: trimmedReason,
-          }),
-        });
-        if (!response.ok) {
-          throw new Error('Failed to save override');
-        }
-        const data = (await response.json()) as {
-          override: ManualOverrideState;
-        };
-        if (onManualOverrideChange) {
-          onManualOverrideChange({ ...data.override, optimistic: false });
-        }
-        if (options.mode === 'auto') {
-          setAutoSaveState('idle');
-        } else {
-          setSaveState('success');
-          successTimeoutRef.current = setTimeout(() => {
-            setSaveState('idle');
-          }, SUCCESS_INDICATOR_MS);
-        }
-      } catch (error) {
-        handleApiError(
-          options.mode === 'auto'
-            ? 'Unable to save slider update'
-            : 'Failed to save manual override',
-          options.mode
-        );
-      } finally {
-        if (options.mode === 'auto' && pendingPayloadRef.current === null) {
-          setAutoSaveState('idle');
-        }
-      }
-    },
-    [taskId, onManualOverrideChange, handleApiError]
-  );
-
-  const scheduleAutoSave = useCallback(
-    (partial: { impact?: number; effort?: number }) => {
-      pendingPayloadRef.current = {
-        ...pendingPayloadRef.current,
-        ...partial,
-      };
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-      }
-      debounceRef.current = setTimeout(() => {
-        const payload = pendingPayloadRef.current;
-        pendingPayloadRef.current = null;
-        if (payload) {
-          void submitOverride(payload, { mode: 'auto' });
-        }
-      }, SAVE_DEBOUNCE_MS);
-    },
-    [submitOverride]
-  );
+  // Check if there are pending changes
+  const hasPendingChanges =
+    pendingImpact !== originalValuesRef.current.impact ||
+    pendingEffort !== originalValuesRef.current.effort ||
+    pendingReason !== originalValuesRef.current.reason;
 
   const handleImpactChange = (value: number[]) => {
     const nextValue = value[0];
-    if (typeof nextValue !== 'number' || typeof effortValue !== 'number') {
+    if (typeof nextValue !== 'number') {
       return;
     }
     const clamped = Math.min(Math.max(nextValue, 0), 10);
-    setImpactValue(clamped);
-    emitOptimisticUpdate(clamped, effortValue);
-    scheduleAutoSave({ impact: clamped });
+    setPendingImpact(clamped);
   };
 
   const handleEffortChange = (event: ChangeEvent<HTMLInputElement>) => {
     const raw = event.target.value;
     if (raw.trim().length === 0) {
-      setEffortValue(null);
+      setPendingEffort(null);
       return;
     }
     const parsed = Number(raw);
-    if (!Number.isFinite(parsed) || typeof impactValue !== 'number') {
+    if (!Number.isFinite(parsed)) {
       return;
     }
     const clamped = Math.min(Math.max(parsed, 0.5), 160);
-    setEffortValue(clamped);
-    emitOptimisticUpdate(impactValue, clamped);
-    scheduleAutoSave({ effort: clamped });
+    setPendingEffort(clamped);
   };
 
-  const handleSaveClick = () => {
-    if (typeof impactValue !== 'number' || typeof effortValue !== 'number') {
+  const handleApplyClick = async () => {
+    if (typeof pendingImpact !== 'number' || typeof pendingEffort !== 'number') {
       return;
     }
-    void submitOverride(
-      {
-        impact: impactValue,
-        effort: effortValue,
-        reason: reasonValue,
-      },
-      { mode: 'manual' }
-    );
+
+    setIsApplying(true);
+
+    try {
+      const override: ManualOverrideState = {
+        impact: pendingImpact,
+        effort: pendingEffort,
+        reason: pendingReason.trim().length > 0 ? pendingReason.trim() : undefined,
+      };
+
+      // If onApply callback provided, use it (for tests and instant re-ranking)
+      if (onApply) {
+        await onApply(override);
+      }
+
+      // Also call the old callback for backward compatibility
+      if (onManualOverrideChange) {
+        onManualOverrideChange(override);
+      }
+
+      // Update original values ref after successful apply
+      originalValuesRef.current = {
+        impact: pendingImpact,
+        effort: pendingEffort,
+        reason: pendingReason,
+      };
+    } finally {
+      setIsApplying(false);
+    }
   };
 
-  const disableSave =
-    saveState === 'saving' ||
+  const handleCancelClick = () => {
+    // Reset to original values
+    setPendingImpact(originalValuesRef.current.impact);
+    setPendingEffort(originalValuesRef.current.effort);
+    setPendingReason(originalValuesRef.current.reason);
+
+    // Call onCancel callback if provided
+    if (onCancel) {
+      onCancel();
+    }
+  };
+
+  const disableApply =
+    isApplying ||
     !canEditScores ||
-    reasonValue.length > MAX_REASON_LENGTH ||
+    !hasPendingChanges ||
+    pendingReason.length > MAX_REASON_LENGTH ||
     typeof resolvedConfidence !== 'number';
 
   return (
@@ -292,7 +210,7 @@ export function ManualOverrideControls({
         <div className="flex items-center justify-between">
           <Label htmlFor="impact-slider">Impact</Label>
           <span className="text-sm text-muted-foreground">
-            {typeof impactValue === 'number' ? impactValue.toFixed(1) : '—'}
+            {typeof pendingImpact === 'number' ? pendingImpact.toFixed(1) : '—'}
           </span>
         </div>
         <Slider
@@ -302,11 +220,11 @@ export function ManualOverrideControls({
           max={10}
           step={0.5}
           disabled={!canEditScores}
-          value={typeof impactValue === 'number' ? [impactValue] : [0]}
+          value={typeof pendingImpact === 'number' ? [pendingImpact] : [0]}
           onValueChange={handleImpactChange}
         />
         <p className="text-xs text-muted-foreground">
-          Drag to override the AI&apos;s strategic impact estimate (0 – 10).
+          Drag to override the AI&apos;s strategic impact estimate (0 – 10).
         </p>
       </div>
 
@@ -318,12 +236,12 @@ export function ManualOverrideControls({
           min={0.5}
           max={160}
           step={0.5}
-          value={typeof effortValue === 'number' ? effortValue : ''}
+          value={typeof pendingEffort === 'number' ? pendingEffort : ''}
           onChange={handleEffortChange}
           disabled={!canEditScores}
         />
         <p className="text-xs text-muted-foreground">
-          Use decimal hours for partial days (0.5 h minimum, 160 h maximum).
+          Use decimal hours for partial days (0.5 h minimum, 160 h maximum).
         </p>
       </div>
 
@@ -331,13 +249,13 @@ export function ManualOverrideControls({
         <div className="flex items-center justify-between">
           <Label htmlFor="override-reason">Reason (optional)</Label>
           <span className="text-xs text-muted-foreground">
-            {reasonValue.length}/{MAX_REASON_LENGTH}
+            {pendingReason.length}/{MAX_REASON_LENGTH}
           </span>
         </div>
         <Textarea
           id="override-reason"
-          value={reasonValue}
-          onChange={event => setReasonValue(event.target.value.slice(0, MAX_REASON_LENGTH))}
+          value={pendingReason}
+          onChange={event => setPendingReason(event.target.value.slice(0, MAX_REASON_LENGTH))}
           maxLength={MAX_REASON_LENGTH}
           placeholder="Explain why this estimate differs from the AI suggestion."
         />
@@ -355,18 +273,31 @@ export function ManualOverrideControls({
                 ? 'Run prioritization to enable overrides'
                 : '—'}
           </p>
-          {autoSaveState === 'saving' && (
-            <p className="text-xs text-muted-foreground">Saving impact/effort…</p>
-          )}
-          {autoSaveState === 'error' && (
-            <p className="text-xs text-destructive">Auto-save failed. Check your network.</p>
+          {hasPendingChanges && !isApplying && (
+            <p className="text-xs text-amber-600 dark:text-amber-500">
+              Changes pending (click Apply to save)
+            </p>
           )}
         </div>
-        <Button onClick={handleSaveClick} disabled={disableSave}>
-          {saveState === 'saving' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          {saveState === 'success' && <Check className="mr-2 h-4 w-4 text-emerald-500" />}
-          Save
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            onClick={handleCancelClick}
+            variant="outline"
+            disabled={!hasPendingChanges || isApplying}
+            aria-label="Cancel changes"
+          >
+            <X className="mr-2 h-4 w-4" />
+            Cancel
+          </Button>
+          <Button
+            onClick={handleApplyClick}
+            disabled={disableApply}
+            aria-label="Apply changes"
+          >
+            {isApplying && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Apply
+          </Button>
+        </div>
       </div>
     </div>
   );

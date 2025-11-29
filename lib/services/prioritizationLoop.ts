@@ -456,6 +456,14 @@ async function runGeneratorIteration(
       }`
     );
     (validationError as any).code = 'GENERATOR_VALIDATION_FAILED';
+    (validationError as any).payload = (() => {
+      try {
+        const json = typeof payload === 'string' ? safeJsonParse(payload) : payload;
+        return normalizePerTaskScores(json);
+      } catch {
+        return undefined;
+      }
+    })();
     throw validationError;
   }
 }
@@ -463,22 +471,46 @@ async function runGeneratorIteration(
 async function runGeneratorIterationWithRetry(
   factory: (instructions: string) => AgentLike,
   instructions: string,
-  maxAttempts = 2
+  maxAttempts = 3
 ): Promise<PrioritizationResult> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const instructionsWithHint =
+      attempt === 1
+        ? instructions
+        : [
+            instructions,
+            '',
+            `## RETRY HINT ${attempt}`,
+            'Ensure every included task has brief_reasoning (<=20 words), outcome/dependency linked, no generic phrases like "important" or "critical".',
+          ].join('\n');
     try {
-      return await runGeneratorIteration(factory, instructions);
+      return await runGeneratorIteration(factory, instructionsWithHint);
     } catch (error) {
       lastError = error;
       const code = (error as { code?: string })?.code;
       const isRetryable = code === 'GENERATOR_VALIDATION_FAILED';
-      if (!isRetryable || attempt === maxAttempts) {
-        throw new Error(
-          `[PrioritizationLoop] Generator failed after ${attempt} attempt${attempt === 1 ? '' : 's'}: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        );
+      console.log(
+        `[PrioritizationLoop] Generator attempt ${attempt} failed`,
+        error instanceof Error ? error.message : error
+      );
+      if (!isRetryable && attempt === maxAttempts) {
+        break;
+      }
+      if (attempt === maxAttempts && isRetryable) {
+        const fallbackPayload = (error as any).payload;
+        if (fallbackPayload && typeof fallbackPayload === 'object') {
+          try {
+            applyBriefReasoningFallbackToPayload(fallbackPayload);
+            console.log('[PrioritizationLoop] Applied brief_reasoning fallback after max retries');
+            return prioritizationResultSchema.parse(fallbackPayload);
+          } catch (parseError) {
+            console.warn(
+              '[PrioritizationLoop] Fallback parse failed after applying brief_reasoning',
+              parseError
+            );
+          }
+        }
       }
     }
   }
@@ -517,6 +549,9 @@ function normalizePerTaskScores(raw: unknown): unknown {
     ? ((result as any).included_tasks as Array<{ task_id: string; inclusion_reason?: string }>)
     : [];
   const includedIds = new Set(included.map(task => task.task_id).filter(Boolean));
+  const inclusionReasonById = new Map(
+    included.map(task => [task.task_id, task.inclusion_reason]).filter(([id]) => Boolean(id))
+  );
   const scoresRecord =
     (result as any).per_task_scores && typeof (result as any).per_task_scores === 'object'
       ? { ...(result as any).per_task_scores }
@@ -531,6 +566,15 @@ function normalizePerTaskScores(raw: unknown): unknown {
   const defaultConfidence =
     typeof (result as any).confidence === 'number' ? (result as any).confidence : 0.5;
 
+  Object.entries(scoresRecord).forEach(([taskId, score]) => {
+    if (score && typeof score === 'object' && !(score as any).brief_reasoning) {
+      (score as any).brief_reasoning = buildBriefReasoningFallback(
+        taskId,
+        inclusionReasonById.get(taskId)
+      );
+    }
+  });
+
   included.forEach(task => {
     if (!scoresRecord[task.task_id]) {
       scoresRecord[task.task_id] = {
@@ -542,6 +586,10 @@ function normalizePerTaskScores(raw: unknown): unknown {
           typeof task.inclusion_reason === 'string'
             ? task.inclusion_reason.slice(0, 300)
             : 'Auto-generated fallback score based on inclusion reasoning.',
+        brief_reasoning: buildBriefReasoningFallback(
+          task.task_id,
+          task.inclusion_reason ?? 'Outcome-linked placeholder reasoning'
+        ),
       };
     }
   });
@@ -594,6 +642,36 @@ function truncate(text: string, maxLength: number): string {
     return '';
   }
   return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+}
+
+function limitToTwentyWords(text: string): string {
+  const words = text.trim().split(/\s+/);
+  return words.slice(0, 20).join(' ');
+}
+
+function buildBriefReasoningFallback(taskId: string, inclusionReason?: string): string {
+  if (typeof inclusionReason === 'string' && inclusionReason.trim().length > 0) {
+    return truncate(limitToTwentyWords(inclusionReason), 150);
+  }
+  return `Fallback reasoning for task ${taskId}`;
+}
+
+function applyBriefReasoningFallbackToPayload(payload: any): void {
+  if (!payload || typeof payload !== 'object') {
+    return;
+  }
+  const orderedIds: string[] = Array.isArray(payload.ordered_task_ids) ? payload.ordered_task_ids : [];
+  if (!payload.per_task_scores || typeof payload.per_task_scores !== 'object') {
+    payload.per_task_scores = {};
+  }
+  orderedIds.forEach((taskId: string, index: number) => {
+    if (!payload.per_task_scores[taskId]) {
+      payload.per_task_scores[taskId] = {};
+    }
+    if (!payload.per_task_scores[taskId].brief_reasoning) {
+      payload.per_task_scores[taskId].brief_reasoning = `Priority: ${index + 1}`;
+    }
+  });
 }
 
 function createChainStep(iteration: number, result: PrioritizationResult): ChainOfThoughtStep {

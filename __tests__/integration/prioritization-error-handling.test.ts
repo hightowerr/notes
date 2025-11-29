@@ -38,6 +38,7 @@ const validResult = {
       confidence: 0.9,
       reasoning: 'Reasoning meets required length for validation.',
       alignment_score: 0.8,
+      brief_reasoning: 'Advances outcome while staying lean',
     },
   },
   thoughts: {

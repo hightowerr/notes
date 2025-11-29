@@ -151,7 +151,7 @@ export function SourceDocuments({
           </div>
         )}
 
-        {isLoading && !error && documents.length === 0 ? (
+        {(isLoading || !status) && !error && documents.length === 0 ? (
           <div className="space-y-2">
             {Array.from({ length: 3 }).map((_, index) => (
               <Skeleton key={index} className="h-12 w-full rounded-lg" />
@@ -182,7 +182,7 @@ export function SourceDocuments({
                       aria-label={excludedIds.includes(doc.id) ? 'Include document' : 'Exclude document'}
                       disabled={disabled}
                     />
-                    <div className="min-w-0 space-y-1">
+                    <div className="min-w-0 flex-1 space-y-1">
                       <TooltipProvider delayDuration={200}>
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -201,7 +201,7 @@ export function SourceDocuments({
                   <Badge
                     variant="outline"
                     className={cn(
-                      'rounded-full px-3 py-1 text-xs capitalize',
+                      'shrink-0 rounded-full px-3 py-1 text-xs capitalize',
                       STATUS_CLASSNAMES[excludedIds.includes(doc.id) ? 'excluded' : doc.status]
                     )}
                   >
@@ -209,7 +209,7 @@ export function SourceDocuments({
                   </Badge>
                 </div>
               ))}
-          </div>
+            </div>
 
             {documents.length > 3 && (
               <div className="flex justify-center">

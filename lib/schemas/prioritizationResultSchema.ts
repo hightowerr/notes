@@ -77,3 +77,4 @@ export const prioritizationResultSchema = prioritizationCoreSchema.superRefine((
 });
 
 export type PrioritizationResult = z.infer<typeof prioritizationResultSchema>;
+export { BriefReasoningSchema } from './taskScoreSchema';
